@@ -1,0 +1,173 @@
+[
+  {
+    "name": "homepage",
+    "description": "",
+    "url": "https://github.com/copylee711/homepage",
+    "homepage": "",
+    "language": "",
+    "stars": 0,
+    "pushedAt": "2026-10-09T13:31:47Z"
+  },
+  {
+    "name": "dsh-academic",
+    "description": "",
+    "url": "https://github.com/copylee711/dsh-academic",
+    "homepage": "",
+    "language": "TypeScript",
+    "stars": 0,
+    "pushedAt": "2026-10-08T15:06:40Z"
+  },
+  {
+    "name": "dsh-better-display",
+    "description": "让 DeepSeek Harness Web 的回答图文并茂，并为联网搜索内容加上 GPT 式引用角标。",
+    "url": "https://github.com/copylee711/dsh-better-display",
+    "homepage": "",
+    "language": "TypeScript",
+    "stars": 0,
+    "pushedAt": "2026-10-07T15:23:51Z"
+  },
+  {
+    "name": "dsh-proxy",
+    "description": "Configure proxy for deepseek harness",
+    "url": "https://github.com/copylee711/dsh-proxy",
+    "homepage": "",
+    "language": "TypeScript",
+    "stars": 3,
+    "pushedAt": "2026-10-07T15:21:55Z"
+  },
+  {
+    "name": "dsh-remote-control",
+    "description": "DeepSeek Harness 远程控制插件：手机扫码、电脑确认后，用手机浏览器继续会话、审批和管理设置。",
+    "url": "https://github.com/copylee711/dsh-remote-control",
+    "homepage": "",
+    "language": "TypeScript",
+    "stars": 0,
+    "pushedAt": "2026-10-07T15:21:27Z"
+  },
+  {
+    "name": "dsh-office",
+    "description": "DeepSeek Harness 插件：AI 直接在你打开的 Word / Excel / PowerPoint 里改文档，改动实时可见，可以一起编辑（Windows）",
+    "url": "https://github.com/copylee711/dsh-office",
+    "homepage": "",
+    "language": "C#",
+    "stars": 1,
+    "pushedAt": "2026-10-07T15:20:48Z"
+  },
+  {
+    "name": "dsh-computer-use",
+    "description": "DeepSeek Harness 的 Windows 电脑控制插件：截图、鼠标、键盘、窗口与剪贴板工具，按应用授权，Esc 暂停。",
+    "url": "https://github.com/copylee711/dsh-computer-use",
+    "homepage": "",
+    "language": "TypeScript",
+    "stars": 2,
+    "pushedAt": "2026-10-07T15:20:33Z"
+  },
+  {
+    "name": "dsh-image-gen",
+    "description": "DeepSeek Harness 生图插件：侧边栏绘画页与图库，对话中生图和改图，可自定义服务商端点与代理。",
+    "url": "https://github.com/copylee711/dsh-image-gen",
+    "homepage": "",
+    "language": "TypeScript",
+    "stars": 0,
+    "pushedAt": "2026-10-07T15:20:20Z"
+  },
+  {
+    "name": "img-convert",
+    "description": "A full stack practice project",
+    "url": "https://github.com/copylee711/img-convert",
+    "homepage": "",
+    "language": "Python",
+    "stars": 0,
+    "pushedAt": "2026-08-26T16:20:40Z"
+  },
+  {
+    "name": "quickdown",
+    "description": "A simple asynchronous concurrent downloader for large files",
+    "url": "https://github.com/copylee711/quickdown",
+    "homepage": "",
+    "language": "Python",
+    "stars": 0,
+    "pushedAt": "2026-08-16T07:55:28Z"
+  },
+  {
+    "name": "learning-site",
+    "description": "",
+    "url": "https://github.com/copylee711/learning-site",
+    "homepage": "https://nightbreeze.cn",
+    "language": "Vue",
+    "stars": 0,
+    "pushedAt": "2026-07-27T02:47:36Z"
+  },
+  {
+    "name": "MathModelingPracticeI",
+    "description": "",
+    "url": "https://github.com/copylee711/MathModelingPracticeI",
+    "homepage": "",
+    "language": "HTML",
+    "stars": 0,
+    "pushedAt": "2026-07-25T15:48:41Z"
+  },
+  {
+    "name": "Super-Knowledge-Base",
+    "description": "A local-first desktop knowledge base for AI agents. Built with Tauri v2 + Vue 3 + Python, supports OpenAI-compatible & local (llama.cpp) embedding/rerank models, MinerU document parsing, ships with an MCP server for Claude Code, and includes an LLM Chat (RAG) module.",
+    "url": "https://github.com/copylee711/Super-Knowledge-Base",
+    "homepage": "",
+    "language": "Vue",
+    "stars": 1,
+    "pushedAt": "2026-07-12T23:43:45Z"
+  },
+  {
+    "name": "notes",
+    "description": "notes of Copy",
+    "url": "https://github.com/copylee711/notes",
+    "homepage": "",
+    "language": "Vue",
+    "stars": 1,
+    "pushedAt": "2026-06-29T11:44:21Z"
+  },
+  {
+    "name": "Image-Parse-MCP",
+    "description": "A multimodal image analysis MCP server that connects to any OpenAI-compatible vision API. Provide an image (URL, local path, or base64) and a prompt — get back a detailed analysis from the multimodal LLM of your choice.",
+    "url": "https://github.com/copylee711/Image-Parse-MCP",
+    "homepage": "",
+    "language": "Python",
+    "stars": 0,
+    "pushedAt": "2026-06-18T14:31:15Z"
+  },
+  {
+    "name": "lower-aigc",
+    "description": "A web tool to reduce your article's aigc rates ",
+    "url": "https://github.com/copylee711/lower-aigc",
+    "homepage": "",
+    "language": "Python",
+    "stars": 1,
+    "pushedAt": "2026-06-15T23:42:50Z"
+  },
+  {
+    "name": "AIgomoku",
+    "description": "AI五子棋",
+    "url": "https://github.com/copylee711/AIgomoku",
+    "homepage": "",
+    "language": "Python",
+    "stars": 0,
+    "pushedAt": "2026-04-27T14:05:46Z"
+  },
+  {
+    "name": "gomoku",
+    "description": "AI五子棋",
+    "url": "https://github.com/copylee711/gomoku",
+    "homepage": "",
+    "language": "Python",
+    "stars": 0,
+    "pushedAt": "2026-04-26T12:27:24Z"
+  },
+  {
+    "name": "matrix_calc",
+    "description": "a matrix caculator",
+    "url": "https://github.com/copylee711/matrix_calc",
+    "homepage": "",
+    "language": "Python",
+    "stars": 0,
+    "pushedAt": "2026-04-26T05:30:35Z"
+  }
+]

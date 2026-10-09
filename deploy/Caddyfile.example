@@ -1,0 +1,38 @@
+# 示例配置，按实际路径修改后放到 /etc/caddy/Caddyfile
+# Caddy 会自动为这些域名签发并续期 HTTPS 证书（需要 80/443 端口对外开放、域名已解析且备案通过）。
+
+www.copylee.cn {
+	redir https://copylee.cn{uri} permanent
+}
+
+# 主页：直接托管构建产物 dist/
+copylee.cn {
+	root * /var/www/homepage
+	encode zstd gzip
+
+	# 带哈希的静态资源长期缓存，其余（index.html 等）每次校验
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	header Cache-Control "no-cache"
+
+	file_server
+}
+
+# Nextcloud：反代到本机容器（假设监听 127.0.0.1:8080）
+cloud.copylee.cn {
+	header Strict-Transport-Security "max-age=15552000; includeSubDomains"
+
+	redir /.well-known/carddav /remote.php/dav/ 301
+	redir /.well-known/caldav /remote.php/dav/ 301
+
+	# 大文件上传：不限制请求体，放宽超时
+	request_body {
+		max_size 10GB
+	}
+
+	reverse_proxy 127.0.0.1:8080 {
+		transport http {
+			read_timeout 1h
+		}
+	}
+}
