@@ -103,6 +103,10 @@ onBeforeUnmount(() => cancelAnimationFrame(frame))
         </div>
       </div>
     </div>
+
+    <a class="cue" href="#portals" aria-label="向下滚动">
+      <span />
+    </a>
   </section>
 </template>
 
@@ -238,6 +242,57 @@ onBeforeUnmount(() => cancelAnimationFrame(frame))
 
 .btn:hover .arrow {
   transform: rotate(45deg) translate(2px, -2px);
+}
+
+/* 底部的滚动提示：一条细线，蓝点沿线下落 */
+.cue {
+  position: absolute;
+  bottom: 28px;
+  left: 50%;
+  z-index: 1;
+  width: 21px;
+  height: 52px;
+  margin-left: -10px;
+  animation: fade 1s ease 2.6s backwards;
+}
+
+.cue::before {
+  content: '';
+  position: absolute;
+  inset: 0 10px;
+  background: linear-gradient(var(--line-strong), transparent);
+}
+
+.cue span {
+  position: absolute;
+  top: 0;
+  left: 8px;
+  width: 5px;
+  height: 5px;
+  border-radius: 1px;
+  background: var(--accent);
+  animation: cue-drop 2.4s cubic-bezier(0.65, 0, 0.2, 1) 3s infinite;
+}
+
+@keyframes cue-drop {
+  0% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  20% {
+    opacity: 1;
+  }
+  80%,
+  100% {
+    opacity: 0;
+    transform: translateY(44px);
+  }
+}
+
+@media (max-height: 640px) {
+  .cue {
+    display: none;
+  }
 }
 
 /* 其余文案逐行入场 */

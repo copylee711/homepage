@@ -8,6 +8,12 @@ html {
   scroll-behavior: smooth;
   scroll-padding-top: calc(var(--header-h) + 16px);
   -webkit-text-size-adjust: 100%;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+::selection {
+  background: var(--accent-soft);
 }
 
 body {
@@ -120,7 +126,20 @@ a {
     transform 0.4s var(--ease);
 }
 
+.row {
+  transition: opacity 0.3s ease;
+}
+
 @media (hover: hover) {
+  /* 悬停某一行时，同组其余行略微退后 */
+  .rows:hover .row {
+    opacity: 0.5;
+  }
+
+  .rows .row:hover {
+    opacity: 1;
+  }
+
   .row:hover .row-arrow {
     opacity: 1;
     transform: none;

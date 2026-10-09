@@ -1,26 +1,9 @@
 <script setup lang="ts">
+import { languageColor } from '../languages'
 import type { Repo } from '../types'
 import AppIcon from './AppIcon.vue'
 
 defineProps<{ repo: Repo }>()
-
-const LANGUAGE_COLORS: Record<string, string> = {
-  TypeScript: '#3178c6',
-  JavaScript: '#f1e05a',
-  Vue: '#41b883',
-  Python: '#3572a5',
-  Go: '#00add8',
-  Rust: '#dea584',
-  Java: '#b07219',
-  Kotlin: '#a97bff',
-  C: '#555555',
-  'C++': '#f34b7d',
-  'C#': '#178600',
-  Shell: '#89e051',
-  HTML: '#e34c26',
-  CSS: '#563d7c',
-  Lua: '#000080',
-}
 </script>
 
 <template>
@@ -30,7 +13,7 @@ const LANGUAGE_COLORS: Record<string, string> = {
     <span class="meta">
       <span v-if="repo.stars" class="stars"><AppIcon name="star" />{{ repo.stars }}</span>
       <span v-if="repo.language" class="lang">
-        <i class="dot" :style="{ background: LANGUAGE_COLORS[repo.language] ?? '#b0b0b5' }" />
+        <i class="dot" :style="{ background: languageColor(repo.language) }" />
         {{ repo.language }}
       </span>
     </span>
@@ -46,6 +29,7 @@ const LANGUAGE_COLORS: Record<string, string> = {
   font-size: 14.5px;
   font-weight: 600;
   overflow-wrap: anywhere;
+  transition: transform 0.4s var(--ease);
 }
 
 .desc {
@@ -83,6 +67,12 @@ const LANGUAGE_COLORS: Record<string, string> = {
 .stars svg {
   width: 12px;
   height: 12px;
+}
+
+@media (hover: hover) {
+  .repo:hover .name {
+    transform: translateX(6px);
+  }
 }
 
 @media (max-width: 767px) {
