@@ -18,21 +18,17 @@ copylee.cn {
 	file_server
 }
 
-# Nextcloud：反代到本机容器（假设监听 127.0.0.1:8080）
+# 文件服务：反代到本机的 SFTPGo（部署见 deploy/sftpgo/）
 cloud.copylee.cn {
 	header Strict-Transport-Security "max-age=15552000; includeSubDomains"
 
-	redir /.well-known/carddav /remote.php/dav/ 301
-	redir /.well-known/caldav /remote.php/dav/ 301
-
-	# 大文件上传：不限制请求体，放宽超时
-	request_body {
-		max_size 10GB
+	# WebDAV，SFTPGo 里已配置同样的 /dav 前缀
+	handle /dav/* {
+		reverse_proxy 127.0.0.1:10080
 	}
 
-	reverse_proxy 127.0.0.1:8080 {
-		transport http {
-			read_timeout 1h
-		}
+	# 网页文件管理与管理后台
+	handle {
+		reverse_proxy 127.0.0.1:8080
 	}
 }

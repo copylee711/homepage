@@ -1,0 +1,35 @@
+# SFTPGo：cloud.copylee.cn 背后的文件服务。
+# 用 host 网络，网页和 WebDAV 只监听本机，由 Caddy 反代并提供 HTTPS；SFTP 直接对外。
+#
+#   网页（管理端 + 文件管理）  127.0.0.1:8080   -> https://cloud.copylee.cn/
+#   WebDAV                     127.0.0.1:10080  -> https://cloud.copylee.cn/dav/
+#   SFTP                       0.0.0.0:2022     -> 需在防火墙放行 TCP 2022
+services:
+  sftpgo:
+    # 升级前先看发行说明：https://github.com/drakkan/sftpgo/releases
+    image: drakkan/sftpgo:v2.6-alpine
+    container_name: sftpgo
+    restart: unless-stopped
+    network_mode: host
+    env_file: .env
+    environment:
+      # 网页
+      SFTPGO_HTTPD__BINDINGS__0__ADDRESS: 127.0.0.1
+      SFTPGO_HTTPD__BINDINGS__0__PORT: 8080
+      SFTPGO_HTTPD__BINDINGS__0__PROXY_ALLOWED: 127.0.0.1
+      SFTPGO_HTTPD__BINDINGS__0__CLIENT_IP_PROXY_HEADER: X-Forwarded-For
+      # WebDAV
+      SFTPGO_WEBDAVD__BINDINGS__0__ADDRESS: 127.0.0.1
+      SFTPGO_WEBDAVD__BINDINGS__0__PORT: 10080
+      SFTPGO_WEBDAVD__BINDINGS__0__PREFIX: /dav
+      SFTPGO_WEBDAVD__BINDINGS__0__PROXY_ALLOWED: 127.0.0.1
+      SFTPGO_WEBDAVD__BINDINGS__0__CLIENT_IP_PROXY_HEADER: X-Forwarded-For
+      # SFTP
+      SFTPGO_SFTPD__BINDINGS__0__PORT: 2022
+      # 首次启动时用 .env 里的账号创建管理员，避免初始化页面暴露在公网
+      SFTPGO_DATA_PROVIDER__CREATE_DEFAULT_ADMIN: "true"
+    volumes:
+      # 用户文件（本地存储的部分）
+      - ./data:/srv/sftpgo
+      # 数据库、主机密钥等状态
+      - ./home:/var/lib/sftpgo

@@ -37,7 +37,7 @@ npm run build
 ```
 
 产物在 `dist/`，上传到服务器（如 `/var/www/homepage`）后由 Caddy 托管。
-Caddy 配置示例见 [deploy/Caddyfile.example](deploy/Caddyfile.example)，其中同时包含 `cloud.copylee.cn` 到 Nextcloud 的反向代理。
+Caddy 配置示例见 [deploy/Caddyfile.example](deploy/Caddyfile.example)，其中同时包含 `cloud.copylee.cn` 到 SFTPGo 的反向代理；SFTPGo 本身的部署见 [deploy/sftpgo/](deploy/sftpgo/README.md)。
 
 ### GitHub Actions
 
