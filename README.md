@@ -8,6 +8,7 @@
 - Markdown 文章、草稿与发布快照、图片上传。
 - 服务端文章渲染、SEO 元信息与站点地图。
 - 内容版本检查、明暗主题与移动端布局。
+- SCUT 学校通知聚合：主页未读摘要、分类检索、官网跳转与每 10 分钟自动检查。
 - 单管理员登录，可选 TOTP、恢复码与多设备 Passkey。
 - 数据库迁移、备份恢复与手动部署流程。
 
@@ -47,6 +48,7 @@ uv run uvicorn app.asgi:app --host 127.0.0.1 --port 8000
 | [备份与恢复](docs/maintenance.md) | 数据快照、图片引用与恢复流程 |
 | [部署指南](deploy/README.md) | 前后端部署、Caddy 与 GitHub Actions |
 | [内容后端](backend/README.md) | 后端目录与文档索引 |
+| [SCUT 通知索引](docs/scut.md) | 采集范围、阅读状态、初始化与运维 |
 | [SFTPGo 部署](deploy/sftpgo/README.md) | 配套文件服务 |
 
 ## 许可证

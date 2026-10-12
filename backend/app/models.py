@@ -9,6 +9,35 @@ class Content(SQLModel, table=True):
     revision: int = 1
 
 
+class ScutNotice(SQLModel, table=True):
+    __tablename__ = "scut_notice"
+    url: str = Field(primary_key=True)
+    title: str
+    published_at: str | None = None
+    first_seen: str
+
+
+class ScutMembership(SQLModel, table=True):
+    __tablename__ = "scut_membership"
+    url: str = Field(primary_key=True, foreign_key="scut_notice.url")
+    column_id: str = Field(primary_key=True)
+
+
+class ScutColumn(SQLModel, table=True):
+    __tablename__ = "scut_column"
+    id: str = Field(primary_key=True)
+    last_success: str | None = None
+    last_attempt: str | None = None
+    last_error: str = ""
+    initialized: bool = False
+    scan_page: int = 1
+    scan_started: str | None = None
+    last_full_scan: str | None = None
+    pages_scanned: int = 0
+    total_pages: int | None = None
+    revision: int = 0
+
+
 class Article(SQLModel, table=True):
     __tablename__ = "article"
     id: str = Field(primary_key=True)

@@ -23,7 +23,8 @@ ORIGIN = "http://localhost:8000"
 @pytest.fixture
 def server(tmp_path):
     settings = Settings(
-        data_dir=tmp_path / "data", static_dir=tmp_path / "dist", sync_enabled=False
+        data_dir=tmp_path / "data", static_dir=tmp_path / "dist", sync_enabled=False,
+        scut_sync_enabled=False,
     )
     migrate(settings)
     seed(settings)

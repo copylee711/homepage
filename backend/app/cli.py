@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import getpass
 import hashlib
 import json
@@ -148,6 +149,8 @@ def main():
     sub = parser.add_subparsers(dest="action", required=True)
     sub.add_parser("migrate")
     sub.add_parser("seed")
+    scut = sub.add_parser("sync-scut", help="同步 SCUT 公开列表；历史扫描可重复执行续传")
+    scut.add_argument("--pages-per-column", type=int, default=5)
     admin = sub.add_parser("set-admin")
     admin.add_argument("--username", default="admin")
     reset = sub.add_parser("reset-security", help="清除 TOTP、恢复码、Passkey 和所有会话")
@@ -173,6 +176,28 @@ def main():
             set_admin(session, args.username, password)
         engine.dispose()
         print("账号已设置，旧会话已撤销")
+    elif args.action == "sync-scut":
+        from .scut import sync_scut
+
+        if not 1 <= args.pages_per_column <= 500:
+            parser.error("pages-per-column 必须为 1–500")
+        engine = make_engine(settings)
+        try:
+            asyncio.run(sync_scut(engine, scan_budget=args.pages_per_column))
+            with Session(engine) as session:
+                from .scut import public_scut
+
+                result = public_scut(session)
+                failed = [c for c in result["columns"] if c["last_error"]]
+                print(f"索引 {len(result['items'])} 条；"
+                      f"初始化完成 {sum(c['initialized'] for c in result['columns'])} / "
+                      f"{len(result['columns'])} 栏目")
+                for column in failed:
+                    print(f"{column['name']}：{column['last_error']}")
+                if failed:
+                    raise SystemExit(1)
+        finally:
+            engine.dispose()
     elif args.action == "backup":
         print(backup(settings, args.output))
     elif args.action == "reset-security":

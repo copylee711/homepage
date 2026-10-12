@@ -8,10 +8,14 @@ import RepoSection from './components/RepoSection.vue'
 import SiteFooter from './components/SiteFooter.vue'
 import SiteHeader from './components/SiteHeader.vue'
 import PostSection from './components/PostSection.vue'
+import ScutSection from './components/ScutSection.vue'
+import { startScut } from './scut'
 const isAdmin = location.pathname === '/admin' || location.pathname.startsWith('/admin/')
+const isScut = location.pathname.replace(/\/$/, '') === '/scut'
 let stop: (() => void) | undefined
-onMounted(() => { if (!isAdmin) stop = startContent() })
-onBeforeUnmount(() => stop?.())
+let stopScut: (() => void) | undefined
+onMounted(() => { if (!isAdmin) { stop = startContent(); stopScut = startScut() } })
+onBeforeUnmount(() => { stop?.(); stopScut?.() })
 </script>
 
 <template>
@@ -19,11 +23,15 @@ onBeforeUnmount(() => stop?.())
   <template v-else-if="ready">
   <SiteHeader />
   <p v-if="contentStatus.stale" class="content-banner" role="status">暂时无法检查更新，正在显示已加载的内容。<button @click="reloadContent">重试</button></p>
-  <main>
+  <main :id="isScut ? 'top' : undefined">
+    <ScutSection v-if="isScut" full />
+    <template v-else>
     <HeroSection />
     <PortalGrid />
+    <ScutSection />
     <RepoSection />
     <PostSection />
+    </template>
   </main>
   <SiteFooter />
   </template>

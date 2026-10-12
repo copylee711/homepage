@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     secure_cookie: bool = False
     public_admin: bool = False
     sync_enabled: bool = True
+    scut_sync_enabled: bool = True
     github_token: str = ""
     session_hours: int = 12
 

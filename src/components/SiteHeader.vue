@@ -11,6 +11,7 @@ const links = [
   { id: 'top', label: 'Home' },
   { id: 'projects', label: 'Projects' },
 ]
+const isScut = location.pathname.replace(/\/$/, '') === '/scut'
 // 入口区没有单独的导航项，滚动到那里时仍高亮 Home
 const sections = ['top', 'portals', 'projects']
 
@@ -38,7 +39,7 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
 <template>
   <header v-if="site" class="header" :class="{ scrolled }">
     <div class="container bar">
-      <a class="brand" href="#top">
+      <a class="brand" :href="isScut ? '/#top' : '#top'" :aria-label="`${site.name} 主页`">
         <LogoMark class="logo" />
         <span>{{ site.name }}</span>
       </a>
@@ -46,15 +47,16 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
         <a
           v-for="link in links"
           :key="link.id"
-          :href="`#${link.id}`"
-          :class="{ active: active === link.id, home: link.id === 'top' }"
-          :aria-current="active === link.id ? 'true' : undefined"
+          :href="`${isScut ? '/' : ''}#${link.id}`"
+          :class="{ active: !isScut && active === link.id, home: link.id === 'top' }"
+          :aria-current="!isScut && active === link.id ? 'true' : undefined"
         >
           {{ link.label }}
         </a>
+        <a href="/scut" :class="{ active: isScut }" :aria-current="isScut ? 'page' : undefined">SCUT</a>
         <a href="/posts">Articles</a>
-        <a :href="site.notes" target="_blank" rel="noopener">Notes</a>
-        <a :href="site.cloud" target="_blank" rel="noopener">Cloud</a>
+        <a :href="site.notes" class="service-link" target="_blank" rel="noopener">Notes</a>
+        <a :href="site.cloud" class="service-link" target="_blank" rel="noopener">Cloud</a>
         <button
           class="theme"
           type="button"
@@ -176,9 +178,15 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
 @media (max-width: 479px) {
   .nav { gap:12px; }
   .brand { font-size:16px; }
+  .brand span { display:none; }
   .nav .home {
     display: none;
   }
+}
+
+@media (max-width: 760px) {
+  .nav .service-link { display:none; }
+  .nav { gap:16px; }
 }
 
 @media (max-width: 379px) {

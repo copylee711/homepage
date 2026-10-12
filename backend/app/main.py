@@ -45,6 +45,8 @@ from .schemas import (
     SecurityProof,
     SiteWrite,
 )
+from .scut import public_scut
+from .scut import sync_loop as scut_sync_loop
 from .security import factor_action, passkey_options, passkey_verify, remove_passkey
 from .settings import Settings
 
@@ -60,11 +62,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app):
         task = asyncio.create_task(sync_loop(app)) if settings.sync_enabled else None
+        scut_task = asyncio.create_task(scut_sync_loop(app)) if settings.scut_sync_enabled else None
         yield
-        if task:
-            task.cancel()
+        for pending in (task, scut_task):
+            if not pending:
+                continue
+            pending.cancel()
             with suppress(asyncio.CancelledError):
-                await task
+                await pending
         engine.dispose()
 
     app = FastAPI(
@@ -78,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(JsonBodyLimit)
     app.state.engine = engine
     app.state.sync_lock = asyncio.Lock()
+    app.state.scut_lock = asyncio.Lock()
     templates = Jinja2Templates(directory=HERE / "templates")
 
     def database(request: Request):
@@ -111,6 +117,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def health(session: Session = Depends(database)):
         versions(session)
         return {"ok": True}
+
+    @app.get("/api/scut")
+    def scut(session: Session = Depends(database)):
+        return {**public_scut(session), "sync_enabled": settings.scut_sync_enabled}
 
     @app.get("/api/site")
     def site(session: Session = Depends(database)):
@@ -401,6 +411,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.mount("/assets", StaticFiles(directory=settings.static_dir / "assets"), name="assets")
 
     @app.get("/", response_class=HTMLResponse)
+    @app.get("/scut", response_class=HTMLResponse)
+    @app.get("/scut/", response_class=HTMLResponse)
     @app.get("/admin", response_class=HTMLResponse)
     @app.get("/admin/{path:path}", response_class=HTMLResponse)
     def frontend(path: str = ""):
