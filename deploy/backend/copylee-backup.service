@@ -1,0 +1,15 @@
+[Unit]
+Description=Back up Copy Lee database and referenced images
+
+[Service]
+Type=oneshot
+User=copylee
+Group=copylee
+WorkingDirectory=/opt/copylee-backend/current
+EnvironmentFile=/etc/copylee/backend.env
+ExecStart=/opt/copylee-backend/current/.venv/bin/python -m app.cli backup
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/copylee

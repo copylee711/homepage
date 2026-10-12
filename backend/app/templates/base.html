@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ title }} · {{ site.name }}</title>
+  <meta name="description" content="{{ description }}">
+  <link rel="canonical" href="{{ canonical }}">
+  <meta property="og:title" content="{{ title }}"><meta property="og:description" content="{{ description }}">
+  <meta property="og:url" content="{{ canonical }}"><meta property="og:site_name" content="{{ site.name }}">
+  <meta property="og:type" content="{% if article is defined and article %}article{% else %}website{% endif %}">
+  {% if cover_absolute is defined and cover_absolute %}<meta property="og:image" content="{{ cover_absolute }}">{% endif %}
+  {% if structured is defined %}<script type="application/ld+json">{{ structured | tojson }}</script>{% endif %}
+  {% for url in css_urls %}<link rel="stylesheet" href="{{ url }}">{% endfor %}
+  <link rel="stylesheet" href="/content-assets/reading.css">
+  <script src="/content-assets/theme.js"></script>
+</head>
+<body data-slug="{{ article.slug if article is defined and article else '' }}" data-post-revision="{{ article.public_revision if article is defined and article else 0 }}">
+  <header class="reading-header container">
+    <a class="reading-brand" href="/">{{ site.name }}</a>
+    <nav aria-label="主导航"><a href="/">Home</a><a href="/posts" aria-current="page">Articles</a>
+      <a data-notes href="{{ site.notes }}" target="_blank" rel="noopener">Notes</a>
+      <button type="button" id="theme-toggle" aria-label="切换明暗主题">◐</button></nav>
+  </header>
+  <main class="reading-main container">{% block content %}{% endblock %}</main>
+  <footer class="reading-footer container"><span>© {{ year }} <span data-site-name>{{ site.name }}</span></span><a href="/">回到主页 ↑</a></footer>
+  <script id="content-versions" type="application/json">{{ version | tojson }}</script>
+  <script src="/content-assets/live.js" defer></script>
+</body>
+</html>

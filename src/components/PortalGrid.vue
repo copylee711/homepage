@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { vReveal } from '../composables/useReveal'
-import { site } from '../site.config'
+import { site } from '../content'
 import PortalCard from './PortalCard.vue'
 </script>
 
 <template>
-  <section id="portals" class="section">
+  <section v-if="site" id="portals" class="section">
     <div class="container">
       <div class="grid">
         <PortalCard

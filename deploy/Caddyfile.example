@@ -1,34 +1,41 @@
-# 示例配置，按实际路径修改后放到 /etc/caddy/Caddyfile
-# Caddy 会自动为这些域名签发并续期 HTTPS 证书（需要 80/443 端口对外开放、域名已解析且备案通过）。
-
+# HTTPS 就绪后的配置。当前 HTTP 阶段使用 Caddyfile.http.example。
 www.copylee.cn {
-	redir https://copylee.cn{uri} permanent
+    redir https://copylee.cn{uri} permanent
 }
-
-# 主页：直接托管构建产物 dist/
 copylee.cn {
-	root * /var/www/homepage
-	encode zstd gzip
-
-	# 带哈希的静态资源长期缓存，其余（index.html 等）每次校验
-	@assets path /assets/*
-	header @assets Cache-Control "public, max-age=31536000, immutable"
-	header Cache-Control "no-cache"
-
-	file_server
+    encode zstd gzip
+    @backend path /api /api/* /posts /posts/* /sitemap.xml /robots.txt /content-assets/*
+    handle @backend {
+        reverse_proxy 127.0.0.1:8000
+    }
+    handle_path /media/* {
+        root * /var/lib/copylee/media
+        header Cache-Control "public, max-age=31536000, immutable"
+        header X-Content-Type-Options nosniff
+        file_server
+    }
+    @admin path /admin /admin/*
+    handle @admin {
+        root * /var/www/copylee
+        header Cache-Control no-store
+        header X-Robots-Tag noindex
+        try_files /index.html
+        file_server
+    }
+    handle /assets/* {
+        root * /var/www/copylee
+        header Cache-Control "public, max-age=31536000, immutable"
+        file_server
+    }
+    handle {
+        root * /var/www/copylee
+        header Cache-Control no-cache
+        file_server
+    }
 }
-
-# 文件服务：反代到本机的 SFTPGo（部署见 deploy/sftpgo/）
-cloud.copylee.cn {
-	header Strict-Transport-Security "max-age=15552000; includeSubDomains"
-
-	# WebDAV，SFTPGo 里已配置同样的 /dav 前缀
-	handle /dav/* {
-		reverse_proxy 127.0.0.1:10080
-	}
-
-	# 网页文件管理与管理后台
-	handle {
-		reverse_proxy 127.0.0.1:8080
-	}
+http://cloud.copylee.cn {
+    reverse_proxy 127.0.0.1:8080
+}
+http://dav.copylee.cn {
+    reverse_proxy 127.0.0.1:10080
 }

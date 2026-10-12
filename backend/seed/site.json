@@ -1,0 +1,51 @@
+{
+  "name": "Copy Lee",
+  "greeting": "Hi, I'm",
+  "roles": [
+    "Student",
+    "Developer",
+    "Builder"
+  ],
+  "intro": "A personal space for notes, projects, and cloud services.",
+  "github": "copylee711",
+  "cloud": "https://cloud.copylee.cn",
+  "notes": "https://cedar-tomato-027.notion.site/Notes-3f477fc5d27680a6b492d9d24a87e714",
+  "portals": [
+    {
+      "title": "Cloud",
+      "description": "私有云盘，用于文件同步与临时协作。",
+      "href": "https://cloud.copylee.cn",
+      "icon": "cloud",
+      "hint": "cloud.copylee.cn"
+    },
+    {
+      "title": "Notes",
+      "description": "学习过程中留下的记录。",
+      "href": "https://cedar-tomato-027.notion.site/Notes-3f477fc5d27680a6b492d9d24a87e714",
+      "icon": "note",
+      "hint": "Notion"
+    },
+    {
+      "title": "GitHub",
+      "description": "开源项目与日常代码。",
+      "href": "https://github.com/copylee711",
+      "icon": "github",
+      "hint": "github.com/copylee711"
+    }
+  ],
+  "repoGroups": [
+    {
+      "title": "DSH Plugins",
+      "description": "DeepSeek Harness 插件",
+      "prefix": "dsh-"
+    }
+  ],
+  "hiddenRepos": [
+    "homepage"
+  ],
+  "icp": "",
+  "police": {
+    "text": "",
+    "code": ""
+  }
+}

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { site } from '../site.config'
+import { site } from '../content'
 import AppIcon from './AppIcon.vue'
 import HeroMark from './HeroMark.vue'
 
@@ -56,7 +56,7 @@ onBeforeUnmount(() => cancelAnimationFrame(frame))
 </script>
 
 <template>
-  <section id="top" ref="hero" class="hero">
+  <section v-if="site" id="top" ref="hero" class="hero">
     <div class="art" aria-hidden="true">
       <div class="art-scroll">
         <div class="grid-lines" />

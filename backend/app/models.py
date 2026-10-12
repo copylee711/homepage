@@ -1,0 +1,69 @@
+from sqlalchemy import JSON, Column
+from sqlmodel import Field, SQLModel
+
+
+class Content(SQLModel, table=True):
+    __tablename__ = "content"
+    key: str = Field(primary_key=True)
+    value: dict = Field(sa_column=Column(JSON, nullable=False))
+    revision: int = 1
+
+
+class Article(SQLModel, table=True):
+    __tablename__ = "article"
+    id: str = Field(primary_key=True)
+    slug: str = Field(unique=True, index=True)
+    draft: dict = Field(sa_column=Column(JSON, nullable=False))
+    published: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
+    # 曾发布的链接永远锁定，撤下再编辑也不能改变地址。
+    slug_locked: bool = False
+    revision: int = 1
+    created_at: str
+    updated_at: str
+
+
+class Administrator(SQLModel, table=True):
+    __tablename__ = "administrator"
+    id: int = Field(default=1, primary_key=True)
+    username: str
+    password_hash: str
+    totp_secret: str | None = None
+    pending_secret: str | None = None
+    pending_expires: float = 0
+    last_totp_step: int = -1
+    recovery_hashes: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+
+
+class Passkey(SQLModel, table=True):
+    __tablename__ = "passkey"
+    id: str = Field(primary_key=True)
+    public_key: str
+    sign_count: int = 0
+    name: str
+    created_at: float
+    last_used: float | None = None
+
+
+class AuthChallenge(SQLModel, table=True):
+    __tablename__ = "auth_challenge"
+    id: str = Field(primary_key=True)
+    challenge: str
+    kind: str
+    origin: str
+    rp_id: str
+    session_hash: str = ""
+    expires_at: float
+
+
+class LoginSession(SQLModel, table=True):
+    __tablename__ = "login_session"
+    token_hash: str = Field(primary_key=True)
+    csrf: str
+    expires_at: float
+
+
+class LoginAttempt(SQLModel, table=True):
+    __tablename__ = "login_attempt"
+    key: str = Field(primary_key=True)
+    failures: int = 0
+    window_start: float

@@ -3,3 +3,13 @@ dist
 *.local
 .env
 .DS_Store
+
+.sites-source/
+.sites-artifacts/
+backend/.venv/
+backend/.data/
+backend/.pytest_cache/
+backend/.ruff_cache/
+__pycache__/
+*.pyc
+.qa/

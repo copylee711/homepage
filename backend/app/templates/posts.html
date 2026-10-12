@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="label">Writing / Notes</p><h1 class="reading-title">Articles<span class="article-total">{{ posts | length }}</span></h1>
+<p class="reading-intro">一些想法，一些记录。</p>
+<div id="post-list" class="post-list">
+{% for post in posts %}
+<a class="post-item" href="/posts/{{ post.slug }}"><time>{{ post.published_at[:10] }}</time><div><h2>{{ post.title }}</h2><p>{{ post.summary }}</p></div><span aria-hidden="true">↗</span></a>
+{% else %}<p class="empty-posts">暂时还没有发布文章。</p>{% endfor %}
+</div>
+{% endblock %}

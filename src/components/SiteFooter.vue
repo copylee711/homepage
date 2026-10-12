@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { site } from '../site.config'
+import { site } from '../content'
 import LogoMark from './LogoMark.vue'
 
 const year = new Date().getFullYear()
 </script>
 
 <template>
-  <footer class="footer">
+  <footer v-if="site" class="footer">
     <div class="container">
       <div class="main">
         <a class="brand" href="#top" aria-label="回到顶部">
@@ -14,6 +14,7 @@ const year = new Date().getFullYear()
         </a>
         <nav class="links" aria-label="页脚导航">
           <a :href="`https://github.com/${site.github}`" target="_blank" rel="noopener">GitHub</a>
+          <a href="/posts">Articles</a>
           <a :href="site.notes" target="_blank" rel="noopener">Notes</a>
           <a :href="site.cloud" target="_blank" rel="noopener">Cloud</a>
           <a class="top" href="#top">Back to top <span aria-hidden="true">↑</span></a>

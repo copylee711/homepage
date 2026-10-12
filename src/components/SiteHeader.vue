@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { site } from '../site.config'
+import { site } from '../content'
 import { useTheme } from '../composables/useTheme'
 import AppIcon from './AppIcon.vue'
 import LogoMark from './LogoMark.vue'
@@ -36,7 +36,7 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
 </script>
 
 <template>
-  <header class="header" :class="{ scrolled }">
+  <header v-if="site" class="header" :class="{ scrolled }">
     <div class="container bar">
       <a class="brand" href="#top">
         <LogoMark class="logo" />
@@ -52,6 +52,7 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
         >
           {{ link.label }}
         </a>
+        <a href="/posts">Articles</a>
         <a :href="site.notes" target="_blank" rel="noopener">Notes</a>
         <a :href="site.cloud" target="_blank" rel="noopener">Cloud</a>
         <button
@@ -173,6 +174,8 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
 }
 
 @media (max-width: 479px) {
+  .nav { gap:12px; }
+  .brand { font-size:16px; }
   .nav .home {
     display: none;
   }

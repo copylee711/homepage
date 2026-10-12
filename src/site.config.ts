@@ -1,4 +1,4 @@
-// 站点内容都在这里改，改完重新构建即可。
+// 仅用于一次性导出初始内容。运行中的网站内容通过 /admin 更新。
 
 export type IconName = 'cloud' | 'note' | 'github'
 

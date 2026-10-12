@@ -1,44 +1,47 @@
 <script setup lang="ts">
 import { vReveal } from '../composables/useReveal'
-import data from '../data/repos.json'
+import { computed } from 'vue'
+import { repos as rawRepos, site } from '../content'
 import { languageColor } from '../languages'
-import { site } from '../site.config'
 import type { Repo } from '../types'
 import RepoCard from './RepoCard.vue'
 
-const repos = (data as Repo[])
-  .filter((r) => !site.hiddenRepos.includes(r.name))
-  .sort((a, b) => b.stars - a.stars || b.pushedAt.localeCompare(a.pushedAt))
+const repos = computed(() => rawRepos.value
+  .filter((r) => !site.value?.hiddenRepos.includes(r.name))
+  .sort((a, b) => b.stars - a.stars || b.pushedAt.localeCompare(a.pushedAt)))
 
 const inGroup = (r: Repo, prefix: string) => r.name.startsWith(prefix)
 
-const groups = [
-  ...site.repoGroups.map((g) => ({
+const groups = computed(() => [
+  ...(site.value?.repoGroups ?? []).map((g, index) => ({
     title: g.title,
     description: g.description,
-    repos: repos.filter((r) => inGroup(r, g.prefix)),
+    repos: repos.value.filter((r) => inGroup(r, g.prefix) && !site.value?.repoGroups.slice(0,index).some(previous => inGroup(r,previous.prefix))),
   })),
   {
     title: 'Others',
     description: '',
-    repos: repos.filter((r) => !site.repoGroups.some((g) => inGroup(r, g.prefix))),
+    repos: repos.value.filter((r) => !site.value?.repoGroups.some((g) => inGroup(r, g.prefix))),
   },
-].filter((g) => g.repos.length)
+].filter((g) => g.repos.length))
 
 // 语言占比条：按仓库的主语言计数，最多列 5 种，其余并入 Other
 const MAX_LANGUAGES = 5
+const languages = computed(() => {
 const counts = new Map<string, number>()
-for (const r of repos) if (r.language) counts.set(r.language, (counts.get(r.language) ?? 0) + 1)
+for (const r of repos.value) if (r.language) counts.set(r.language, (counts.get(r.language) ?? 0) + 1)
 const ranked = [...counts].sort((a, b) => b[1] - a[1])
-const languages = ranked.slice(0, MAX_LANGUAGES).map(([name, count]) => ({ name, count, color: languageColor(name) }))
+const result = ranked.slice(0, MAX_LANGUAGES).map(([name, count]) => ({ name, count, color: languageColor(name) }))
 const rest = ranked.slice(MAX_LANGUAGES).reduce((sum, [, count]) => sum + count, 0)
-if (rest) languages.push({ name: 'Other', count: rest, color: languageColor('') })
+if (rest) result.push({ name: 'Other', count: rest, color: languageColor('') })
+return result
+})
 
-const profile = `https://github.com/${site.github}`
+const profile = computed(() => `https://github.com/${site.value?.github ?? ''}`)
 </script>
 
 <template>
-  <section id="projects" class="section">
+  <section v-if="site" id="projects" class="section">
     <div class="container">
       <h2 v-reveal class="section-title">
         Projects<sup class="count">{{ repos.length }}</sup>

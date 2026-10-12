@@ -1,0 +1,46 @@
+name: Deploy backend
+on:
+  workflow_dispatch:
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.4"
+          enable-cache: true
+      - name: Test locked backend
+        working-directory: backend
+        run: |
+          uv sync --frozen --python 3.12
+          uv run --frozen pytest -q
+          uv run --frozen ruff check app migrations tests
+      - name: Set up SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Upload and activate release
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          release="$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA}"
+          ssh_args=(-i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}")
+          ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p /opt/copylee-backend/releases/$release"
+          rsync -az --exclude=.venv --exclude=.data --exclude=.env --exclude=__pycache__ --exclude=.pytest_cache --exclude=.ruff_cache \
+            -e "ssh -i ~/.ssh/deploy_key -p ${DEPLOY_PORT:-22}" \
+            backend/ "$DEPLOY_USER@$DEPLOY_HOST:/opt/copylee-backend/releases/$release/"
+          ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "sudo /usr/local/sbin/copylee-deploy $release"

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<a class="back-link" href="/posts">← 所有文章</a>
+<div id="article-content"><article>
+  <p class="article-date"><time datetime="{{ article.published_at }}">{{ article.published_at[:10] }}</time> · {{ site.name }}</p>
+  <h1 class="reading-title">{{ article.title }}</h1><p class="reading-intro">{{ article.summary }}</p>
+  {% if article.cover %}<img class="article-cover" src="{{ article.cover }}" alt="{{ article.title }}" loading="lazy">{% endif %}
+  <div class="prose">{{ article.html | safe }}</div>
+</article></div>
+<p id="article-update" class="update-notice" role="status" hidden>文章有新版本。<button type="button" onclick="location.reload()">刷新阅读</button></p>
+{% endblock %}

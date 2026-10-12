@@ -1,5 +1,7 @@
 # SFTPGo 部署
 
+[项目首页](../../README.md) · [部署指南](../README.md)
+
 `cloud.copylee.cn` 背后的文件服务：网页文件管理、WebDAV、SFTP，本地硬盘存日常文件，大文件目录落在 OSS。
 
 ## 启动
@@ -41,14 +43,14 @@ ssh -L 8080:127.0.0.1:8080 <服务器用户>@<服务器IP>
 
 ## 接入 OSS
 
-1. 新建一个**私有**存储桶（与服务器同在广州），不要和别的用途混用。
-2. 新建一个 RAM 子账号，只授予这个桶的读写权限，生成 AccessKey。
+1. 私有存储桶 `copylee-cloud`（广州，标准存储），专供 SFTPGo 使用。
+2. RAM 子账号 `sftpgo-oss`，通过自定义策略 `sftpgo-oss-copylee-cloud` 只能读写这个桶；在 RAM 控制台为它创建 AccessKey。
 3. 在 SFTPGo 的虚拟文件夹里填：
 
    | 项 | 值 |
    |---|---|
    | 存储 | S3 (Compatible) |
-   | Bucket | 桶名 |
+   | Bucket | `copylee-cloud` |
    | Region | `cn-guangzhou` |
    | Endpoint | `https://oss-cn-guangzhou-internal.aliyuncs.com` |
    | Access Key / Secret | 子账号的密钥 |

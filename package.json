@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "fetch:repos": "node scripts/fetch-repos.mjs",
-    "prebuild": "node scripts/fetch-repos.mjs",
+    "export:seed": "node scripts/export-seed.mjs",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview"
   },

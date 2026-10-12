@@ -1,0 +1,34 @@
+# gz 当前 HTTP 阶段，管理通过 SSH 隧道直连后端。
+http://copylee.cn, http://www.copylee.cn {
+    encode zstd gzip
+    @private path /admin /admin/* /api/auth /api/auth/* /api/admin /api/admin/*
+    handle @private {
+        respond "管理后台请通过 SSH 隧道访问" 403
+    }
+    @backend path /api /api/* /posts /posts/* /sitemap.xml /robots.txt /content-assets/*
+    handle @backend {
+        reverse_proxy 127.0.0.1:8000
+    }
+    handle_path /media/* {
+        root * /var/lib/copylee/media
+        header Cache-Control "public, max-age=31536000, immutable"
+        header X-Content-Type-Options nosniff
+        file_server
+    }
+    handle /assets/* {
+        root * /var/www/copylee
+        header Cache-Control "public, max-age=31536000, immutable"
+        file_server
+    }
+    handle {
+        root * /var/www/copylee
+        header Cache-Control no-cache
+        file_server
+    }
+}
+http://cloud.copylee.cn {
+    reverse_proxy 127.0.0.1:8080
+}
+http://dav.copylee.cn {
+    reverse_proxy 127.0.0.1:10080
+}

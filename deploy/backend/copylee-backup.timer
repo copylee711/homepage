@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Copy Lee backup
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target
