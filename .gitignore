@@ -15,3 +15,5 @@ __pycache__/
 .qa/
 .playwright-cli/
 output/playwright/
+output/ui-preview/
+.playwright-mcp/

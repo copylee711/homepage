@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -111,3 +112,21 @@ def update_article(session: Session, row: Article, revision: int, **values):
     )
     if result.rowcount != 1:
         raise HTTPException(409, "文章已被其他窗口修改，请重新加载后再操作")
+
+
+def adjacent_posts(session: Session, slug: str) -> tuple[dict | None, dict | None]:
+    """返回 (较新, 较旧) 的相邻已发布文章摘要。"""
+    posts = summaries(session)
+    index = next((i for i, post in enumerate(posts) if post["slug"] == slug), None)
+    if index is None:
+        return None, None
+    newer = posts[index - 1] if index > 0 else None
+    older = posts[index + 1] if index + 1 < len(posts) else None
+    return newer, older
+
+
+def reading_stats(markdown: str) -> dict:
+    """中文按字、拉丁文按词计数；约 400 字/分钟。"""
+    text = re.sub(r"```.*?```|`[^`]*`|!\[[^\]]*\]\([^)]*\)|\]\([^)]*\)|[#>*_\-|]", " ", markdown, flags=re.S)
+    words = len(re.findall(r"[㐀-鿿豈-﫿]", text)) + len(re.findall(r"[A-Za-z0-9]+(?:['’][A-Za-z]+)?", text))
+    return {"words": words, "minutes": max(1, round(words / 400))}

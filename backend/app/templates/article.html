@@ -1,11 +1,24 @@
 {% extends "base.html" %}
+{% from "macros.html" import grid %}
 {% block content %}
-<a class="back-link" href="/posts">← 所有文章</a>
-<div id="article-content"><article>
-  <p class="article-date"><time datetime="{{ article.published_at }}">{{ article.published_at[:10] }}</time> · {{ site.name }}</p>
-  <h1 class="reading-title">{{ article.title }}</h1><p class="reading-intro">{{ article.summary }}</p>
-  {% if article.cover %}<img class="article-cover" src="{{ article.cover }}" alt="{{ article.title }}" loading="lazy">{% endif %}
-  <div class="prose">{{ article.html | safe }}</div>
-</article></div>
-<p id="article-update" class="update-notice" role="status" hidden>文章有新版本。<button type="button" onclick="location.reload()">刷新阅读</button></p>
+<div class="page-heading article-heading">{{ grid() }}<div class="container article-heading-content">
+  <a class="back-link reading-rise" href="/posts"><span aria-hidden="true">←</span> 所有文章</a>
+  <p class="article-meta reading-rise" style="--delay:80ms"><time datetime="{{ article.published_at }}">{{ article.published_at[:10] }}</time><span>约 {{ reading.minutes }} 分钟</span><span>{{ reading.words }} 字</span></p>
+  <h1 class="reading-title reading-rise" style="--delay:140ms">{{ article.title }}</h1>
+  {% if article.summary %}<p class="reading-intro reading-rise" style="--delay:220ms">{{ article.summary }}</p>{% endif %}
+</div></div>
+<div class="container reading-article">
+  <div id="article-content" class="article-body reading-rise" style="--delay:300ms"><article>
+    {% if article.cover %}<img class="article-cover" src="{{ article.cover }}" alt="{{ article.title }}">{% endif %}
+    <div class="prose">{{ article.html | safe }}</div>
+    <p class="article-end" aria-hidden="true"><span></span></p>
+  </article>
+  <p id="article-update" class="update-notice" role="status" hidden>文章有新版本。<button type="button" onclick="location.reload()">刷新阅读</button></p>
+  {% if newer or older %}<nav class="article-pager" aria-label="相邻文章">
+    {% if older %}<a class="older" href="/posts/{{ older.slug }}"><span class="label">Previous</span><strong>{{ older.title }}</strong></a>{% else %}<span></span>{% endif %}
+    {% if newer %}<a class="newer" href="/posts/{{ newer.slug }}"><span class="label">Next</span><strong>{{ newer.title }}</strong></a>{% endif %}
+  </nav>{% endif %}
+  </div>
+  <aside class="article-toc" aria-label="文章目录" hidden><p class="label">Contents</p><ol></ol></aside>
+</div>
 {% endblock %}

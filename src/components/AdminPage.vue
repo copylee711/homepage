@@ -18,7 +18,12 @@ const security = ref<SecurityState>(), securityPassword = ref(''), securityOtp =
 const enrollment = ref<{secret:string; qr:string}>(), recoveryCodes = ref<string[]>([])
 const canPasskey = computed(() => passkeyAvailable())
 async function loadSecurity() { security.value = await api<SecurityState>('/api/admin/security') }
-function proof() { return {password:securityPassword.value, otp:securityOtp.value} }
+const securityPasswordInput = ref<HTMLInputElement>()
+// 绑定、撤销与两步验证都需再次确认密码；空值先在前端提示，避免显示接口的英文校验信息。
+function proof() {
+  if (!securityPassword.value) { securityPasswordInput.value?.focus(); throw new Error('请先在上方「确认当前密码」中输入登录密码。') }
+  return {password:securityPassword.value, otp:securityOtp.value}
+}
 async function factorOperation(operation:string) { await action(async () => {
   const result = await api<{secret?:string; qr?:string; recovery_codes?:string[]}>(`/api/admin/security/2fa/${operation}`, 'POST', proof())
   if(operation==='setup') enrollment.value={secret:result.secret!,qr:result.qr!}
@@ -39,8 +44,9 @@ async function addPasskey() { await action(async () => {
   securityPassword.value=''; securityOtp.value=''; await loadSecurity(); message.value='Passkey 已绑定，下次可以直接使用设备验证登录。'
 }) }
 async function removePasskey(id:string) { await action(async () => {
+  const body = proof()
   if(!confirm('撤销后这个 Passkey 将不能再登录，继续吗？')) return
-  await api(`/api/admin/security/passkeys/${encodeURIComponent(id)}/remove`,'POST',proof())
+  await api(`/api/admin/security/passkeys/${encodeURIComponent(id)}/remove`,'POST',body)
   securityPassword.value=''; securityOtp.value=''; await loadSecurity(); message.value='Passkey 已撤销，其他会话已退出。'
 }) }
 const settings = ref<SiteContent>(), siteRevision = ref(0)
@@ -202,15 +208,15 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', preventLeave))
         <template v-if="tab==='security'">
           <div class="section-head"><div><p class="eyebrow">Account access</p><h1>登录安全</h1></div></div>
           <p class="subtle">选择适合你的登录方式。Passkey 使用设备验证；开启 TOTP 后，密码登录还需要验证码。</p>
-          <div class="form-grid security-proof"><label>确认当前密码<span class="field-hint">绑定或撤销前再次确认</span><input v-model="securityPassword" type="password" autocomplete="current-password" maxlength="200"></label><label>验证码 / 恢复码<span class="field-hint">已开启 TOTP 时填写；绑定时填写新验证码</span><input v-model="securityOtp" autocomplete="one-time-code" maxlength="80"></label></div>
-          <section class="edit-card"><h2>Passkey</h2><p class="subtle">绑定后可用指纹、面容、设备 PIN 或安全密钥登录。可绑定多个设备，最多 10 个。</p>
+          <div class="form-grid security-proof"><label>确认当前密码<span class="field-hint">绑定或撤销前再次确认</span><input ref="securityPasswordInput" v-model="securityPassword" type="password" autocomplete="current-password" maxlength="200"></label><label>验证码 / 恢复码<span class="field-hint">已开启 TOTP 时填写；绑定时填写新验证码</span><input v-model="securityOtp" autocomplete="one-time-code" maxlength="80"></label></div>
+          <section class="edit-card security-card"><h2>Passkey</h2><p class="subtle">绑定后可用指纹、面容、设备 PIN 或安全密钥登录。可绑定多个设备，最多 10 个。</p>
             <div class="form-grid"><label>设备名称<input v-model="keyName" maxlength="80" placeholder="例如：我的手机"></label></div>
             <button @click="addPasskey" :disabled="!canPasskey">绑定 Passkey</button>
             <p class="field-hint">正式站点使用 HTTPS 后，请在正式域名重新绑定。本地 Passkey 仅适用于 localhost。</p>
             <div v-for="key in security?.passkeys" :key="key.id" class="key-row"><div><strong>{{key.name}}</strong><p class="field-hint">{{key.last_used ? `最近使用：${new Date(key.last_used*1000).toLocaleString()}` : '尚未用于登录'}}</p></div><button class="danger" @click="removePasskey(key.id)">撤销</button></div>
             <p v-if="!security?.passkeys.length" class="field-hint">还没有绑定设备。</p>
           </section>
-          <section class="edit-card"><h2>两步验证（TOTP）<span class="security-status">{{security?.totp_enabled ? '已开启' : '未开启'}}</span></h2>
+          <section class="edit-card security-card"><h2>两步验证（TOTP）<span class="security-status">{{security?.totp_enabled ? '已开启' : '未开启'}}</span></h2>
             <p class="subtle">使用验证器 App 生成 6 位验证码。默认关闭，可随时开启；恢复码每个只能使用一次。</p>
             <template v-if="enrollment"><img class="totp-qr" :src="enrollment.qr" alt="验证器绑定二维码"><label>手动绑定密钥<input :value="enrollment.secret" readonly autocomplete="off"></label><p class="field-hint">二维码和密钥请勿分享。绑定在 10 分钟后失效；在上方输入验证码确认。</p><button class="primary" @click="factorOperation('enable')">确认开启</button></template>
             <button v-else-if="!security?.totp_enabled" @click="factorOperation('setup')">开始绑定验证器</button>
@@ -276,6 +282,10 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', preventLeave))
 .admin-shell { min-height:100vh; }
 .passkey-login { margin-top:16px; width:100%; }
 .security-proof { margin:24px 0; }
+.security-card>button,.security-card>.buttons { margin-top:20px; }
+.security-card>.form-grid+button { margin-top:16px; }
+.security-card>.field-hint { margin-top:12px; }
+.security-card>label,.security-card>.totp-qr { display:block; margin-top:16px; }
 .security-status { margin-left:12px; font-size:12px; color:var(--muted); font-weight:400; }
 .totp-qr { width:200px; height:200px; display:block; margin:20px 0; }
 .key-row { display:flex; align-items:center; justify-content:space-between; gap:16px; border-top:1px solid var(--line); margin-top:20px; padding-top:16px; }

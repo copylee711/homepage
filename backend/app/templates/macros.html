@@ -1,0 +1,5 @@
+{# 页面标题逐字入场：读屏读取 aria-label，逐字 span 仅作视觉。 #}
+{% macro chars(text) -%}
+<span aria-hidden="true">{% for char in text %}<span class="char" style="--c:{{ loop.index0 }}">{{ char }}</span>{% endfor %}</span>
+{%- endmacro %}
+{% macro grid() -%}<div class="page-grid" aria-hidden="true"><span></span><i></i></div>{%- endmacro %}

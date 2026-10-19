@@ -414,3 +414,37 @@ def test_json_size_limit_and_unicode_login(server):
         headers={"Origin": ORIGIN},
     )
     assert response.status_code == 401
+
+
+def publish(client, headers, **changes):
+    post = create_post(client, headers, **changes)
+    response = client.post(
+        f"/api/admin/posts/{post['id']}/publish", json={"revision": 1}, headers=headers
+    )
+    assert response.status_code == 200, response.text
+
+
+def test_reading_pages_feed_and_not_found(server):
+    client, _, _ = server
+    headers = login(client)
+    publish(client, headers, slug="older", title="Older post", markdown="## 第一节\n\n中文正文。")
+    publish(client, headers, slug="newer", title="Newer post", markdown="Plain words here.")
+    older = client.get("/posts/older").text
+    assert 'href="/posts/newer"' in older and "约 1 分钟" in older
+    assert 'href="/posts/older"' in client.get("/posts/newer").text
+    assert "粤ICP备2026159168号" in older and "https://beian.miit.gov.cn/" in older
+    feed = client.get("/feed.xml")
+    assert feed.headers["content-type"].startswith("application/atom+xml")
+    assert feed.text.index("Newer post") < feed.text.index("Older post")
+    assert "/scut" in client.get("/sitemap.xml").text
+    missing = client.get("/no-such-page")
+    assert missing.status_code == 404 and "这个页面走丢了" in missing.text
+    assert client.get("/api/no-such-route").json() == {"detail": "Not Found"}
+    assert "这篇文章暂时不在这里" in client.get("/posts/missing").text
+
+
+def test_reading_stats_counts_cjk_and_words():
+    from app.content import reading_stats
+
+    stats = reading_stats("# 标题\n\n你好世界 hello world\n\n```py\nignored code\n```")
+    assert stats == {"words": 8, "minutes": 1}

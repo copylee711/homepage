@@ -1,2 +1,12 @@
 {% extends "base.html" %}
-{% block content %}<p class="label">404</p><h1 class="reading-title">这篇文章暂时不在这里。</h1><p class="reading-intro">文章不存在或已撤下。</p><a class="back-link" href="/posts">← 返回文章列表</a>{% endblock %}
+{% from "macros.html" import chars, grid %}
+{% block content %}
+<div class="page-heading not-found">{{ grid() }}<div class="container page-heading-content">
+  <p class="label reading-rise">Not found</p>
+  <h1 class="page-title" aria-label="404">{{ chars("404") }}</h1>
+  <p class="page-intro reading-rise" style="--delay:200ms">{{ heading }}<span>{{ detail }}</span></p>
+  <nav class="not-found-links reading-rise" style="--delay:320ms" aria-label="可以去的地方">
+    <a href="/">回到主页 <span aria-hidden="true">↗</span></a><a href="/posts">所有文章 <span aria-hidden="true">↗</span></a><a href="/scut">SCUT 通知 <span aria-hidden="true">↗</span></a>
+  </nav>
+</div></div>
+{% endblock %}

@@ -5,7 +5,7 @@ http://copylee.cn, http://www.copylee.cn {
     handle @private {
         respond "管理后台请通过 SSH 隧道访问" 403
     }
-    @backend path /api /api/* /posts /posts/* /sitemap.xml /robots.txt /content-assets/*
+    @backend path /api /api/* /posts /posts/* /sitemap.xml /feed.xml /robots.txt /content-assets/*
     handle @backend {
         reverse_proxy 127.0.0.1:8000
     }
@@ -31,6 +31,11 @@ http://copylee.cn, http://www.copylee.cn {
         root * /var/www/copylee
         header Cache-Control no-cache
         file_server
+    }
+    # 未匹配的页面由后端渲染与站点一致的 404 页面。
+    handle_errors 404 {
+        rewrite * /404
+        reverse_proxy 127.0.0.1:8000
     }
 }
 http://cloud.copylee.cn {

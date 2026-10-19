@@ -4,12 +4,21 @@
   box-sizing: border-box;
 }
 
+* { scrollbar-width:thin; scrollbar-color:var(--scrollbar-thumb) var(--scrollbar-track); }
+*::-webkit-scrollbar { width:8px; height:8px; }
+*::-webkit-scrollbar-track { background:var(--scrollbar-track); }
+*::-webkit-scrollbar-thumb { background:var(--scrollbar-thumb); border-radius:8px; }
+*::-webkit-scrollbar-thumb:hover { background:var(--scrollbar-hover); }
+*::-webkit-scrollbar-thumb:active { background:var(--scrollbar-active); }
+@media(forced-colors:active) { * { scrollbar-color:auto; } }
+
 html {
   scroll-behavior: smooth;
   scroll-padding-top: calc(var(--header-h) + 16px);
   -webkit-text-size-adjust: 100%;
   scrollbar-width: thin;
-  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scrollbar-gutter:stable;
 }
 
 ::selection {
@@ -71,6 +80,33 @@ a {
   margin-inline: auto;
   padding-inline: var(--gutter);
 }
+
+.page-heading { position:relative; isolation:isolate; padding:calc(var(--header-h) + 64px) 0 52px; background:linear-gradient(120deg,var(--bg) 35%,var(--bg-tint)); }
+.page-heading::after { content:''; position:absolute; inset:auto 0 0; height:45%; background:linear-gradient(transparent,var(--bg)); z-index:-1; }
+.page-heading-content { position:relative; }
+.page-title { margin:16px 0 22px; font-size:clamp(3.25rem,7vw,5.75rem); font-weight:800; line-height:1.08; letter-spacing:-.035em; overflow-wrap:anywhere; }
+.page-intro { max-width:660px; color:var(--text-2); font-size:clamp(1rem,2vw,1.25rem); }
+.page-intro span { display:block; margin-top:8px; font-size:14px; color:var(--muted); }
+.page-back { position:absolute; top:50px; right:var(--gutter); font-size:14px; color:var(--muted); transition:color .3s; }
+.page-back span { display:inline-block; transition:transform .4s var(--ease); }
+.page-back:hover { color:var(--accent); }
+.page-back:hover span { transform:translate(3px,-3px); }
+.page-grid { position:absolute; z-index:-1; top:var(--header-h); right:max(var(--gutter),calc((100vw - var(--content)) / 2)); width:min(45vw,480px); height:300px; background-image:linear-gradient(var(--grid-line) 1px,transparent 1px),linear-gradient(90deg,var(--grid-line) 1px,transparent 1px); background-size:48px 48px; mask-image:radial-gradient(ellipse,#000 10%,transparent 70%); animation:page-grid-in 1.5s var(--ease) both; }
+.page-grid span { position:absolute; top:96px; left:48%; width:8px; height:8px; border-radius:2px; background:var(--accent); box-shadow:0 0 0 5px var(--accent-soft); animation:page-node-pop .7s var(--ease) .9s backwards,page-node-pulse 3.6s ease-in-out 2s infinite; }
+/* 与首屏同款的引导线与第二节点：线条从节点处生长，节点弹出后呼吸 */
+.page-grid::before,.page-grid::after { content:''; position:absolute; pointer-events:none; }
+.page-grid::before { top:-20%; bottom:-10%; left:calc(48% + 4px); width:1px; background:linear-gradient(transparent,var(--accent) 35%,transparent 80%); opacity:.45; transform-origin:top; animation:page-grow-y 1.4s var(--ease) .5s backwards; }
+.page-grid::after { left:-10%; right:-10%; top:192px; height:1px; background:linear-gradient(90deg,transparent,var(--accent) 40%,transparent 85%); opacity:.28; transform-origin:left; animation:page-grow-x 1.4s var(--ease) .7s backwards; }
+.page-grid i { position:absolute; top:188px; left:20%; width:8px; height:8px; border-radius:2px; background:var(--accent); opacity:.4; box-shadow:0 0 0 5px var(--accent-soft); animation:page-node-pop .7s var(--ease) 1.1s backwards,page-node-pulse 3.6s ease-in-out 3.2s infinite; }
+@keyframes page-grid-in { from { opacity:0; transform:translateY(16px); } }
+@keyframes page-grow-y { from { transform:scaleY(0); } }
+@keyframes page-grow-x { from { transform:scaleX(0); } }
+@keyframes page-node-pop { from { opacity:0; transform:scale(0); } }
+@keyframes page-node-pulse { 50% { box-shadow:0 0 0 10px transparent; } }
+/* 标题逐字上浮，与首页字标入场同一节奏 */
+.page-title .char { display:inline-block; animation:page-char-up 1s var(--ease) both; animation-delay:calc(var(--c) * 45ms + 120ms); }
+@keyframes page-char-up { from { opacity:0; transform:translateY(60%) rotate(4deg); filter:blur(6px); } }
+@media(max-width:600px) { .page-heading { padding-top:calc(var(--header-h) + 40px); padding-bottom:32px; } .page-back { position:static; display:inline-block; margin-top:24px; } .page-grid { width:70vw; opacity:.6; } }
 
 .section {
   padding-block: clamp(48px, 7vw, 88px);

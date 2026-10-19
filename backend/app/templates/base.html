@@ -2,9 +2,12 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#fcfcfd">
   <title>{{ title }} · {{ site.name }}</title>
   <meta name="description" content="{{ description }}">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="canonical" href="{{ canonical }}">
+  <link rel="alternate" type="application/atom+xml" title="{{ site.name }} · Articles" href="/feed.xml">
   <meta property="og:title" content="{{ title }}"><meta property="og:description" content="{{ description }}">
   <meta property="og:url" content="{{ canonical }}"><meta property="og:site_name" content="{{ site.name }}">
   <meta property="og:type" content="{% if article is defined and article %}article{% else %}website{% endif %}">
@@ -15,15 +18,24 @@
   <script src="/content-assets/theme.js"></script>
 </head>
 <body data-slug="{{ article.slug if article is defined and article else '' }}" data-post-revision="{{ article.public_revision if article is defined and article else 0 }}">
-  <header class="reading-header container">
-    <a class="reading-brand" href="/">{{ site.name }}</a>
-    <nav aria-label="主导航"><a href="/">Home</a><a href="/posts" aria-current="page">Articles</a>
-      <a data-notes href="{{ site.notes }}" target="_blank" rel="noopener">Notes</a>
-      <button type="button" id="theme-toggle" aria-label="切换明暗主题">◐</button></nav>
+  <header class="reading-header">
+    <div class="container reading-bar">
+    <a class="reading-brand" href="/" aria-label="{{ site.name }} 主页">{% include "logo.html" %}<span data-site-name>{{ site.name }}</span></a>
+    <nav aria-label="主导航"><a class="home" href="/#top">Home</a><a href="/#projects">Projects</a><a href="/scut">SCUT</a><a{% if nav_active is not defined or nav_active == 'posts' %} class="active" aria-current="page"{% endif %} href="/posts">Articles</a>
+      <a class="service-link" data-notes href="{{ site.notes }}" target="_blank" rel="noopener">Notes</a><a class="service-link" data-cloud href="{{ site.cloud }}" target="_blank" rel="noopener">Cloud</a>
+      <button type="button" id="theme-toggle" aria-label="切换明暗主题"><svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg><svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15.3A9 9 0 0 1 8.7 4a9 9 0 1 0 11.3 11.3Z"/></svg></button></nav>
+    </div>
+    {% if article is defined and article %}<div class="reading-progress" aria-hidden="true"><span></span></div>{% endif %}
   </header>
-  <main class="reading-main container">{% block content %}{% endblock %}</main>
-  <footer class="reading-footer container"><span>© {{ year }} <span data-site-name>{{ site.name }}</span></span><a href="/">回到主页 ↑</a></footer>
+  <main id="top" class="reading-main">{% block content %}{% endblock %}</main>
+  <footer class="reading-footer"><div class="container">
+    <div class="reading-footer-main"><a class="reading-brand" href="#top" aria-label="回到顶部">{% include "logo.html" %}</a><nav aria-label="页脚导航"><a data-github href="https://github.com/{{ site.github }}" target="_blank" rel="noopener">GitHub</a><a href="/posts">Articles</a><a href="/feed.xml">RSS</a><a data-notes href="{{ site.notes }}" target="_blank" rel="noopener">Notes</a><a data-cloud href="{{ site.cloud }}" target="_blank" rel="noopener">Cloud</a><a class="to-top" href="#top">Back to top <span aria-hidden="true">↑</span></a></nav></div>
+    <div class="reading-legal"><span>© {{ year }} <span data-site-name>{{ site.name }}</span></span>
+      <span class="reading-beian" data-beian>{% if site.icp %}<a data-icp href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">{{ site.icp }}</a>{% endif %}{% if site.police.text %}<a data-police href="https://beian.mps.gov.cn/#/query/webSearch?code={{ site.police.code }}" target="_blank" rel="noopener">{{ site.police.text }}</a>{% endif %}</span></div>
+  </div></footer>
+  <a class="float-top" href="#top" aria-label="回到顶部"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 15V5m-5 5 5-5 5 5"/></svg></a>
   <script id="content-versions" type="application/json">{{ version | tojson }}</script>
+  <script src="/content-assets/reading.js" defer></script>
   <script src="/content-assets/live.js" defer></script>
 </body>
 </html>

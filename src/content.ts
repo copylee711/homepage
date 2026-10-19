@@ -38,7 +38,7 @@ async function refresh(force = false) {
       if (postData) { posts.value = postData.items; next.posts = postData.revision }
       versions = next
       contentStatus.error = ''; contentStatus.stale = false; failures = 0
-      if (site.value) document.title = site.value.name
+      if (site.value) document.title = location.pathname.replace(/\/$/, '') === '/scut' ? `SCUT · ${site.value.name}` : site.value.name
     } catch (error) {
       contentStatus.error = error instanceof Error ? error.message : '内容加载失败'
       contentStatus.stale = !!site.value

@@ -1,10 +1,13 @@
 {% extends "base.html" %}
+{% from "macros.html" import chars, grid %}
 {% block content %}
-<p class="label">Writing / Notes</p><h1 class="reading-title">Articles<span class="article-total">{{ posts | length }}</span></h1>
-<p class="reading-intro">一些想法，一些记录。</p>
-<div id="post-list" class="post-list">
+<div class="page-heading">{{ grid() }}<div class="container page-heading-content">
+<p class="label reading-rise">Writing / Notes</p><h1 class="page-title" aria-label="Articles">{{ chars("Articles") }}<span class="article-total" data-count="{{ posts | length }}">{{ posts | length }}</span></h1>
+<p class="page-intro reading-rise" style="--delay:160ms">一些想法，一些记录。<span>新文章发布后自动出现在这里，也可以通过 <a href="/feed.xml">RSS</a> 订阅。</span></p><a class="page-back reading-rise" style="--delay:240ms" href="/">返回主页 <span aria-hidden="true">↗</span></a>
+</div></div>
+<div class="container reading-list-content"><div id="post-list" class="post-list">
 {% for post in posts %}
-<a class="post-item" href="/posts/{{ post.slug }}"><time>{{ post.published_at[:10] }}</time><div><h2>{{ post.title }}</h2><p>{{ post.summary }}</p></div><span aria-hidden="true">↗</span></a>
-{% else %}<p class="empty-posts">暂时还没有发布文章。</p>{% endfor %}
-</div>
+<a class="post-item" data-reveal style="--reveal-delay:{{ [loop.index0, 5] | min * 70 }}ms" href="/posts/{{ post.slug }}"><time datetime="{{ post.published_at }}">{{ post.published_at[:10] }}</time><div><h2>{{ post.title }}</h2><p>{{ post.summary }}</p></div><span aria-hidden="true">↗</span></a>
+{% else %}<div class="empty-posts reading-rise" style="--delay:300ms"><span class="label">Coming soon</span><h2>一些想法，正在成形。</h2><p>暂时还没有发布文章。</p><a href="/#projects">先看看我的项目 <span aria-hidden="true">↗</span></a></div>{% endfor %}
+</div></div>
 {% endblock %}

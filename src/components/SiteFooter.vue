@@ -15,6 +15,7 @@ const year = new Date().getFullYear()
         <nav class="links" aria-label="页脚导航">
           <a :href="`https://github.com/${site.github}`" target="_blank" rel="noopener">GitHub</a>
           <a href="/posts">Articles</a>
+          <a href="/feed.xml">RSS</a>
           <a :href="site.notes" target="_blank" rel="noopener">Notes</a>
           <a :href="site.cloud" target="_blank" rel="noopener">Cloud</a>
           <a class="top" href="#top">Back to top <span aria-hidden="true">↑</span></a>

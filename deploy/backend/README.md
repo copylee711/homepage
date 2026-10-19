@@ -6,7 +6,7 @@
 
 ## 初次安装
 
-1. 安装官方 uv 0.10.4，将可执行文件放到 `/usr/local/bin/uv`。使用已安装 `/usr/bin/python3`，不安装另一套 Python。安装前核对官方发布包与校验值。
+1. 安装官方 uv 0.10.4，将可执行文件放到 `/usr/local/bin/uv`。服务器访问 GitHub Releases 与 files.pythonhosted.org 很慢：uv 在本机下载并核对 sha256 后上传；依赖按锁文件哈希从阿里云 PyPI 镜像安装。使用已安装 `/usr/bin/python3`，不安装另一套 Python。安装前核对官方发布包与校验值。
 2. 创建无交互登录的 `copylee` 服务用户，home 指向 `/var/lib/copylee`。创建数据目录（0711）、图片目录（0755）、`/opt/copylee-backend/releases`、`/etc/copylee`（0700）。代码 release 目录归 copylee，前端目录保留 caddy 读取权限。
 3. 将 `backend/` 上传到 `/opt/copylee-backend/releases/<UTC时间-完整commitSHA>/`，忽略 `.venv`、`.data`、`.env` 和缓存。创建 `/opt/copylee-backend/current` 链接到该 release。
 4. 从 `.env.example` 创建 `/etc/copylee/backend.env`，权限 0600。不要在其中保存明文管理员密码；GitHub Token 可选，Token 不输出日志。Origin 需与 SSH 隧道的访问地址相同。
@@ -17,7 +17,9 @@ set -a
 source /etc/copylee/backend.env
 set +a
 cd /opt/copylee-backend/current
-runuser -u copylee -- /usr/local/bin/uv sync --frozen --no-dev --python /usr/bin/python3
+runuser -u copylee -- /usr/local/bin/uv export --frozen --no-dev --no-emit-project -o requirements.lock.txt
+runuser -u copylee -- /usr/local/bin/uv venv --python /usr/bin/python3 .venv
+runuser -u copylee -- /usr/local/bin/uv pip install --python .venv/bin/python --require-hashes --index-url https://mirrors.aliyun.com/pypi/simple/ -r requirements.lock.txt
 runuser -u copylee -- .venv/bin/python -m app.cli migrate
 runuser -u copylee -- .venv/bin/python -m app.cli seed
 runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin
@@ -43,7 +45,7 @@ ssh -o ClearAllForwardings=yes -L 8000:127.0.0.1:8000 gz
 
 ## HTTPS 开启
 
-先确认域名 HTTPS 条件和证书签发，使用 HTTPS Caddy 示例，仅切换主页域名，cloud/dav 保留原有 HTTP 配置。环境设置：
+ICP 备案已完成（粤ICP备2026159168号）。开启前确认：阿里云安全组入方向放行 TCP 443；DNS 的 `@`、`www` 指向服务器。cloud、dav 子域名需先添加 A 记录，否则保留示例中的 `http://` 前缀。使用 HTTPS Caddy 示例，Caddy 自动签发证书。环境设置：
 
 ```bash
 COPYLEE_SITE_URL=https://copylee.cn

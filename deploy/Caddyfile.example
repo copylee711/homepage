@@ -1,10 +1,10 @@
-# HTTPS 就绪后的配置。当前 HTTP 阶段使用 Caddyfile.http.example。
+# 备案完成后的 HTTPS 配置（需安全组放行 443）。HTTP 阶段使用 Caddyfile.http.example。
 www.copylee.cn {
     redir https://copylee.cn{uri} permanent
 }
 copylee.cn {
     encode zstd gzip
-    @backend path /api /api/* /posts /posts/* /sitemap.xml /robots.txt /content-assets/*
+    @backend path /api /api/* /posts /posts/* /sitemap.xml /feed.xml /robots.txt /content-assets/*
     handle @backend {
         reverse_proxy 127.0.0.1:8000
     }
@@ -39,10 +39,16 @@ copylee.cn {
         header Cache-Control no-cache
         file_server
     }
+    # 未匹配的页面由后端渲染与站点一致的 404 页面。
+    handle_errors 404 {
+        rewrite * /404
+        reverse_proxy 127.0.0.1:8000
+    }
 }
-http://cloud.copylee.cn {
+# 子域名需要先在 DNS 添加 cloud、dav 的 A 记录，否则证书签发失败；未添加前保留 http:// 前缀。
+cloud.copylee.cn {
     reverse_proxy 127.0.0.1:8080
 }
-http://dav.copylee.cn {
+dav.copylee.cn {
     reverse_proxy 127.0.0.1:10080
 }

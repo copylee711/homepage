@@ -26,6 +26,10 @@
   --header-h: 64px;
 
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --scrollbar-thumb: var(--line-strong);
+  --scrollbar-track: transparent;
+  --scrollbar-hover: var(--muted);
+  --scrollbar-active: var(--accent);
 
   /* Outfit 只含拉丁字符，中文回退到系统字体 */
   --font: 'Outfit Variable', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'HarmonyOS Sans SC',

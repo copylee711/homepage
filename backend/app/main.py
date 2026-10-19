@@ -8,20 +8,24 @@ from pathlib import Path
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, select
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .auth import COOKIE, authenticate, current_session
 from .content import (
+    adjacent_posts,
     bump,
     get_article,
     public_article,
     public_site,
     published_posts,
+    reading_stats,
     require_content,
     save_site,
     summaries,
@@ -30,6 +34,7 @@ from .content import (
     versions,
 )
 from .database import make_engine
+from .feed import atom_feed
 from .github import sync_loop, sync_repos
 from .limits import JsonBodyLimit
 from .models import Administrator, Article, Passkey
@@ -52,6 +57,7 @@ from .settings import Settings
 
 HERE = Path(__file__).parent
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+PLAIN_404_PREFIXES = ("/api/", "/media/", "/content-assets/", "/assets/")
 Image.MAX_IMAGE_PIXELS = 20_000_000
 
 
@@ -101,7 +107,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         if request.url.path.startswith(("/api/", "/admin")):
             response.headers["Cache-Control"] = "no-store"
-        elif request.url.path.startswith(("/posts", "/sitemap", "/robots", "/content-assets/")):
+        elif request.url.path.startswith(("/posts", "/sitemap", "/robots", "/feed", "/content-assets/")):
             response.headers["Cache-Control"] = "no-cache"
         return response
 
@@ -112,6 +118,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(OperationalError)
     async def busy(_, exc):
         return JSONResponse({"detail": "数据库暂时不可用，请稍后重试"}, status_code=503)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def not_found(request: Request, exc: StarletteHTTPException):
+        # 页面请求的 404 返回与站点一致的页面；API 与静态资源保持 JSON/空响应。
+        if exc.status_code != 404 or request.url.path.startswith(PLAIN_404_PREFIXES):
+            return await http_exception_handler(request, exc)
+        try:
+            with Session(engine) as session:
+                context = page_context(
+                    session, request.url.path, "页面不存在", "这个页面不存在或已经移走"
+                )
+        except HTTPException:
+            return await http_exception_handler(request, exc)
+        context.update(heading="这个页面走丢了。", detail="地址可能有误，或内容已经移走。", nav_active="")
+        return templates.TemplateResponse(
+            request=request, name="404.html", context=context, status_code=404
+        )
 
     @app.get("/api/health")
     def health(session: Session = Depends(database)):
@@ -363,14 +386,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if exc.status_code != 404:
                 raise
             context = page_context(session, f"/posts/{slug}", "文章不存在", "文章不存在或已撤下")
+            context.update(heading="这篇文章暂时不在这里。", detail="文章不存在或已撤下。")
             return templates.TemplateResponse(
                 request=request, name="404.html", context=context, status_code=404
             )
         context = page_context(session, f"/posts/{slug}", article["title"], article["summary"])
         cover = article["cover"]
         cover_absolute = settings.site_url + cover if cover.startswith("/") else cover
+        newer, older = adjacent_posts(session, slug)
         context.update(
             article=article,
+            reading=reading_stats(article["markdown"]),
+            newer=newer,
+            older=older,
             cover_absolute=cover_absolute,
             structured={
                 "@context": "https://schema.org",
@@ -389,7 +417,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/sitemap.xml")
     def sitemap(session: Session = Depends(database)):
         root = Element("urlset", xmlns="http://www.sitemaps.org/schemas/sitemap/0.9")
-        for path, modified in [("/", None), ("/posts", None)] + [
+        for path, modified in [("/", None), ("/scut", None), ("/posts", None)] + [
             (f"/posts/{p['slug']}", p["updated_at"]) for p in published_posts(session)
         ]:
             entry = SubElement(root, "url")
@@ -400,6 +428,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             tostring(root, encoding="utf-8", xml_declaration=True), media_type="application/xml"
         )
 
+    @app.get("/feed.xml")
+    def feed(session: Session = Depends(database)):
+        body = atom_feed(public_site(session), published_posts(session)[:20], settings.site_url)
+        return Response(body, media_type="application/atom+xml; charset=utf-8")
+
     @app.get("/robots.txt", response_class=PlainTextResponse)
     def robots():
         return f"User-agent: *\nDisallow: /admin\nDisallow: /api/\nSitemap: {settings.site_url}/sitemap.xml\n"
@@ -407,6 +440,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # 开发/SSH 隧道时直连后端也能查看完整站点；生产静态资源由 Caddy 服务。
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
     app.mount("/content-assets", StaticFiles(directory=HERE / "static"), name="content-assets")
+    @app.get("/favicon.svg", include_in_schema=False)
+    def favicon():
+        icon = settings.static_dir / "favicon.svg"
+        if not icon.is_file():
+            raise HTTPException(404)
+        return FileResponse(icon, media_type="image/svg+xml")
+
     if (settings.static_dir / "assets").is_dir():
         app.mount("/assets", StaticFiles(directory=settings.static_dir / "assets"), name="assets")
 

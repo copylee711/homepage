@@ -16,7 +16,10 @@ cd "$next"
 set -a
 source /etc/copylee/backend.env
 set +a
-runuser -u copylee -- /usr/local/bin/uv sync --frozen --no-dev --python /usr/bin/python3
+# 服务器访问 files.pythonhosted.org 不稳定：按锁文件导出带哈希的依赖，从阿里云镜像安装。
+runuser -u copylee -- /usr/local/bin/uv export --frozen --no-dev --no-emit-project -o requirements.lock.txt >/dev/null
+runuser -u copylee -- /usr/local/bin/uv venv --python /usr/bin/python3 .venv
+runuser -u copylee -- env UV_HTTP_TIMEOUT=60 /usr/local/bin/uv pip install --python .venv/bin/python   --require-hashes --index-url "${COPYLEE_PIP_INDEX:-https://mirrors.aliyun.com/pypi/simple/}" -r requirements.lock.txt
 snapshot=$(runuser -u copylee -- "$next/.venv/bin/python" -m app.cli backup)
 printf 'Backup created: %s\n' "$snapshot"
 systemctl stop copylee-backend

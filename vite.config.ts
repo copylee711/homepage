@@ -11,6 +11,7 @@ export default defineConfig({
       '/posts': 'http://127.0.0.1:8000',
       '/content-assets': 'http://127.0.0.1:8000',
       '/sitemap.xml': 'http://127.0.0.1:8000',
+      '/feed.xml': 'http://127.0.0.1:8000',
       '/robots.txt': 'http://127.0.0.1:8000',
     },
   },

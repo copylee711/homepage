@@ -63,6 +63,6 @@ export const site = {
   hiddenRepos: ['homepage'] as string[],
 
   // 备案信息：留空则页脚不显示
-  icp: '',
+  icp: '粤ICP备2026159168号',
   police: { text: '', code: '' },
 }
