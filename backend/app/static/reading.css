@@ -124,6 +124,8 @@
 .reading-footer .to-top span { display:inline-block; transition:transform .4s var(--ease); }
 .reading-footer .to-top:hover span { transform:translateY(-3px); }
 .reading-legal { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px 24px; padding-bottom:28px; }
+.reading-admin { margin-left:14px; opacity:.55; transition:opacity .3s,color .3s; }
+.reading-footer .reading-admin:hover { opacity:1; color:var(--accent); }
 .reading-beian { display:flex; flex-wrap:wrap; gap:8px 20px; }
 .float-top { position:fixed; right:24px; bottom:24px; z-index:9; display:grid; place-items:center; width:44px; height:44px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--header-bg); color:var(--muted); -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px); opacity:0; visibility:hidden; transform:translateY(12px); transition:opacity .4s,transform .4s var(--ease),visibility .4s,color .2s,border-color .2s; }
 .float-top.shown { opacity:1; visibility:visible; transform:none; }

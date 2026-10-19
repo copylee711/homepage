@@ -23,7 +23,7 @@ const year = new Date().getFullYear()
       </div>
 
       <div class="legal">
-        <span>© {{ year }} {{ site.name }}</span>
+        <span>© {{ year }} {{ site.name }}<a class="admin" href="/admin" rel="nofollow">Admin</a></span>
         <span v-if="site.icp || site.police.text" class="beian">
           <a v-if="site.icp" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">
             {{ site.icp }}
@@ -107,6 +107,20 @@ const year = new Date().getFullYear()
   justify-content: space-between;
   gap: 8px 24px;
   padding-block: 0 28px;
+}
+
+.admin {
+  margin-left: 14px;
+  color: var(--faint);
+  opacity: 0.55;
+  transition:
+    opacity 0.3s ease,
+    color 0.3s ease;
+}
+
+.admin:hover {
+  opacity: 1;
+  color: var(--accent);
 }
 
 .beian {
