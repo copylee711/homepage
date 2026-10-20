@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Copy Lee WebDAV · 私有同步接口</title>
-<meta name="description" content="Copy Lee 私有云的 WebDAV 同步接口，仅供已授权账号在客户端中使用，不提供经营性服务。">
+<meta name="description" content="Copy Lee 私有云的 WebDAV 同步接口。">
 <meta name="robots" content="noindex">
 <style>
 :root { --bg:#fcfcfd; --tint:#eef2fb; --surface:#fff; --text:#111114; --text2:#4b5563; --muted:#6b7280; --faint:#9ca3af; --line:rgba(17,24,39,.08); --accent:#3b6ef5; --grid:rgba(59,110,245,.09); color-scheme:light; }
@@ -17,8 +17,7 @@ main { flex:1; display:grid; place-items:center; padding:48px 24px; }
 h1 { margin:10px 0 12px; font-size:clamp(2rem,6vw,3rem); line-height:1.1; letter-spacing:-.03em; }
 p { margin:0; color:var(--text2); }
 code { padding:2px 8px; border-radius:6px; background:var(--surface); border:1px solid var(--line); font-family:ui-monospace,Consolas,monospace; font-size:14px; }
-.notice { margin:24px 0 0; padding:18px 20px; border:1px solid var(--line); border-left:3px solid var(--accent); border-radius:12px; background:var(--surface); font-size:14px; }
-.notice strong { display:block; margin-bottom:6px; color:var(--text); }
+.note { margin-top:16px !important; color:var(--faint) !important; font-size:14px; }
 a { color:var(--accent); }
 footer { padding:28px 24px; text-align:center; color:var(--faint); font-size:13px; border-top:1px solid var(--line); }
 footer a { color:var(--muted); text-decoration:none; }
@@ -33,15 +32,12 @@ footer p { margin:4px 0; color:var(--faint); }
     <h1>Copy Lee WebDAV</h1>
     <p>这是 <a href="https://cloud.copylee.cn/">Copy Lee 私有云</a> 的 WebDAV 同步接口，供已授权账号在文件管理器或同步客户端中挂载使用，浏览器无法直接浏览文件。</p>
     <p style="margin-top:12px">客户端地址：<code>https://dav.copylee.cn/</code></p>
-    <div class="notice" role="note">
-      <strong>私有云声明</strong>
-      <p>本接口仅供站长本人及受邀亲友使用，账号由站长手动分配，不开放注册，不面向公众提供存储或分享服务，不收取任何费用，不属于经营性互联网信息服务。</p>
-    </div>
+    <p class="note">私有云，仅供本人及受邀亲友使用，不开放注册。</p>
   </div>
 </main>
 <footer>
   <p><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">粤ICP备2026159168号</a></p>
-  <p>© Copy Lee · 个人非经营性网站 · <a href="https://copylee.cn/">copylee.cn</a></p>
+  <p>© Copy Lee · <a href="https://copylee.cn/">copylee.cn</a></p>
 </footer>
 </body>
 </html>

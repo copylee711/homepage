@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Copy Lee Cloud · 个人私有云</title>
-<meta name="description" content="Copy Lee 的个人私有云盘，仅供本人及受邀亲友使用，不开放注册，不提供经营性服务。">
+<meta name="description" content="Copy Lee 的个人私有云盘。">
 <meta name="robots" content="noindex">
 <link rel="icon" href="/static/branding/favicon.svg" type="image/svg+xml">
 <style>
@@ -19,9 +19,7 @@ main { flex:1; display:grid; place-items:center; padding:48px 24px; }
 .label { margin:28px 0 0; color:var(--faint); font-size:12px; font-weight:600; letter-spacing:.2em; text-transform:uppercase; }
 h1 { margin:10px 0 12px; font-size:clamp(2.2rem,7vw,3.4rem); line-height:1.1; letter-spacing:-.03em; }
 .intro { margin:0; color:var(--text2); font-size:17px; }
-.notice { margin:28px 0 0; padding:18px 20px; border:1px solid var(--line); border-left:3px solid var(--accent); border-radius:12px; background:var(--surface); color:var(--text2); font-size:14px; }
-.notice strong { display:block; margin-bottom:6px; color:var(--text); }
-.notice ul { margin:0; padding-left:18px; }
+.note { margin:10px 0 0; color:var(--faint); font-size:14px; }
 .actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:32px; }
 .btn { display:inline-flex; align-items:center; gap:10px; padding:12px 24px; border-radius:10px; background:var(--surface); color:var(--text); text-decoration:none; font-weight:500; box-shadow:0 0 0 1px var(--line),0 4px 14px -6px rgba(17,24,39,.16); transition:transform .3s cubic-bezier(.2,.8,.2,1),box-shadow .3s; }
 .btn:hover { transform:translateY(-2px); }
@@ -40,15 +38,8 @@ footer p { margin:4px 0; }
     <svg class="mark" viewBox="0 0 340 280" fill="currentColor" aria-hidden="true"><path d="M255 0H140A137 137 0 0 0 140 274V224A87 87 0 0 1 140 50H205Z"/><path d="M160 80h48v144h122l-50 50H160Z"/></svg>
     <p class="label">Private cloud</p>
     <h1>Copy Lee Cloud</h1>
-    <p class="intro">站长个人使用的私有云盘，用于自己的文件存储、备份与多设备同步。</p>
-    <div class="notice" role="note">
-      <strong>私有云声明</strong>
-      <ul>
-        <li>本服务仅供站长本人及少量受邀亲友使用，账号由站长手动分配，<b>不开放注册</b>。</li>
-        <li>不面向公众提供存储、下载或分享服务，不收取任何费用，<b>不属于经营性互联网信息服务</b>。</li>
-        <li>不发布、不传播任何公开内容；如有问题请联系站长。</li>
-      </ul>
-    </div>
+    <p class="intro">个人文件存储、备份与多设备同步。</p>
+    <p class="note">私有云，仅供本人及受邀亲友使用，不开放注册。</p>
     <div class="actions">
       <a class="btn primary" href="/web/client/login">登录云盘 →</a>
       <a class="btn" href="https://copylee.cn/">返回主页</a>
@@ -57,7 +48,7 @@ footer p { margin:4px 0; }
 </main>
 <footer>
   <p><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">粤ICP备2026159168号</a></p>
-  <p>© Copy Lee · 个人非经营性网站 · <a href="https://copylee.cn/">copylee.cn</a></p>
+  <p>© Copy Lee · <a href="https://copylee.cn/">copylee.cn</a></p>
 </footer>
 </body>
 </html>
