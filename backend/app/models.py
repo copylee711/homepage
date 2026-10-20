@@ -96,3 +96,22 @@ class LoginAttempt(SQLModel, table=True):
     key: str = Field(primary_key=True)
     failures: int = 0
     window_start: float
+
+
+class Note(SQLModel, table=True):
+    __tablename__ = "note"
+    id: str = Field(primary_key=True)
+    slug: str = Field(unique=True, index=True)
+    title: str
+    summary: str = ""
+    category: str = ""
+    markdown: str
+    html: str
+    # github：从笔记仓库同步，内容以仓库为准；manual：后台直接编写。
+    source: str = "manual"
+    path: str | None = Field(default=None, unique=True)
+    sha: str = ""
+    visible: bool = True
+    revision: int = 1
+    created_at: str
+    updated_at: str

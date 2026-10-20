@@ -95,7 +95,7 @@ onBeforeUnmount(() => cancelAnimationFrame(frame))
         </p>
         <p class="intro rise" style="--i: 4">{{ site.intro }}</p>
         <div class="actions rise" style="--i: 5">
-          <a class="btn primary" :href="site.notes" target="_blank" rel="noopener">
+          <a class="btn primary" href="/notes">
             Explore Notes
             <AppIcon class="arrow" name="arrow" />
           </a>

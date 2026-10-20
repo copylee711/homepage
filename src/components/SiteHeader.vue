@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { site } from '../content'
 import { useTheme } from '../composables/useTheme'
 import AppIcon from './AppIcon.vue'
@@ -17,6 +17,24 @@ const sections = ['top', 'portals', 'projects']
 
 const scrolled = ref(false)
 const active = ref('top')
+const scroller = ref<HTMLElement>()
+const fadeStart = ref(false)
+const fadeEnd = ref(false)
+
+// 窄屏下导航横向滚动：两端渐隐提示，并让当前栏目保持可见。
+function updateEdges() {
+  const el = scroller.value
+  if (!el) return
+  fadeStart.value = el.scrollLeft > 4
+  fadeEnd.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 4
+}
+function revealActive() {
+  const el = scroller.value
+  const link = el?.querySelector<HTMLElement>('.active')
+  if (!el || !link || el.scrollWidth <= el.clientWidth) return
+  el.scrollTo({ left: link.offsetLeft - (el.clientWidth - link.offsetWidth) / 2, behavior: 'smooth' })
+}
+watch(active, () => nextTick(revealActive))
 
 const onScroll = () => {
   scrolled.value = window.scrollY > 8
@@ -32,8 +50,13 @@ const onScroll = () => {
 onMounted(() => {
   onScroll()
   window.addEventListener('scroll', onScroll, { passive: true })
+  window.addEventListener('resize', updateEdges, { passive: true })
+  nextTick(() => { updateEdges(); revealActive() })
 })
-onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', onScroll)
+  window.removeEventListener('resize', updateEdges)
+})
 </script>
 
 <template>
@@ -44,19 +67,21 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
         <span>{{ site.name }}</span>
       </a>
       <nav class="nav" aria-label="主导航">
+        <div ref="scroller" class="nav-scroll" :class="{ 'fade-start': fadeStart, 'fade-end': fadeEnd }" @scroll.passive="updateEdges">
         <a
           v-for="link in links"
           :key="link.id"
           :href="`${isScut ? '/' : ''}#${link.id}`"
-          :class="{ active: !isScut && active === link.id, home: link.id === 'top' }"
+          :class="{ active: !isScut && active === link.id }"
           :aria-current="!isScut && active === link.id ? 'true' : undefined"
         >
           {{ link.label }}
         </a>
         <a href="/scut" :class="{ active: isScut }" :aria-current="isScut ? 'page' : undefined">SCUT</a>
         <a href="/posts">Articles</a>
-        <a :href="site.notes" class="service-link" target="_blank" rel="noopener">Notes</a>
-        <a :href="site.cloud" class="service-link" target="_blank" rel="noopener">Cloud</a>
+        <a href="/notes">Notes</a>
+        <a :href="site.cloud" target="_blank" rel="noopener">Cloud</a>
+        </div>
         <button
           class="theme"
           type="button"
@@ -113,14 +138,46 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
 
 .nav {
   display: flex;
+  flex: 1;
   align-items: stretch;
-  gap: clamp(16px, 4vw, 40px);
+  justify-content: flex-end;
+  gap: clamp(8px, 2vw, 24px);
+  min-width: 0;
   height: 100%;
+  margin-left: 24px;
   font-size: 14px;
   color: var(--muted);
 }
 
+/* 栏目多于屏宽时横向滑动，滚动条隐藏，两端渐隐 */
+.nav-scroll {
+  display: flex;
+  align-items: stretch;
+  gap: clamp(16px, 4vw, 40px);
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.nav-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.nav-scroll.fade-end {
+  mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+}
+
+.nav-scroll.fade-start {
+  mask-image: linear-gradient(90deg, transparent, #000 28px);
+}
+
+.nav-scroll.fade-start.fade-end {
+  mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
+
 .nav a {
+  flex: none;
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -148,6 +205,7 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
 }
 
 .theme {
+  flex: none;
   display: inline-grid;
   place-items: center;
   align-self: center;
@@ -175,23 +233,13 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
   height: 20px;
 }
 
-@media (max-width: 479px) {
-  .nav { gap:12px; }
-  .brand { font-size:16px; }
-  .brand span { display:none; }
-  .nav .home {
-    display: none;
-  }
-}
-
 @media (max-width: 760px) {
-  .nav .service-link { display:none; }
-  .nav { gap:16px; }
+  .nav-scroll { gap: 20px; }
 }
 
-@media (max-width: 379px) {
-  .brand span {
-    display: none;
-  }
+@media (max-width: 479px) {
+  .nav { margin-left: 12px; }
+  .brand { font-size: 16px; }
+  .brand span { display: none; }
 }
 </style>

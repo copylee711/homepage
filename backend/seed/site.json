@@ -9,7 +9,23 @@
   "intro": "A personal space for notes, projects, and cloud services.",
   "github": "copylee711",
   "cloud": "https://cloud.copylee.cn",
-  "notes": "https://cedar-tomato-027.notion.site/Notes-3f477fc5d27680a6b492d9d24a87e714",
+  "socials": [
+    {
+      "platform": "github",
+      "url": "https://github.com/copylee711",
+      "visible": true
+    },
+    {
+      "platform": "linkedin",
+      "url": "https://www.linkedin.com/in/fuzhi-lee-8517b9441",
+      "visible": true
+    },
+    {
+      "platform": "instagram",
+      "url": "",
+      "visible": false
+    }
+  ],
   "portals": [
     {
       "title": "Cloud",
@@ -20,10 +36,10 @@
     },
     {
       "title": "Notes",
-      "description": "学习过程中留下的记录。",
-      "href": "https://cedar-tomato-027.notion.site/Notes-3f477fc5d27680a6b492d9d24a87e714",
+      "description": "学习过程中留下的 Markdown 笔记。",
+      "href": "/notes",
       "icon": "note",
-      "hint": "Notion"
+      "hint": "copylee.cn/notes"
     },
     {
       "title": "GitHub",

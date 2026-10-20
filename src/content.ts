@@ -1,11 +1,12 @@
 import { computed, reactive, ref } from 'vue'
-import type { SiteContent, PostSummary, Repo } from './types'
+import type { NoteSummary, SiteContent, PostSummary, Repo } from './types'
 
 export const site = ref<SiteContent>()
 export const repos = ref<Repo[]>([])
 export const posts = ref<PostSummary[]>([])
+export const notes = ref<NoteSummary[]>([])
 export const contentStatus = reactive({ loading: true, error: '', stale: false })
-let versions = { site: 0, repos: 0, posts: 0 }
+let versions = { site: 0, repos: 0, posts: 0, notes: 0 }
 let timer: ReturnType<typeof setTimeout> | undefined
 let failures = 0
 let active: Promise<void> | undefined
@@ -28,14 +29,16 @@ async function refresh(force = false) {
   active = (async () => {
     try {
       const next = await fetchJson<typeof versions>('/api/version')
-      const [siteData, repoData, postData] = await Promise.all([
+      const [siteData, repoData, postData, noteData] = await Promise.all([
         force || next.site !== versions.site ? fetchJson<{ site: SiteContent; revision: number }>('/api/site') : null,
         force || next.repos !== versions.repos ? fetchJson<{ items: Repo[]; revision: number }>('/api/repos') : null,
         force || next.posts !== versions.posts ? fetchJson<{ items: PostSummary[]; revision: number }>('/api/posts') : null,
+        force || next.notes !== versions.notes ? fetchJson<{ items: NoteSummary[]; revision: number }>('/api/notes') : null,
       ])
       if (siteData) { site.value = siteData.site; next.site = siteData.revision }
       if (repoData) { repos.value = repoData.items; next.repos = repoData.revision }
       if (postData) { posts.value = postData.items; next.posts = postData.revision }
+      if (noteData) { notes.value = noteData.items; next.notes = noteData.revision }
       versions = next
       contentStatus.error = ''; contentStatus.stale = false; failures = 0
       if (site.value) document.title = location.pathname.replace(/\/$/, '') === '/scut' ? `SCUT · ${site.value.name}` : site.value.name

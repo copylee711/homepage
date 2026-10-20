@@ -2,11 +2,13 @@
 import { onBeforeUnmount, onMounted } from 'vue'
 import { contentStatus, ready, reloadContent, startContent } from './content'
 import AdminPage from './components/AdminPage.vue'
+import BootScreen from './components/BootScreen.vue'
 import HeroSection from './components/HeroSection.vue'
 import PortalGrid from './components/PortalGrid.vue'
 import RepoSection from './components/RepoSection.vue'
 import SiteFooter from './components/SiteFooter.vue'
 import SiteHeader from './components/SiteHeader.vue'
+import NoteSection from './components/NoteSection.vue'
 import PostSection from './components/PostSection.vue'
 import ScutSection from './components/ScutSection.vue'
 import { startScut } from './scut'
@@ -30,23 +32,20 @@ onBeforeUnmount(() => { stop?.(); stopScut?.() })
     <PortalGrid />
     <ScutSection />
     <RepoSection />
+    <NoteSection />
     <PostSection />
     </template>
   </main>
   <SiteFooter />
   </template>
-  <main v-else class="content-loading container" aria-live="polite">
-    <p class="label">Copy Lee</p><h1>{{ contentStatus.loading ? '正在加载内容…' : '内容暂时不可用' }}</h1>
-    <p v-if="contentStatus.error">{{ contentStatus.error }}</p>
-    <button v-if="!contentStatus.loading" @click="reloadContent">重新加载</button>
-  </main>
+  <Transition name="boot"><BootScreen v-if="!isAdmin && !ready" /></Transition>
 </template>
 
 <style scoped>
-.content-loading { padding-top:25vh; min-height:100vh; }
-.content-loading h1 { font-size:2.4rem; margin:20px 0; }
-.content-loading p { color:var(--muted); }
-.content-loading button,.content-banner button { color:var(--accent); border:0; background:none; cursor:pointer; font:inherit; margin-top:16px; }
+.content-banner button { color:var(--accent); border:0; background:none; cursor:pointer; font:inherit; }
+/* 内容就绪后加载页淡出并轻微放大，露出下方首页 */
+.boot-leave-active { transition:opacity .6s var(--ease),transform .6s var(--ease); }
+.boot-leave-to { opacity:0; transform:scale(1.04); }
 .content-banner { position:fixed; top:64px; z-index:11; width:100%; padding:8px 24px; margin:0; background:var(--surface); border-bottom:1px solid var(--line); font-size:13px; }
 .content-banner button { margin:0 0 0 12px; }
 </style>

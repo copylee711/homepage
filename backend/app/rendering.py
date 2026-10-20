@@ -1,7 +1,14 @@
 import nh3
 from markdown_it import MarkdownIt
+from mdit_py_plugins.dollarmath import dollarmath_plugin
 
-markdown = MarkdownIt("commonmark", {"html": False}).enable("table")
+# 公式保留 TeX 原文，由前端 KaTeX 在浏览器渲染。
+markdown = (
+    # 允许 Markdown 中的 HTML（如 <br>、<sup>），输出统一经 nh3 白名单清洗。
+    MarkdownIt("commonmark", {"html": True})
+    .enable(["table", "strikethrough"])
+    .use(dollarmath_plugin, double_inline=True)
+)
 
 
 def render_markdown(source: str) -> str:
@@ -33,6 +40,15 @@ def render_markdown(source: str) -> str:
             "tr",
             "th",
             "td",
+            "s",
+            "sub",
+            "sup",
+            "mark",
+            "kbd",
+            "details",
+            "summary",
+            "span",
+            "div",
         },
         attributes={
             "a": {"href", "title"},
@@ -40,6 +56,7 @@ def render_markdown(source: str) -> str:
             "ol": {"start"},
             "code": {"class"},
         },
+        allowed_classes={"span": {"math", "inline"}, "div": {"math", "block"}},
         url_schemes={"http", "https", "mailto"},
         link_rel="noopener noreferrer",
     )

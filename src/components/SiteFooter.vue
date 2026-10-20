@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { site } from '../content'
 import LogoMark from './LogoMark.vue'
+import SocialLinks from './SocialLinks.vue'
 
 const year = new Date().getFullYear()
 </script>
@@ -15,12 +16,14 @@ const year = new Date().getFullYear()
         <nav class="links" aria-label="页脚导航">
           <a :href="`https://github.com/${site.github}`" target="_blank" rel="noopener">GitHub</a>
           <a href="/posts">Articles</a>
+          <a href="/notes">Notes</a>
           <a href="/feed.xml">RSS</a>
-          <a :href="site.notes" target="_blank" rel="noopener">Notes</a>
           <a :href="site.cloud" target="_blank" rel="noopener">Cloud</a>
           <a class="top" href="#top">Back to top <span aria-hidden="true">↑</span></a>
         </nav>
       </div>
+
+      <SocialLinks :socials="site.socials ?? []" />
 
       <div class="legal">
         <span>© {{ year }} {{ site.name }}<a class="admin" href="/admin" rel="nofollow">Admin</a></span>

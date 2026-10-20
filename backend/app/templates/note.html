@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% from "macros.html" import grid %}
+{% block content %}
+<div class="page-heading article-heading">{{ grid() }}<div class="container article-heading-content">
+  <a class="back-link reading-rise" href="/notes"><span aria-hidden="true">←</span> 所有笔记</a>
+  <p class="article-meta reading-rise" style="--delay:80ms">{% if note.category %}<span>{{ note.category }}</span>{% endif %}<span>更新于 <time datetime="{{ note.updated_at }}">{{ note.updated_at[:10] }}</time></span><span>约 {{ reading.minutes }} 分钟</span></p>
+  <h1 class="reading-title reading-rise" style="--delay:140ms">{{ note.title }}</h1>
+</div></div>
+<div class="container reading-article">
+  <div class="article-body reading-rise" style="--delay:260ms"><article>
+    <div class="prose">{{ body | safe }}</div>
+    <p class="article-end" aria-hidden="true"><span></span></p>
+  </article>
+  {% if prev_note or next_note %}<nav class="article-pager" aria-label="相邻笔记">
+    {% if prev_note %}<a class="older" href="/notes/{{ prev_note.slug }}"><span class="label">Previous</span><strong>{{ prev_note.title }}</strong></a>{% else %}<span></span>{% endif %}
+    {% if next_note %}<a class="newer" href="/notes/{{ next_note.slug }}"><span class="label">Next</span><strong>{{ next_note.title }}</strong></a>{% endif %}
+  </nav>{% endif %}
+  </div>
+  <aside class="article-toc" aria-label="笔记目录" hidden><p class="label">Contents</p><ol></ol></aside>
+</div>
+{% endblock %}

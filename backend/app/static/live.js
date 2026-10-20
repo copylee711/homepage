@@ -30,7 +30,6 @@
       if (next.site !== versions.site) {
         const {site} = await json('/api/site');
         document.querySelectorAll('[data-site-name]').forEach(el => el.textContent=site.name);
-        document.querySelectorAll('[data-notes]').forEach(el => el.href=site.notes);
         document.querySelectorAll('[data-cloud]').forEach(el => el.href=site.cloud);
         document.querySelectorAll('[data-github]').forEach(el => el.href='https://github.com/'+site.github);
         const beian = document.querySelector('[data-beian]');

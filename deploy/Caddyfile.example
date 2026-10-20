@@ -4,7 +4,7 @@ www.copylee.cn {
 }
 copylee.cn {
     encode zstd gzip
-    @backend path /api /api/* /posts /posts/* /sitemap.xml /feed.xml /robots.txt /content-assets/*
+    @backend path /api /api/* /posts /posts/* /notes /notes/* /sitemap.xml /feed.xml /robots.txt /content-assets/*
     handle @backend {
         reverse_proxy 127.0.0.1:8000
     }

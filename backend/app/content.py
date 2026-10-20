@@ -8,6 +8,16 @@ from sqlmodel import Session, select
 from .models import Article, Content
 from .schemas import Site
 
+NOTES_DEFAULTS = {
+    "repo": "copylee711/notes",
+    "branch": "master",
+    "autoPublish": True,
+    "exclude": [".*", "docs", "node_modules", "README.md"],
+    "last_commit": "",
+    "last_success": None,
+    "last_error": "",
+}
+
 
 def timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -25,12 +35,15 @@ def bump(session: Session, key: str):
 
 
 def versions(session: Session) -> dict:
-    return {key: require_content(session, key).revision for key in ("site", "repos", "posts")}
+    return {
+        key: require_content(session, key).revision for key in ("site", "repos", "posts", "notes")
+    }
 
 
 def public_site(session: Session) -> dict:
     value = dict(require_content(session, "site").value)
     value["portals"] = [p for p in value["portals"] if p.get("visible", True)]
+    value["socials"] = [s for s in value.get("socials", []) if s.get("visible") and s.get("url")]
     return value
 
 
@@ -45,6 +58,7 @@ def initialize(session: Session, site: dict, repos: list) -> bool:
             {"items": repos, "github": site["github"], "last_success": None, "last_error": ""},
         ),
         ("posts", {}),
+        ("notes", dict(NOTES_DEFAULTS)),
     ):
         session.add(Content(key=key, value=value))
     session.commit()

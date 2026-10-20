@@ -14,7 +14,7 @@
   // 列表与相邻文章卡片：网格高光跟随指针。
   document.addEventListener('pointermove', event => {
     if (event.pointerType === 'touch') return;
-    const card = event.target.closest?.('.post-item,.article-pager a,.not-found-links a');
+    const card = event.target.closest?.('.post-item,.note-card,.article-pager a,.not-found-links a');
     if (!card) return;
     const rect = card.getBoundingClientRect();
     card.style.setProperty('--mx', `${event.clientX - rect.left}px`);
@@ -38,6 +38,50 @@
   addEventListener('resize', onScroll, { passive: true });
   onScroll();
 
+  // 移动端导航可横向滚动：把当前栏目滚到可见位置。
+  const navScroll = document.querySelector('.nav-scroll');
+  const current = navScroll?.querySelector('.active');
+  if (navScroll && current && navScroll.scrollWidth > navScroll.clientWidth) {
+    navScroll.scrollLeft = current.offsetLeft - (navScroll.clientWidth - current.offsetWidth) / 2;
+  }
+  const edges = () => {
+    if (!navScroll) return;
+    navScroll.classList.toggle('fade-start', navScroll.scrollLeft > 4);
+    navScroll.classList.toggle('fade-end', navScroll.scrollLeft + navScroll.clientWidth < navScroll.scrollWidth - 4);
+  };
+  navScroll?.addEventListener('scroll', edges, { passive: true });
+  addEventListener('resize', edges, { passive: true });
+  edges();
+
+  // 笔记列表：本地搜索与分类筛选。
+  const query = document.getElementById('notes-query');
+  const chips = [...document.querySelectorAll('.notes-chips button')];
+  if (query || chips.length) {
+    let category = '';
+    const filter = () => {
+      const words = (query?.value ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+      let shown = 0;
+      for (const group of document.querySelectorAll('.note-group')) {
+        let visible = 0;
+        const groupMatch = !category || group.dataset.group === category;
+        for (const card of group.querySelectorAll('[data-note]')) {
+          const match = groupMatch && words.every(word => card.dataset.search.includes(word));
+          card.hidden = !match;
+          if (match) { visible++; card.classList.add('is-visible'); }
+        }
+        group.hidden = !visible;
+        shown += visible;
+      }
+      document.querySelector('.notes-empty').hidden = shown > 0;
+    };
+    query?.addEventListener('input', filter);
+    for (const chip of chips) chip.addEventListener('click', () => {
+      category = chip.dataset.category;
+      for (const other of chips) other.classList.toggle('active', other === chip);
+      filter();
+    });
+  }
+
   const prose = document.querySelector('.prose');
   if (!prose) return;
 
@@ -50,7 +94,10 @@
     used.add(id);
     return id;
   };
-  const headings = [...prose.querySelectorAll('h2,h3')];
+  // 笔记常用一级标题分节，目录按正文中实际出现的最高两级生成。
+  const all = [...prose.querySelectorAll('h1,h2,h3')];
+  const top = Math.min(...all.map(h => Number(h.tagName[1])));
+  const headings = all.filter(h => Number(h.tagName[1]) <= top + 1);
   for (const heading of headings) {
     heading.dataset.title = heading.textContent.trim();
     heading.id = slug(heading.dataset.title);
@@ -65,7 +112,7 @@
     const links = new Map();
     for (const heading of headings) {
       const item = document.createElement('li'), link = document.createElement('a');
-      item.className = heading.tagName === 'H3' ? 'sub' : '';
+      item.className = Number(heading.tagName[1]) > top ? 'sub' : '';
       link.href = `#${heading.id}`; link.textContent = heading.dataset.title;
       item.append(link); list.append(item); links.set(heading, link);
     }

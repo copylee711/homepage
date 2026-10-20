@@ -5,7 +5,7 @@ http://copylee.cn, http://www.copylee.cn {
     handle @private {
         respond "管理后台请通过 SSH 隧道访问" 403
     }
-    @backend path /api /api/* /posts /posts/* /sitemap.xml /feed.xml /robots.txt /content-assets/*
+    @backend path /api /api/* /posts /posts/* /notes /notes/* /sitemap.xml /feed.xml /robots.txt /content-assets/*
     handle @backend {
         reverse_proxy 127.0.0.1:8000
     }

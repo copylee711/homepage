@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import secrets
 import warnings
 from contextlib import asynccontextmanager, suppress
@@ -37,12 +38,26 @@ from .database import make_engine
 from .feed import atom_feed
 from .github import sync_loop, sync_repos
 from .limits import JsonBodyLimit
-from .models import Administrator, Article, Passkey
+from .models import Administrator, Article, Note, Passkey
+from .notes import (
+    admin_view,
+    bump_notes,
+    get_note,
+    public_note,
+    public_notes,
+    save_manual,
+    sync_notes,
+    update_config,
+)
+from .notes import sync_loop as notes_sync_loop
 from .rendering import render_markdown
 from .schemas import (
     ArticleDraft,
     ArticleWrite,
     Login,
+    NotesConfig,
+    NoteVisibility,
+    NoteWrite,
     PasskeyResponse,
     PasskeySetup,
     Preview,
@@ -69,8 +84,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app):
         task = asyncio.create_task(sync_loop(app)) if settings.sync_enabled else None
         scut_task = asyncio.create_task(scut_sync_loop(app)) if settings.scut_sync_enabled else None
+        notes_task = asyncio.create_task(notes_sync_loop(app)) if settings.sync_enabled else None
         yield
-        for pending in (task, scut_task):
+        for pending in (task, scut_task, notes_task):
             if not pending:
                 continue
             pending.cancel()
@@ -90,7 +106,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.engine = engine
     app.state.sync_lock = asyncio.Lock()
     app.state.scut_lock = asyncio.Lock()
+    app.state.notes_lock = asyncio.Lock()
     templates = Jinja2Templates(directory=HERE / "templates")
+    templates.env.globals["social_icons"] = json.loads(
+        (HERE / "static/social-icons.json").read_text(encoding="utf-8")
+    )["icons"]
 
     def database(request: Request):
         with Session(request.app.state.engine) as session:
@@ -107,7 +127,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         if request.url.path.startswith(("/api/", "/admin")):
             response.headers["Cache-Control"] = "no-store"
-        elif request.url.path.startswith(("/posts", "/sitemap", "/robots", "/feed", "/content-assets/")):
+        elif request.url.path.startswith(("/posts", "/notes", "/sitemap", "/robots", "/feed", "/content-assets/")):
             response.headers["Cache-Control"] = "no-cache"
         return response
 
@@ -153,6 +173,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def repos(session: Session = Depends(database)):
         row = require_content(session, "repos")
         return {"items": row.value["items"], "revision": row.revision}
+
+    @app.get("/api/notes")
+    def notes(session: Session = Depends(database)):
+        row = require_content(session, "notes")
+        return {"items": public_notes(session), "revision": row.revision}
 
     @app.get("/api/version")
     def version(session: Session = Depends(database)):
@@ -321,6 +346,65 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session.commit()
         return {"revision": body.revision + 1}
 
+    @app.get("/api/admin/notes")
+    def admin_notes(session: Session = Depends(authorized)):
+        rows = session.exec(select(Note)).all()
+        items = sorted(rows, key=lambda n: (n.source, n.category, n.title.lower()))
+        config = require_content(session, "notes").value
+        return {"items": [admin_view(n) for n in items], "config": config}
+
+    @app.put("/api/admin/notes/config")
+    def admin_notes_config(body: NotesConfig, session: Session = Depends(authorized)):
+        previous = require_content(session, "notes").value
+        changed = (body.repo, body.branch, body.exclude) != (
+            previous.get("repo"), previous.get("branch"), previous.get("exclude")
+        )
+        # 仓库、分支或排除规则变化后，下一次同步重新下载完整内容。
+        update_config(session, **body.model_dump(), **({"last_commit": ""} if changed else {}))
+        session.commit()
+        return require_content(session, "notes").value
+
+    @app.post("/api/admin/notes/sync")
+    async def admin_notes_sync(request: Request, session: Session = Depends(authorized)):
+        return await sync_notes(request.app, force=True)
+
+    @app.post("/api/admin/notes", status_code=201)
+    def create_note(body: NoteWrite, session: Session = Depends(authorized)):
+        return admin_view(save_manual(session, None, body), full=True)
+
+    @app.get("/api/admin/notes/{note_id}")
+    def admin_note(note_id: str, session: Session = Depends(authorized)):
+        return admin_view(get_note(session, note_id), full=True)
+
+    @app.put("/api/admin/notes/{note_id}")
+    def save_note(note_id: str, body: NoteWrite, session: Session = Depends(authorized)):
+        return admin_view(save_manual(session, get_note(session, note_id), body), full=True)
+
+    @app.post("/api/admin/notes/{note_id}/visibility")
+    def note_visibility(
+        note_id: str, body: NoteVisibility, session: Session = Depends(authorized)
+    ):
+        note = get_note(session, note_id)
+        if note.revision != body.revision:
+            raise HTTPException(409, "笔记已被修改，请重新加载")
+        note.visible, note.revision = body.visible, note.revision + 1
+        session.add(note)
+        bump_notes(session)
+        session.commit()
+        return admin_view(note)
+
+    @app.post("/api/admin/notes/{note_id}/remove")
+    def remove_note(note_id: str, body: Revision, session: Session = Depends(authorized)):
+        note = get_note(session, note_id)
+        if note.source != "manual":
+            raise HTTPException(409, "仓库笔记请在 GitHub 删除，或在这里隐藏")
+        if note.revision != body.revision:
+            raise HTTPException(409, "笔记已被修改，请重新加载")
+        session.delete(note)
+        bump_notes(session)
+        session.commit()
+        return {"ok": True}
+
     @app.post("/api/admin/preview")
     def preview(body: Preview, session: Session = Depends(authorized)):
         return {"html": render_markdown(body.markdown)}
@@ -369,6 +453,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "canonical": settings.site_url + path,
             "version": versions(session),
             "css_urls": css_urls(settings.static_dir),
+            "math_assets": math_assets(settings.static_dir),
             "year": timestamp()[:4],
         }
 
@@ -397,6 +482,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         context.update(
             article=article,
             reading=reading_stats(article["markdown"]),
+            math='class="math' in article["html"],
             newer=newer,
             older=older,
             cover_absolute=cover_absolute,
@@ -414,11 +500,50 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return templates.TemplateResponse(request=request, name="article.html", context=context)
 
+    @app.get("/notes", response_class=HTMLResponse)
+    def note_list(request: Request, session: Session = Depends(database)):
+        context = page_context(session, "/notes", "Notes", "学习过程中留下的 Markdown 笔记")
+        items = public_notes(session)
+        groups: dict[str, list] = {}
+        for item in items:
+            groups.setdefault(item["category"] or "General", []).append(item)
+        context.update(notes=items, groups=groups, nav_active="notes")
+        return templates.TemplateResponse(request=request, name="notes.html", context=context)
+
+    @app.get("/notes/{slug}", response_class=HTMLResponse)
+    def note_page(slug: str, request: Request, session: Session = Depends(database)):
+        try:
+            note = public_note(session, slug)
+        except HTTPException:
+            context = page_context(session, f"/notes/{slug}", "笔记不存在", "笔记不存在或未公开")
+            context.update(
+                heading="这篇笔记暂时不在这里。", detail="笔记不存在或未公开。", nav_active="notes"
+            )
+            return templates.TemplateResponse(
+                request=request, name="404.html", context=context, status_code=404
+            )
+        context = page_context(session, f"/notes/{slug}", note.title, note.summary or note.title)
+        siblings = [n for n in public_notes(session) if n["category"] == note.category]
+        index = next(i for i, n in enumerate(siblings) if n["slug"] == slug)
+        context.update(
+            note=note,
+            # 页面标题已显示笔记名，去掉正文开头重复的一级标题。
+            body=re.sub(r"^\s*<h1>.*?</h1>\s*", "", note.html, count=1, flags=re.S),
+            nav_active="notes",
+            reading=reading_stats(note.markdown),
+            prev_note=siblings[index - 1] if index > 0 else None,
+            next_note=siblings[index + 1] if index + 1 < len(siblings) else None,
+            math='class="math' in note.html,
+        )
+        return templates.TemplateResponse(request=request, name="note.html", context=context)
+
     @app.get("/sitemap.xml")
     def sitemap(session: Session = Depends(database)):
         root = Element("urlset", xmlns="http://www.sitemaps.org/schemas/sitemap/0.9")
         for path, modified in [("/", None), ("/scut", None), ("/posts", None)] + [
             (f"/posts/{p['slug']}", p["updated_at"]) for p in published_posts(session)
+        ] + [("/notes", None)] + [
+            (f"/notes/{n['slug']}", n["updated_at"]) for n in public_notes(session)
         ]:
             entry = SubElement(root, "url")
             SubElement(entry, "loc").text = settings.site_url + path
@@ -466,10 +591,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
-def css_urls(static_dir: Path) -> list[str]:
+def read_manifest(static_dir: Path) -> dict:
     try:
-        manifest = json.loads((static_dir / ".vite/manifest.json").read_text(encoding="utf-8"))
-        entry = next(item for item in manifest.values() if item.get("isEntry"))
-        return ["/" + name for name in entry.get("css", [])]
-    except (OSError, ValueError, StopIteration):
-        return []
+        return json.loads((static_dir / ".vite/manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def css_urls(static_dir: Path) -> list[str]:
+    entry = read_manifest(static_dir).get("index.html", {})
+    return ["/" + name for name in entry.get("css", [])]
+
+
+def math_assets(static_dir: Path) -> dict:
+    """KaTeX 单独打包，仅在含公式的页面加载。"""
+    entry = read_manifest(static_dir).get("src/math.ts")
+    if not entry:
+        return {}
+    return {"js": "/" + entry["file"], "css": ["/" + name for name in entry.get("css", [])]}
