@@ -34,6 +34,7 @@ MAX_NOTE_BYTES = 500_000
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 HTML_IMG = re.compile(r"<img\b([^>]*?)/?>(?:\s*</img>)?", re.I)
 LINK = re.compile(r'(!?)\[([^\]\n]*)\]\(\s*<?([^)\s>]+)>?((?:\s+"[^"\n]*")?)\s*\)')
+TOC_MARKER = re.compile(r"^[ \t]*\[toc\][ \t]*$\n?", re.I | re.M)
 SYNC_INTERVAL = 1800
 
 
@@ -118,7 +119,9 @@ def read_archive(data: bytes, patterns: list[str]) -> tuple[dict[str, str], dict
             extension = posixpath.splitext(path)[1].lower()
             if extension == ".md" and member.size <= MAX_NOTE_BYTES:
                 content = archive.extractfile(member).read().decode("utf-8", "replace")
-                notes[path] = html_images(content.lstrip("﻿"))
+                # Typora 的 [toc] 标记由页面目录代替。
+                content = TOC_MARKER.sub("", content.lstrip("\ufeff"))
+                notes[path] = html_images(content)
             elif extension in IMAGE_EXTENSIONS and member.size <= MAX_IMAGE_BYTES:
                 images[path] = archive.extractfile(member).read()
     return notes, images

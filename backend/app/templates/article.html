@@ -6,6 +6,7 @@
   <p class="article-meta reading-rise" style="--delay:80ms"><time datetime="{{ article.published_at }}">{{ article.published_at[:10] }}</time><span>约 {{ reading.minutes }} 分钟</span><span>{{ reading.words }} 字</span></p>
   <h1 class="reading-title reading-rise" style="--delay:140ms">{{ article.title }}</h1>
   {% if article.summary %}<p class="reading-intro reading-rise" style="--delay:220ms">{{ article.summary }}</p>{% endif %}
+  <div class="reading-actions reading-rise" style="--delay:260ms"><button type="button" class="fav-button" data-kind="post" data-slug="{{ article.slug }}" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.9l-5.2 2.8 1-5.9-4.3-4.1 5.9-.8z"/></svg><span>收藏</span></button></div>
 </div></div>
 <div class="container reading-article">
   <div id="article-content" class="article-body reading-rise" style="--delay:300ms"><article>

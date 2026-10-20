@@ -1,3 +1,4 @@
+import re
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -181,3 +182,100 @@ class NotesConfig(StrictModel):
         if any(not v.strip() or len(v) > 100 for v in values):
             raise ValueError("排除规则不能为空或超过 100 字符")
         return [v.strip() for v in values]
+
+
+# —— 访客账户 ——
+
+Kind = Literal["note", "post"]
+
+
+class CodeRequest(StrictModel):
+    email: str = Field(min_length=3, max_length=254)
+    purpose: Literal["register", "reset"]
+
+
+class Register(StrictModel):
+    email: str = Field(min_length=3, max_length=254)
+    code: str = Field(min_length=6, max_length=6, pattern=r"^[0-9]{6}$")
+    name: str = Field(default="", max_length=40)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class UserLogin(StrictModel):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class PasswordReset(StrictModel):
+    email: str = Field(min_length=3, max_length=254)
+    code: str = Field(min_length=6, max_length=6, pattern=r"^[0-9]{6}$")
+    password: str = Field(min_length=8, max_length=128)
+
+
+class PasswordChange(StrictModel):
+    current: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class ProfileWrite(StrictModel):
+    name: str = Field(min_length=1, max_length=40)
+
+
+class AccountDelete(StrictModel):
+    password: str = Field(min_length=1, max_length=128)
+
+
+class Target(StrictModel):
+    kind: Kind
+    slug: str = Field(min_length=1, max_length=120)
+
+
+class SmtpConfig(StrictModel):
+    host: str = Field(default="", max_length=200, pattern=r"^$|^[A-Za-z0-9.-]+$")
+    port: int = Field(default=465, ge=1, le=65535)
+    security: Literal["ssl", "starttls"] = "ssl"
+    username: str = Field(default="", max_length=254)
+    fromName: str = Field(default="", max_length=60)
+    fromAddress: str = Field(default="", max_length=254)
+
+
+class AccountsConfig(StrictModel):
+    registrationOpen: bool = False
+    allowedDomains: list[str] = Field(default_factory=list, max_length=200)
+    dailyLimit: int = Field(default=100, ge=1, le=2000)
+    smtp: SmtpConfig
+    # None 表示不修改；空字符串表示清除。
+    smtpPassword: str | None = Field(default=None, max_length=200)
+
+    @field_validator("allowedDomains")
+    @classmethod
+    def domains(cls, values):
+        cleaned = sorted({v.strip().lower().lstrip("@") for v in values if v.strip()})
+        if any(not re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", v) for v in cleaned):
+            raise ValueError("邮箱域名格式不正确")
+        return cleaned
+
+
+class TestMail(StrictModel):
+    to: str = Field(min_length=3, max_length=254)
+
+
+class UserState(StrictModel):
+    disabled: bool
+
+
+class ReadingState(StrictModel):
+    baseline: str = Field(min_length=1, max_length=40)
+    read: list[str] = Field(default_factory=list, max_length=50_000)
+    unread: list[str] = Field(default_factory=list, max_length=50_000)
+
+    @field_validator("read", "unread")
+    @classmethod
+    def short_ids(cls, values):
+        if any(len(v) > 100 for v in values):
+            raise ValueError("通知编号过长")
+        return values
+
+
+class ReadingWrite(StrictModel):
+    state: ReadingState

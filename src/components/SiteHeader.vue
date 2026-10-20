@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { account, loadAccount } from '../account'
 import { site } from '../content'
 import { useTheme } from '../composables/useTheme'
 import AppIcon from './AppIcon.vue'
@@ -11,7 +12,11 @@ const links = [
   { id: 'top', label: 'Home' },
   { id: 'projects', label: 'Projects' },
 ]
-const isScut = location.pathname.replace(/\/$/, '') === '/scut'
+const path = location.pathname.replace(/\/$/, '')
+const isScut = path === '/scut'
+const isAccount = path === '/account'
+// 非首页时，锚点链接回到首页对应区块。
+const onHome = path === ''
 // 入口区没有单独的导航项，滚动到那里时仍高亮 Home
 const sections = ['top', 'portals', 'projects']
 
@@ -52,6 +57,7 @@ onMounted(() => {
   window.addEventListener('scroll', onScroll, { passive: true })
   window.addEventListener('resize', updateEdges, { passive: true })
   nextTick(() => { updateEdges(); revealActive() })
+  if (!isAccount) loadAccount()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('scroll', onScroll)
@@ -62,7 +68,7 @@ onBeforeUnmount(() => {
 <template>
   <header v-if="site" class="header" :class="{ scrolled }">
     <div class="container bar">
-      <a class="brand" :href="isScut ? '/#top' : '#top'" :aria-label="`${site.name} 主页`">
+      <a class="brand" :href="onHome ? '#top' : '/#top'" :aria-label="`${site.name} 主页`">
         <LogoMark class="logo" />
         <span>{{ site.name }}</span>
       </a>
@@ -71,9 +77,9 @@ onBeforeUnmount(() => {
         <a
           v-for="link in links"
           :key="link.id"
-          :href="`${isScut ? '/' : ''}#${link.id}`"
-          :class="{ active: !isScut && active === link.id }"
-          :aria-current="!isScut && active === link.id ? 'true' : undefined"
+          :href="`${onHome ? '' : '/'}#${link.id}`"
+          :class="{ active: onHome && active === link.id }"
+          :aria-current="onHome && active === link.id ? 'true' : undefined"
         >
           {{ link.label }}
         </a>
@@ -82,6 +88,11 @@ onBeforeUnmount(() => {
         <a href="/notes">Notes</a>
         <a :href="site.cloud" target="_blank" rel="noopener">Cloud</a>
         </div>
+        <a class="account" :class="{ active: isAccount }" href="/account" :aria-label="account ? `账户：${account.name}` : '登录或注册'" :title="account ? account.name : '登录 / 注册'">
+          <img v-if="account?.avatar" :src="account.avatar" alt="">
+          <span v-else-if="account" class="initial">{{ account.name.slice(0, 1).toUpperCase() }}</span>
+          <svg v-else viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="3.5" /><path d="M5 19.5a7 7 0 0 1 14 0" /></svg>
+        </a>
         <button
           class="theme"
           type="button"
@@ -202,6 +213,61 @@ onBeforeUnmount(() => {
 
 .nav a.active::after {
   transform: scaleX(1);
+}
+
+.account {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  align-self: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  overflow: hidden;
+  color: inherit;
+  transition: color 0.2s ease, box-shadow 0.3s ease;
+}
+
+/* 提高优先级，覆盖 .nav a 的 inline-flex，让图标在圆形中居中 */
+.nav .account {
+  display: inline-grid;
+  justify-content: center;
+}
+
+.nav .account::after {
+  display: none;
+}
+
+.account:hover,
+.account.active {
+  color: var(--text);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.account svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.account img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.initial {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, var(--accent), #7ea2ff);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .theme {

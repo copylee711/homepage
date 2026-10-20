@@ -1,7 +1,9 @@
 import asyncio
 import json
+import logging
 import re
 import secrets
+import smtplib
 import warnings
 from contextlib import asynccontextmanager, suppress
 from io import BytesIO
@@ -14,11 +16,14 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from PIL import Image, UnidentifiedImageError
+from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, select
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .auth import COOKIE, authenticate, current_session
+from . import accounts
+from .accounts import USER_COOKIE, current_user, profile
+from .auth import COOKIE, authenticate, check_origin, current_session
 from .content import (
     adjacent_posts,
     bump,
@@ -38,7 +43,17 @@ from .database import make_engine
 from .feed import atom_feed
 from .github import sync_loop, sync_repos
 from .limits import JsonBodyLimit
-from .models import Administrator, Article, Note, Passkey
+from .models import (
+    Administrator,
+    Article,
+    Favorite,
+    History,
+    Note,
+    Passkey,
+    ScutReading,
+    User,
+    UserSession,
+)
 from .notes import (
     admin_view,
     bump_notes,
@@ -52,18 +67,30 @@ from .notes import (
 from .notes import sync_loop as notes_sync_loop
 from .rendering import render_markdown
 from .schemas import (
+    AccountDelete,
+    AccountsConfig,
     ArticleDraft,
     ArticleWrite,
+    CodeRequest,
     Login,
     NotesConfig,
     NoteVisibility,
     NoteWrite,
     PasskeyResponse,
     PasskeySetup,
+    PasswordChange,
+    PasswordReset,
     Preview,
+    ProfileWrite,
+    ReadingWrite,
+    Register,
     Revision,
     SecurityProof,
     SiteWrite,
+    Target,
+    TestMail,
+    UserLogin,
+    UserState,
 )
 from .scut import public_scut
 from .scut import sync_loop as scut_sync_loop
@@ -77,6 +104,7 @@ from .security import (
 from .settings import Settings
 
 HERE = Path(__file__).parent
+logger = logging.getLogger(__name__)
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 PLAIN_404_PREFIXES = ("/api/", "/media/", "/content-assets/", "/assets/")
 Image.MAX_IMAGE_PIXELS = 20_000_000
@@ -279,6 +307,215 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session.delete(row)
         session.commit()
         response.delete_cookie(COOKIE, path="/api")
+        return {"ok": True}
+
+    # —— 访客账户 ——
+
+    @app.get("/api/account/config")
+    def account_config(session: Session = Depends(database)):
+        return accounts.public_config(session)
+
+    @app.post("/api/account/code")
+    async def account_code(body: CodeRequest, request: Request,
+                           session: Session = Depends(database)):
+        check_origin(request)
+        prepared = accounts.prepare_code(request, session, body.email, body.purpose)
+        if prepared:
+            name = public_site(session)["name"]
+            mail = accounts.code_mail(prepared["code"], body.purpose, name)
+            try:
+                await asyncio.to_thread(accounts.send_mail, prepared["config"], settings,
+                                        prepared["email"], *mail)
+            except (smtplib.SMTPException, OSError) as exc:
+                session.exec(delete(accounts.EmailCode).where(accounts.EmailCode.id == prepared["row"]))
+                session.commit()
+                logger.warning("验证码邮件发送失败：%s", type(exc).__name__)
+                raise HTTPException(502, "验证码邮件发送失败，请稍后再试") from None
+        return {"ok": True, "resend_after": accounts.RESEND_SECONDS}
+
+    @app.post("/api/account/register")
+    def account_register(body: Register, request: Request, response: Response,
+                         session: Session = Depends(database)):
+        return accounts.register(request, response, session, body)
+
+    @app.post("/api/account/login")
+    def account_login(body: UserLogin, request: Request, response: Response,
+                      session: Session = Depends(database)):
+        return accounts.login(request, response, session, body)
+
+    @app.post("/api/account/reset")
+    def account_reset(body: PasswordReset, request: Request, response: Response,
+                      session: Session = Depends(database)):
+        return accounts.reset_password(request, response, session, body)
+
+    @app.post("/api/account/logout")
+    def account_logout(request: Request, response: Response, session: Session = Depends(database)):
+        _, row = current_user(request, session, write=True)
+        session.delete(row)
+        session.commit()
+        response.delete_cookie(USER_COOKIE, path="/api")
+        return {"ok": True}
+
+    @app.get("/api/account/me")
+    def account_me(request: Request, session: Session = Depends(database)):
+        user, row = current_user(request, session)
+        return {"user": profile(user), "csrf": row.csrf}
+
+    @app.put("/api/account/profile")
+    def account_profile(body: ProfileWrite, request: Request, session: Session = Depends(database)):
+        user, _ = current_user(request, session, write=True)
+        user.name = body.name.strip()
+        session.add(user)
+        session.commit()
+        return profile(user)
+
+    @app.post("/api/account/password")
+    def account_password(body: PasswordChange, request: Request,
+                         session: Session = Depends(database)):
+        user, row = current_user(request, session, write=True)
+        accounts.change_password(session, user, row, body)
+        return {"ok": True}
+
+    @app.post("/api/account/avatar")
+    async def account_avatar(request: Request, session: Session = Depends(database)):
+        user, _ = current_user(request, session, write=True)
+        chunks, size = [], 0
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > accounts.MAX_AVATAR_BYTES:
+                raise HTTPException(413, "头像不能超过 2 MiB")
+            chunks.append(chunk)
+        user.avatar = await asyncio.to_thread(
+            accounts.save_avatar, b"".join(chunks), user, settings.media_dir
+        )
+        session.add(user)
+        session.commit()
+        return profile(user)
+
+    @app.post("/api/account/delete")
+    def account_delete(body: AccountDelete, request: Request, response: Response,
+                       session: Session = Depends(database)):
+        user, _ = current_user(request, session, write=True)
+        accounts.delete_account(session, user, body.password, settings.media_dir)
+        response.delete_cookie(USER_COOKIE, path="/api")
+        return {"ok": True}
+
+    @app.get("/api/account/favorites")
+    def account_favorites(request: Request, session: Session = Depends(database)):
+        user, _ = current_user(request, session)
+        return {"items": accounts.entries(session, Favorite, user, Favorite.created_at)}
+
+    @app.get("/api/account/favorites/check")
+    def account_favorite_check(kind: str, slug: str, request: Request,
+                               session: Session = Depends(database)):
+        user, _ = current_user(request, session)
+        return {"favorite": session.get(Favorite, (user.id, kind, slug)) is not None}
+
+    @app.post("/api/account/favorites")
+    def account_favorite(body: Target, request: Request, session: Session = Depends(database)):
+        user, _ = current_user(request, session, write=True)
+        accounts.add_favorite(session, user, body.kind, body.slug)
+        return {"favorite": True}
+
+    @app.post("/api/account/favorites/remove")
+    def account_unfavorite(body: Target, request: Request, session: Session = Depends(database)):
+        user, _ = current_user(request, session, write=True)
+        row = session.get(Favorite, (user.id, body.kind, body.slug))
+        if row:
+            session.delete(row)
+            session.commit()
+        return {"favorite": False}
+
+    @app.get("/api/account/history")
+    def account_history(request: Request, session: Session = Depends(database)):
+        user, _ = current_user(request, session)
+        return {"items": accounts.entries(session, History, user, History.viewed_at)}
+
+    @app.post("/api/account/history")
+    def account_view(body: Target, request: Request, session: Session = Depends(database)):
+        user, _ = current_user(request, session, write=True)
+        accounts.record_view(session, user, body.kind, body.slug)
+        return {"ok": True}
+
+    @app.post("/api/account/history/clear")
+    def account_history_clear(request: Request, session: Session = Depends(database)):
+        user, _ = current_user(request, session, write=True)
+        session.exec(delete(History).where(History.user_id == user.id))
+        session.commit()
+        return {"ok": True}
+
+    @app.get("/api/account/scut")
+    def account_scut(request: Request, session: Session = Depends(database)):
+        user, _ = current_user(request, session)
+        row = session.get(ScutReading, user.id)
+        return {"state": row.state if row else None, "updated_at": row.updated_at if row else None}
+
+    @app.put("/api/account/scut")
+    def account_scut_save(body: ReadingWrite, request: Request,
+                          session: Session = Depends(database)):
+        user, _ = current_user(request, session, write=True)
+        row = session.get(ScutReading, user.id) or ScutReading(user_id=user.id, state={},
+                                                               updated_at="")
+        row.state, row.updated_at = body.state.model_dump(), timestamp()
+        session.add(row)
+        session.commit()
+        return {"updated_at": row.updated_at}
+
+    # —— 后台：注册与邮件配置、用户管理 ——
+
+    @app.get("/api/admin/accounts")
+    def admin_accounts(session: Session = Depends(authorized)):
+        users = session.exec(select(User).order_by(User.created_at.desc())).all()
+        return {"config": accounts.admin_config(session), "users": [
+            {**profile(u), "disabled": u.disabled, "last_login": u.last_login} for u in users
+        ]}
+
+    @app.put("/api/admin/accounts/config")
+    def admin_accounts_config(body: AccountsConfig, session: Session = Depends(authorized)):
+        data = body.model_dump(exclude={"smtpPassword"})
+        return accounts.save_config(session, data, body.smtpPassword, settings)
+
+    @app.post("/api/admin/accounts/test-email")
+    async def admin_accounts_test(body: TestMail, session: Session = Depends(authorized)):
+        value = accounts.config(session)
+        if not accounts.smtp_ready(value):
+            raise HTTPException(409, "请先填写并保存 SMTP 服务器、账号与授权码")
+        to = accounts.normalize_email(body.to, session, check_domain=False)
+        name = public_site(session)["name"]
+        try:
+            await asyncio.to_thread(
+                accounts.send_mail, value, settings, to, f"{name} · 邮件发送测试",
+                "这是一封测试邮件，说明验证码邮件可以正常发送。",
+                "<p>这是一封测试邮件，说明验证码邮件可以正常发送。</p>",
+            )
+        except smtplib.SMTPAuthenticationError:
+            raise HTTPException(502, "SMTP 登录失败：请检查账号与授权码（不是邮箱登录密码）") from None
+        except (smtplib.SMTPException, OSError) as exc:
+            raise HTTPException(502, f"邮件发送失败：{type(exc).__name__}") from None
+        return {"ok": True}
+
+    @app.post("/api/admin/accounts/users/{user_id}/state")
+    def admin_user_state(user_id: str, body: UserState, session: Session = Depends(authorized)):
+        user = session.get(User, user_id)
+        if user is None:
+            raise HTTPException(404, "用户不存在")
+        user.disabled = body.disabled
+        if body.disabled:
+            session.exec(delete(UserSession).where(UserSession.user_id == user.id))
+        session.add(user)
+        session.commit()
+        return {"ok": True}
+
+    @app.post("/api/admin/accounts/users/{user_id}/remove")
+    def admin_user_remove(user_id: str, session: Session = Depends(authorized)):
+        user = session.get(User, user_id)
+        if user is None:
+            raise HTTPException(404, "用户不存在")
+        for table in (Favorite, History, UserSession, ScutReading):
+            session.exec(delete(table).where(table.user_id == user.id))
+        accounts.remove_avatar(user, settings.media_dir)
+        session.delete(user)
+        session.commit()
         return {"ok": True}
 
     @app.get("/api/admin/site")
@@ -600,6 +837,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     @app.get("/scut", response_class=HTMLResponse)
     @app.get("/scut/", response_class=HTMLResponse)
+    @app.get("/account", response_class=HTMLResponse)
     @app.get("/admin", response_class=HTMLResponse)
     @app.get("/admin/{path:path}", response_class=HTMLResponse)
     def frontend(path: str = ""):

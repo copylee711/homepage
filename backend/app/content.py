@@ -1,3 +1,4 @@
+import json
 import re
 from datetime import datetime, timezone
 
@@ -7,6 +8,13 @@ from sqlmodel import Session, select
 
 from .models import Article, Content
 from .schemas import Site
+
+
+def accounts_defaults() -> dict:
+    from .accounts import ACCOUNTS_DEFAULTS
+
+    return json.loads(json.dumps(ACCOUNTS_DEFAULTS))
+
 
 NOTES_DEFAULTS = {
     "repo": "copylee711/notes",
@@ -59,6 +67,7 @@ def initialize(session: Session, site: dict, repos: list) -> bool:
         ),
         ("posts", {}),
         ("notes", dict(NOTES_DEFAULTS)),
+        ("accounts", accounts_defaults()),
     ):
         session.add(Content(key=key, value=value))
     session.commit()

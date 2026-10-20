@@ -26,3 +26,10 @@ test('corrupted storage and unknown publication dates', () => {
   assert.equal(parseReading('{"baseline":"2026-10-12","read":"x","unread":[]}'), undefined)
   assert.equal(isUnread(notice('unknown', null), initialReading(baseline)), true)
 })
+
+test('account state wins, local-only marks are kept', async () => {
+  const { mergeReading } = await import('../src/scut-reading.ts')
+  const server = { baseline, read: ['a'], unread: ['b'] }
+  const local = { baseline: '2026-10-15T00:00:00Z', read: ['b', 'c'], unread: ['a', 'd'] }
+  assert.deepEqual(mergeReading(server, local), { baseline, read: ['a', 'c'], unread: ['b', 'd'] })
+})

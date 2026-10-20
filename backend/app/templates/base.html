@@ -25,6 +25,7 @@
     <div class="container reading-bar">
     <a class="reading-brand" href="/" aria-label="{{ site.name }} 主页">{% include "logo.html" %}<span data-site-name>{{ site.name }}</span></a>
     <nav class="reading-nav" aria-label="主导航"><div class="nav-scroll"><a href="/#top">Home</a><a href="/#projects">Projects</a><a href="/scut">SCUT</a><a{% if active == 'posts' %} class="active" aria-current="page"{% endif %} href="/posts">Articles</a><a{% if active == 'notes' %} class="active" aria-current="page"{% endif %} href="/notes">Notes</a><a data-cloud href="{{ site.cloud }}" target="_blank" rel="noopener">Cloud</a></div>
+      <a class="account-link" id="account-link" href="/account" aria-label="登录或注册" title="登录 / 注册"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5a7 7 0 0 1 14 0"/></svg></a>
       <button type="button" id="theme-toggle" aria-label="切换明暗主题"><svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg><svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15.3A9 9 0 0 1 8.7 4a9 9 0 1 0 11.3 11.3Z"/></svg></button></nav>
     </div>
     {% if reading_page %}<div class="reading-progress" aria-hidden="true"><span></span></div>{% endif %}

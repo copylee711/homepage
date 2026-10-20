@@ -22,7 +22,7 @@ function askOtp(target: 'login' | 'unlock') {
 // 请求结束、表单解除禁用后再聚焦验证码输入框。
 watch([otpFor, busy], ([target, working]) => { if (target && !working) nextTick(() => otpInput.value?.focus()) }, { flush: 'post' })
 function submitOtp() { return otpFor.value === 'login' ? login() : unlockWithPassword() }
-const tab = ref<'profile' | 'portals' | 'repos' | 'posts' | 'notes' | 'security'>('profile')
+const tab = ref<'profile' | 'portals' | 'repos' | 'posts' | 'notes' | 'accounts' | 'security'>('profile')
 type SecurityState = {elevated_until:number; totp_enabled:boolean; recovery_remaining:number; passkeys:{id:string; name:string; created_at:number; last_used:number|null}[]}
 const security = ref<SecurityState>(), securityOtp = ref(''), keyName = ref('我的设备')
 const enrollment = ref<{secret:string; qr:string}>(), recoveryCodes = ref<string[]>([])
@@ -73,7 +73,7 @@ async function keyLogin() { await action(async () => {
   const credential = await usePasskey(options.options)
   const result = await api<{csrf:string}>('/api/auth/passkey/verify','POST',{challenge_id:options.challenge_id,credential})
   csrf.value=result.csrf; password.value=''
-  await loadSettings(); await listArticles(); await loadSecurity(); await loadNotes()
+  await loadSettings(); await listArticles(); await loadSecurity(); await loadNotes(); await loadAccounts()
 }) }
 async function addPasskey() { await action(async () => {
   const options = await api<{options:Record<string,any>;challenge_id:string}>('/api/admin/security/passkeys/options','POST',{...proof(),name:keyName.value})
@@ -146,6 +146,33 @@ async function deleteNote() { await action(async () => {
 async function previewNote() { await action(async () => {
   notePreview.value = (await api<{html: string}>('/api/admin/preview', 'POST', {markdown: noteEdit.value!.markdown})).html
 }) }
+type AccountsConfig = {registrationOpen:boolean; allowedDomains:string[]; dailyLimit:number; smtp:{host:string; port:number; security:'ssl'|'starttls'; username:string; fromName:string; fromAddress:string}; hasSmtpPassword:boolean}
+type SiteUser = {id:string; email:string; name:string; avatar:string; created_at:string; disabled:boolean; last_login:string|null}
+const accountsConfig = ref<AccountsConfig>(), domainsText = ref(''), smtpSecret = ref(''), testTo = ref(''), siteUsers = ref<SiteUser[]>([])
+async function loadAccounts() {
+  const data = await api<{config: AccountsConfig; users: SiteUser[]}>('/api/admin/accounts')
+  accountsConfig.value = data.config; domainsText.value = data.config.allowedDomains.join('\n'); siteUsers.value = data.users
+}
+async function saveAccounts(clearSecret = false) { await action(async () => {
+  const {hasSmtpPassword: _, ...config} = accountsConfig.value!
+  const body = {...config, allowedDomains: lines(domainsText.value), ...(clearSecret ? {smtpPassword: ''} : smtpSecret.value ? {smtpPassword: smtpSecret.value} : {})}
+  accountsConfig.value = await api<AccountsConfig>('/api/admin/accounts/config', 'PUT', body)
+  domainsText.value = accountsConfig.value.allowedDomains.join('\n'); smtpSecret.value = ''
+  message.value = clearSecret ? 'SMTP 授权码已清除。' : '注册与邮件设置已保存。'
+}) }
+async function testMail() { await action(async () => {
+  await api('/api/admin/accounts/test-email', 'POST', {to: testTo.value})
+  message.value = `测试邮件已发送到 ${testTo.value}，请查收。`
+}) }
+async function setUserState(user: SiteUser, disabled: boolean) { await action(async () => {
+  await api(`/api/admin/accounts/users/${user.id}/state`, 'POST', {disabled}); user.disabled = disabled
+  message.value = disabled ? `已停用 ${user.email}，其登录已失效。` : `已恢复 ${user.email}。`
+}) }
+async function removeUser(user: SiteUser) { await action(async () => {
+  if (!confirm(`永久删除 ${user.email} 及其收藏、浏览记录？`)) return
+  await api(`/api/admin/accounts/users/${user.id}/remove`, 'POST')
+  siteUsers.value = siteUsers.value.filter(item => item !== user); message.value = '用户已删除。'
+}) }
 function emptyDraft(): Draft { return { title: '', slug: '', summary: '', markdown: '', cover: '' } }
 
 async function api<T>(path: string, method = 'GET', data?: unknown): Promise<T> {
@@ -182,7 +209,7 @@ async function login() { await action(async () => {
   try { data = await api<{csrf: string}>('/api/auth/login', 'POST', {username: username.value, password: password.value, otp: otpFor.value ? otpCode.value : ''}) }
   catch (err) { if (needsOtp(err)) { askOtp('login'); return } throw err }
   csrf.value = data.csrf; password.value = ''; otpFor.value = null; otpCode.value = ''
-  await loadSettings(); await listArticles(); await loadSecurity(); await loadNotes()
+  await loadSettings(); await listArticles(); await loadSecurity(); await loadNotes(); await loadAccounts()
 }) }
 async function logout() { await action(async () => {
   if(((dirty.value && draft.value.title) || siteDirty.value) && !confirm('有未保存修改，仍要退出吗？')) return
@@ -268,7 +295,7 @@ async function importMarkdown(event: Event, target: 'post' | 'note') {
   input.value = ''
   if (!file) return
   if (file.size > 500_000) { error.value = 'Markdown 文件不能超过 500 KB'; return }
-  let text = (await file.text()).replace(/^﻿/, '').replace(/\r\n/g, '\n')
+  let text = (await file.text()).replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
   const heading = /^#\s+(.+?)\s*#*\s*$/m.exec(text)
   const title = (heading?.[1] ?? file.name.replace(/\.(md|markdown|txt)$/i, '')).trim().slice(0, 200)
   if (heading && text.trimStart().startsWith(heading[0])) text = text.trimStart().slice(heading[0].length).trimStart()
@@ -295,7 +322,7 @@ onMounted(async () => {
   window.addEventListener('beforeunload', preventLeave)
   try {
     csrf.value = (await api<{csrf: string}>('/api/auth/me')).csrf
-    await loadSettings(); await listArticles(); await loadSecurity(); await loadNotes()
+    await loadSettings(); await listArticles(); await loadSecurity(); await loadNotes(); await loadAccounts()
   } catch(err) { if((err as {status?: number}).status !== 401) error.value = err instanceof Error ? err.message : '后台加载失败' }
   finally { loading.value = false }
 })
@@ -322,7 +349,7 @@ set -a; . /etc/copylee/backend.env; set +a
 runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pre><p>设备丢失、无法通过两步验证时，再执行以下命令清除 Passkey、两步验证与恢复码：</p><pre>runuser -u copylee -- .venv/bin/python -m app.cli reset-security --confirm</pre></details>
     </main>
     <div v-else class="admin-layout">
-      <aside class="admin-nav"><p class="eyebrow">Workspace</p><button v-for="item in [{id:'profile',name:'主页设置'},{id:'portals',name:'入口卡片'},{id:'repos',name:'仓库展示'},{id:'posts',name:'文章管理'},{id:'notes',name:'笔记管理'},{id:'security',name:'登录安全'}]" :key="item.id" :class="{selected:tab===item.id}" @click="tab=item.id as typeof tab">{{ item.name }}<span>↗</span></button><p class="nav-note">内容保存后即可更新。<br>页面样式仍由代码管理。</p></aside>
+      <aside class="admin-nav"><p class="eyebrow">Workspace</p><button v-for="item in [{id:'profile',name:'主页设置'},{id:'portals',name:'入口卡片'},{id:'repos',name:'仓库展示'},{id:'posts',name:'文章管理'},{id:'notes',name:'笔记管理'},{id:'accounts',name:'用户与邮件'},{id:'security',name:'登录安全'}]" :key="item.id" :class="{selected:tab===item.id}" @click="tab=item.id as typeof tab">{{ item.name }}<span>↗</span></button><p class="nav-note">内容保存后即可更新。<br>页面样式仍由代码管理。</p></aside>
       <main class="admin-main"><fieldset :disabled="busy">
         <template v-if="tab==='security'">
           <div class="section-head"><div><p class="eyebrow">Account access</p><h1>登录安全</h1></div></div>
@@ -344,7 +371,7 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
           <section v-if="recoveryCodes.length" class="edit-card"><h2>保存恢复码</h2><p class="subtle">这些恢复码仅显示一次。请保存到安全位置；重新生成后旧恢复码失效。</p><pre class="recovery-codes">{{recoveryCodes.join('\n')}}</pre><button @click="recoveryCodes=[]">我已保存恢复码</button></section>
           <p class="field-hint">忘记密码或设备丢失时，可在服务器上重置，步骤见登录页底部。安全设置修改会撤销其他会话。</p>
         </template>
-        <template v-if="tab !== 'posts' && tab !== 'notes' && tab !== 'security' && settings">
+        <template v-if="tab !== 'posts' && tab !== 'notes' && tab !== 'accounts' && tab !== 'security' && settings">
           <div class="section-head"><div><p class="eyebrow">Site content</p><h1>{{ tab==='profile' ? '主页设置' : tab==='portals' ? '入口卡片' : '仓库展示' }}</h1></div>
             <div class="buttons"><button @click="reloadSettings">重新加载</button><button class="primary" @click="saveSettings">{{busy ? '处理中…' : '保存设置'}}</button></div></div>
           <div v-if="tab==='profile'" class="form-grid">
@@ -385,6 +412,38 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
               <div class="form-grid"><label>分组名称<input v-model="group.title"></label><label>仓库名前缀<input v-model="group.prefix" placeholder="dsh-"></label><label class="wide">描述<input v-model="group.description"></label></div>
             </section><button @click="settings.repoGroups.push({title:'新分组',description:'',prefix:''})">＋ 添加分组</button>
           </template>
+        </template>
+        <template v-if="tab==='accounts' && accountsConfig">
+          <div class="section-head"><div><p class="eyebrow">Members</p><h1>用户与邮件</h1></div><button class="primary" @click="saveAccounts()">保存设置</button></div>
+          <section class="edit-card"><h2>注册</h2><p class="subtle">访客用邮箱注册后可以收藏笔记与文章、查看浏览记录。邮箱需通过验证码验证。</p>
+            <div class="form-grid">
+              <label class="checkbox"><input type="checkbox" v-model="accountsConfig.registrationOpen">开放注册<span class="field-hint">关闭后已注册用户仍可登录</span></label>
+              <label>每日验证码上限<span class="field-hint">全站合计，保护你的个人邮箱</span><input v-model.number="accountsConfig.dailyLimit" type="number" min="1" max="2000"></label>
+              <label class="wide">允许注册的邮箱域名<span class="field-hint">每行一个；找回密码不受此限制</span><textarea v-model="domainsText" rows="5"></textarea></label>
+            </div>
+          </section>
+          <section class="edit-card"><h2>验证码邮件（SMTP）</h2><p class="subtle">使用你的个人邮箱发送验证码。QQ 邮箱：设置 → 账号与安全 → 开启 SMTP 服务，获取“授权码”填入下方（不是 QQ 密码）。</p>
+            <div class="form-grid">
+              <label>SMTP 服务器<input v-model="accountsConfig.smtp.host" placeholder="smtp.qq.com"></label>
+              <div class="form-grid tight"><label>端口<input v-model.number="accountsConfig.smtp.port" type="number" min="1" max="65535"></label><label>加密<select v-model="accountsConfig.smtp.security"><option value="ssl">SSL（465）</option><option value="starttls">STARTTLS（587）</option></select></label></div>
+              <label>邮箱账号<input v-model="accountsConfig.smtp.username" type="email" placeholder="you@qq.com" autocomplete="off"></label>
+              <label>授权码<span class="field-hint">{{ accountsConfig.hasSmtpPassword ? '已保存，加密存储；留空表示不修改' : '尚未设置' }}</span><input v-model="smtpSecret" type="password" autocomplete="new-password" :placeholder="accountsConfig.hasSmtpPassword ? '••••••••' : 'SMTP 授权码'"></label>
+              <label>发件人名称<input v-model="accountsConfig.smtp.fromName" placeholder="Copy Lee"></label>
+              <label>发件地址<span class="field-hint">留空则使用邮箱账号</span><input v-model="accountsConfig.smtp.fromAddress" type="email"></label>
+            </div>
+            <div class="test-mail"><input v-model="testTo" type="email" placeholder="接收测试邮件的地址" aria-label="测试收件地址"><button :disabled="!testTo" @click="testMail">发送测试邮件</button><button v-if="accountsConfig.hasSmtpPassword" class="danger" @click="saveAccounts(true)">清除授权码</button></div>
+            <p class="field-hint">先保存设置，再发送测试邮件。阿里云服务器限制 25 端口，请使用 465 或 587。</p>
+          </section>
+          <section class="edit-card"><h2>注册用户<span class="security-status">{{ siteUsers.length }} 人</span></h2>
+            <p v-if="!siteUsers.length" class="subtle">还没有注册用户。</p>
+            <ul class="note-list user-list">
+              <li v-for="user in siteUsers" :key="user.id" :class="{ muted: user.disabled }">
+                <div class="user-info"><span class="user-face"><img v-if="user.avatar" :src="user.avatar" alt=""><template v-else>{{ user.name.slice(0,1).toUpperCase() }}</template></span>
+                  <div class="note-info"><strong>{{ user.name }}</strong><span>{{ user.email }} · 注册于 {{ user.created_at.slice(0,10) }}{{ user.last_login ? ` · 最近登录 ${user.last_login.slice(0,10)}` : '' }}</span></div></div>
+                <div class="buttons"><label class="switch"><input type="checkbox" :checked="!user.disabled" @change="setUserState(user, !user.disabled)"><span>{{ user.disabled ? '已停用' : '正常' }}</span></label><button class="danger" @click="removeUser(user)">删除</button></div>
+              </li>
+            </ul>
+          </section>
         </template>
         <template v-if="tab==='notes'">
           <div class="section-head"><div><p class="eyebrow">Knowledge base</p><h1>笔记管理</h1></div><div class="buttons"><button @click="syncNotes">立即同步</button><label class="upload-button">导入 .md<input type="file" accept=".md,.markdown,.txt,text/markdown" @change="importMarkdown($event, 'note')"></label><button class="primary" @click="newNote">＋ 新建笔记</button></div></div>
@@ -566,6 +625,12 @@ input:read-only { color:var(--muted); }
 .switch input:checked { background:var(--accent); }
 .switch input:checked::after { transform:translateX(14px); }
 .switch span { min-width:28px; font-size:12px; }
+.form-grid.tight { gap:12px; }
+.test-mail { display:flex; gap:10px; flex-wrap:wrap; margin:20px 0 8px; }
+.test-mail input { max-width:300px; }
+.user-info { display:flex; align-items:center; gap:12px; min-width:0; }
+.user-face { flex:none; display:grid; place-items:center; width:36px; height:36px; border-radius:50%; overflow:hidden; background:linear-gradient(135deg,var(--accent),#7ea2ff); color:#fff; font-weight:700; }
+.user-face img { width:100%; height:100%; object-fit:cover; }
 .hidden-repos { max-width:500px; }.group-title { margin-top:36px; }
 .feedback { padding:14px 24px; margin:16px 40px 0; border-radius:8px; font-size:14px; }
 .error { color:#d15c5c; background:rgba(209,92,92,.08); }.success { color:var(--accent); background:var(--accent-soft); }

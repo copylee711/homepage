@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from 'vue'
 import { contentStatus, ready, reloadContent, startContent } from './content'
+import AccountPage from './components/AccountPage.vue'
 import AdminPage from './components/AdminPage.vue'
 import BootScreen from './components/BootScreen.vue'
 import HeroSection from './components/HeroSection.vue'
@@ -14,6 +15,7 @@ import ScutSection from './components/ScutSection.vue'
 import { startScut } from './scut'
 const isAdmin = location.pathname === '/admin' || location.pathname.startsWith('/admin/')
 const isScut = location.pathname.replace(/\/$/, '') === '/scut'
+const isAccount = location.pathname.replace(/\/$/, '') === '/account'
 let stop: (() => void) | undefined
 let stopScut: (() => void) | undefined
 onMounted(() => { if (!isAdmin) { stop = startContent(); stopScut = startScut() } })
@@ -25,8 +27,9 @@ onBeforeUnmount(() => { stop?.(); stopScut?.() })
   <template v-else-if="ready">
   <SiteHeader />
   <p v-if="contentStatus.stale" class="content-banner" role="status">暂时无法检查更新，正在显示已加载的内容。<button @click="reloadContent">重试</button></p>
-  <main :id="isScut ? 'top' : undefined">
+  <main :id="isScut || isAccount ? 'top' : undefined">
     <ScutSection v-if="isScut" full />
+    <AccountPage v-else-if="isAccount" />
     <template v-else>
     <HeroSection />
     <PortalGrid />

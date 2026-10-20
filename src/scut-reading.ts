@@ -44,3 +44,13 @@ export function setRead(state: ReadingState, ids: string[], read: boolean): Read
     unread: [...new Set([...state.unread.filter((id) => !changed.has(id)), ...(read ? [] : ids)])],
   }
 }
+
+/** 登录后合并账户与本机状态：以账户为准，补入本机新标记、且与账户不冲突的条目。 */
+export function mergeReading(server: ReadingState, local: ReadingState): ReadingState {
+  const serverRead = new Set(server.read), serverUnread = new Set(server.unread)
+  return {
+    baseline: server.baseline,
+    read: [...new Set([...server.read, ...local.read.filter((id) => !serverUnread.has(id))])],
+    unread: [...new Set([...server.unread, ...local.unread.filter((id) => !serverRead.has(id))])],
+  }
+}

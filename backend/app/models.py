@@ -117,3 +117,65 @@ class Note(SQLModel, table=True):
     revision: int = 1
     created_at: str
     updated_at: str
+
+
+# —— 访客账户（与管理员认证完全分离）——
+
+
+class User(SQLModel, table=True):
+    __tablename__ = "user"
+    id: str = Field(primary_key=True)
+    email: str = Field(unique=True, index=True)
+    password_hash: str
+    name: str
+    avatar: str = ""
+    disabled: bool = False
+    created_at: str
+    last_login: str | None = None
+
+
+class UserSession(SQLModel, table=True):
+    __tablename__ = "user_session"
+    token_hash: str = Field(primary_key=True)
+    user_id: str = Field(index=True)
+    csrf: str
+    expires_at: float
+
+
+class EmailCode(SQLModel, table=True):
+    __tablename__ = "email_code"
+    id: str = Field(primary_key=True)
+    email: str = Field(index=True)
+    purpose: str
+    code_hash: str
+    ip_hash: str = ""
+    attempts: int = 0
+    created_at: float
+    expires_at: float
+
+
+class Favorite(SQLModel, table=True):
+    __tablename__ = "favorite"
+    user_id: str = Field(primary_key=True)
+    kind: str = Field(primary_key=True)
+    slug: str = Field(primary_key=True)
+    title: str = ""
+    created_at: str
+
+
+class History(SQLModel, table=True):
+    __tablename__ = "history"
+    user_id: str = Field(primary_key=True)
+    kind: str = Field(primary_key=True)
+    slug: str = Field(primary_key=True)
+    title: str = ""
+    viewed_at: str = Field(index=True)
+
+
+class ScutReading(SQLModel, table=True):
+    """SCUT 通知的已读/未读状态，登录后跨设备同步。"""
+
+    __tablename__ = "scut_reading"
+    user_id: str = Field(primary_key=True)
+    state: dict = Field(sa_column=Column(JSON, nullable=False))
+    updated_at: str

@@ -1,6 +1,7 @@
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
+import { account, accountApi } from './account'
 import { fetchJson } from './content'
-import { initialReading, isUnread, parseReading, setRead } from './scut-reading'
+import { initialReading, isUnread, mergeReading, parseReading, setRead } from './scut-reading'
 import type { Notice, ReadingState } from './scut-reading'
 
 export interface ScutColumn {
@@ -20,12 +21,38 @@ export const reading = ref<ReadingState>()
 export const unread = computed(() => scut.value?.items.filter((item) => reading.value && isUnread(item, reading.value)) ?? [])
 let pending: Promise<void> | undefined
 
+// 登录后阅读状态同步到账户；未登录时只保存在本机浏览器。
+let syncedUser = ''
+let uploadTimer: ReturnType<typeof setTimeout> | undefined
+
 function saveReading() {
   try {
     localStorage.setItem(STORAGE, JSON.stringify(reading.value))
     scutStatus.storageError = ''
   } catch { scutStatus.storageError = '浏览器无法保存阅读状态，本次浏览仍可使用，刷新后可能丢失。' }
+  if (account.value && syncedUser === account.value.id) {
+    clearTimeout(uploadTimer)
+    uploadTimer = setTimeout(() => {
+      accountApi('/scut', 'PUT', { state: reading.value }).catch(() => {
+        scutStatus.storageError = '阅读状态暂时无法同步到账户，已保存在本机。'
+      })
+    }, 800)
+  }
 }
+
+async function pullAccountReading() {
+  const user = account.value
+  if (!user) { syncedUser = ''; return }
+  if (syncedUser === user.id || !reading.value) return
+  try {
+    const { state } = await accountApi<{ state: unknown }>('/scut')
+    const server = state ? parseReading(JSON.stringify(state)) : undefined
+    if (server) reading.value = mergeReading(server, reading.value)
+    syncedUser = user.id
+    saveReading()
+  } catch { /* 同步失败时继续使用本机状态 */ }
+}
+watch(account, () => { void pullAccountReading() })
 
 export function markRead(ids: string[], read = true) {
   if (!reading.value) return
@@ -48,6 +75,7 @@ export async function reloadScut() {
         catch { scutStatus.storageError = '浏览器无法读取阅读状态，本次阅读状态仅在内存中保存。' }
         reading.value ??= initialReading()
         saveReading()
+        void pullAccountReading()
       }
       scut.value = data
       scutStatus.error = ''

@@ -22,6 +22,7 @@ from .settings import Settings
 
 ROOT = Path(__file__).resolve().parents[1]
 MEDIA_PATTERN = re.compile(r"/media/([a-f0-9]{48}\.(?:jpg|png|webp|gif))")
+AVATAR_PATTERN = re.compile(r"/media/avatars/([a-f0-9]{32}\.webp)")
 
 
 def migrate(settings: Settings):
@@ -70,6 +71,13 @@ def backup(settings: Settings, output: Path | None = None) -> Path:
             for draft, published in snapshot.execute("SELECT draft, published FROM article"):
                 values.extend([draft, published or ""])
             columns = {row[1] for row in snapshot.execute("PRAGMA table_info(administrator)")}
+            tables = {row[0] for row in snapshot.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            avatars = set()
+            if "user" in tables:
+                avatars = {
+                    match for (avatar,) in snapshot.execute('SELECT avatar FROM "user"')
+                    for match in AVATAR_PATTERN.findall(avatar or "")
+                }
             needs_key = "totp_secret" in columns and snapshot.execute(
                 "SELECT 1 FROM administrator WHERE totp_secret IS NOT NULL OR pending_secret IS NOT NULL"
             ).fetchone()
@@ -86,6 +94,14 @@ def backup(settings: Settings, output: Path | None = None) -> Path:
             if not source.is_file() or source.is_symlink():
                 raise ValueError(f"引用的图片不存在：{name}")
             shutil.copyfile(source, stage / "media" / name)
+        if avatars:
+            (stage / "media" / "avatars").mkdir()
+        for name in avatars:
+            source = settings.media_dir / "avatars" / name
+            # 头像缺失不影响恢复，跳过即可。
+            if source.is_file() and not source.is_symlink():
+                shutil.copyfile(source, stage / "media" / "avatars" / name)
+                references.add(f"avatars/{name}")
         files = ["content.db"] + [f"media/{name}" for name in sorted(references)]
         if (stage / "2fa.key").is_file():
             files.append("2fa.key")
@@ -115,7 +131,7 @@ def restore(source: Path, target: Path):
         raise ValueError("备份格式无效")
     for name, expected in manifest["files"].items():
         if name not in {"content.db", "2fa.key"} and not re.fullmatch(
-            r"media/[a-f0-9]{48}\.(jpg|png|webp|gif)", name
+            r"media/[a-f0-9]{48}\.(jpg|png|webp|gif)|media/avatars/[a-f0-9]{32}\.webp", name
         ):
             raise ValueError("备份包含非法路径")
         if (source / name).is_symlink() or file_hash(source / name) != expected:
@@ -123,7 +139,7 @@ def restore(source: Path, target: Path):
     target.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix=".restore-", dir=target.parent))
     try:
-        (stage / "media").mkdir()
+        (stage / "media" / "avatars").mkdir(parents=True)
         for name in manifest["files"]:
             shutil.copyfile(source / name, stage / name)
             if name in {"content.db", "2fa.key"}:
@@ -134,6 +150,9 @@ def restore(source: Path, target: Path):
             connection.execute("DELETE FROM login_session")
             connection.execute("DELETE FROM login_attempt")
             tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if "user_session" in tables:
+                connection.execute("DELETE FROM user_session")
+                connection.execute("DELETE FROM email_code")
             if "auth_challenge" in tables:
                 connection.execute("DELETE FROM auth_challenge")
                 connection.execute("UPDATE administrator SET pending_secret=NULL, pending_expires=0")
