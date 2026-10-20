@@ -46,17 +46,8 @@ copylee.cn {
     }
 }
 cloud.copylee.cn {
-    # 子域名首页：私有云声明与备案号（deploy/sftpgo/landing），登录入口为 /web/client/login
-    @landing path /
-    handle @landing {
-        root * /var/www/sftpgo-landing
-        rewrite * /cloud.html
-        header Cache-Control no-cache
-        file_server
-    }
-    handle {
-        reverse_proxy 127.0.0.1:8080
-    }
+    # 根路径由 SFTPGo 跳转到登录页，登录页底部显示备案号（deploy/sftpgo/branding）
+    reverse_proxy 127.0.0.1:8080
 }
 dav.copylee.cn {
     # 仅浏览器直接打开根路径时显示说明页；WebDAV 客户端使用 PROPFIND 或带认证请求，不受影响

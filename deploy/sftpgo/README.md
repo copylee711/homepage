@@ -6,11 +6,11 @@
 
 ## 备案号与私有云声明
 
-按《非经营性互联网信息服务备案管理办法》，网站首页底部中央需标明备案编号并链接工信部备案系统。子域名不单独备案，但 cloud、dav 都是可直接访问的站点，同样挂出备案号，并在页面上声明为个人私有云、不开放注册、不提供经营性服务。
+按《非经营性互联网信息服务备案管理办法》，网站首页底部中央需标明备案编号并链接工信部备案系统。子域名不单独备案，但 cloud、dav 都是可直接访问的站点，同样挂出备案号，并简单注明为私有云、仅限受邀账号。
 
-- `landing/cloud.html`：cloud.copylee.cn 首页，Caddy 在根路径 `/` 提供，“登录云盘”跳转 `/web/client/login`。
+- cloud.copylee.cn：根路径由 SFTPGo 跳转到登录页，登录页即首页，底部居中显示备案号。
 - `landing/dav.html`：仅浏览器直接打开 dav.copylee.cn 根路径时显示；WebDAV 客户端请求照常转给 SFTPGo。
-- `branding/` 与 `branding.env`：SFTPGo 自带的品牌配置（Logo、名称、登录页备案号链接与私有云声明），通过 `/etc/sftpgo/env.d/branding.env` 生效，不修改 `sftpgo.json`，也不修改 SFTPGo 源码或模板，升级软件包后仍然保留。
+- `branding/` 与 `branding.env`：SFTPGo 自带的品牌配置（居中 Logo、登录页备案号链接与私有云提示），通过 `/etc/sftpgo/env.d/branding.env` 生效，不修改 `sftpgo.json`，也不修改 SFTPGo 源码或模板，升级软件包后仍然保留。
 
 更新品牌或落地页：把本目录上传到服务器后以 root 执行 `bash install-branding.sh`（会重启 SFTPGo，中断数秒）。Caddy 配置见 [../Caddyfile.example](../Caddyfile.example)。
 
