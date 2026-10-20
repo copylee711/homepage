@@ -432,7 +432,7 @@ def test_reading_pages_feed_and_not_found(server):
     older = client.get("/posts/older").text
     assert 'href="/posts/newer"' in older and "约 1 分钟" in older
     assert 'href="/posts/older"' in client.get("/posts/newer").text
-    assert "粤ICP备2026159168号" in older and "https://beian.miit.gov.cn/" in older
+    assert "粤ICP备2026159168号-1" in older and "https://beian.miit.gov.cn/" in older
     feed = client.get("/feed.xml")
     assert feed.headers["content-type"].startswith("application/atom+xml")
     assert feed.text.index("Newer post") < feed.text.index("Older post")

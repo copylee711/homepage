@@ -45,7 +45,7 @@ ssh -o ClearAllForwardings=yes -L 8000:127.0.0.1:8000 gz
 
 ## HTTPS 开启
 
-ICP 备案已完成（粤ICP备2026159168号）。开启前确认：阿里云安全组入方向放行 TCP 443；DNS 的 `@`、`www` 指向服务器。cloud、dav 子域名需先添加 A 记录，否则保留示例中的 `http://` 前缀。使用 HTTPS Caddy 示例，Caddy 自动签发证书。环境设置：
+ICP 备案已完成（粤ICP备2026159168号-1）。开启前确认：阿里云安全组入方向放行 TCP 443；DNS 的 `@`、`www` 指向服务器。cloud、dav 子域名需先添加 A 记录，否则保留示例中的 `http://` 前缀。使用 HTTPS Caddy 示例，Caddy 自动签发证书。环境设置：
 
 ```bash
 COPYLEE_SITE_URL=https://copylee.cn
