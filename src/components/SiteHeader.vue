@@ -228,10 +228,9 @@ onBeforeUnmount(() => {
   transition: color 0.2s ease, box-shadow 0.3s ease;
 }
 
-/* 提高优先级，覆盖 .nav a 的 inline-flex，让图标在圆形中居中 */
+/* 提高优先级，覆盖 .nav a 的 inline-flex；网格轨道须撑满圆形，首字母底色才能铺满 */
 .nav .account {
   display: inline-grid;
-  justify-content: center;
 }
 
 .nav .account::after {

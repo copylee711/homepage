@@ -378,6 +378,7 @@ def save_avatar(payload: bytes, user: User, media_dir) -> str:
     picture = ImageOps.fit(picture, (256, 256), Image.Resampling.LANCZOS)
     folder = media_dir / "avatars"
     folder.mkdir(parents=True, exist_ok=True)
+    folder.chmod(0o755)
     name = f"{secrets.token_hex(16)}.webp"
     temporary = folder / f".{name}.tmp"
     picture.save(temporary, "WEBP", quality=85)

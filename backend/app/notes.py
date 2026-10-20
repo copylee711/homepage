@@ -172,6 +172,7 @@ async def fetch_archive(repo: str, branch: str, last: str, token: str, transport
 def store_images(images: dict[str, bytes], needed: set[str], media_dir) -> dict[str, str]:
     folder = media_dir / "notes"
     folder.mkdir(parents=True, exist_ok=True)
+    folder.chmod(0o755)
     urls = {}
     for path in needed & images.keys():
         data = images[path]
