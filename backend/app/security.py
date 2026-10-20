@@ -44,6 +44,7 @@ from .auth import (
 from .models import Administrator, AuthChallenge, LoginAttempt, LoginSession, Passkey
 
 CHALLENGE_COOKIE = "copylee_challenge"
+ELEVATION_SECONDS = 600
 
 
 def cipher(settings, create=False):
@@ -93,7 +94,16 @@ def locked_admin(request, session):
     return session.get(Administrator, 1)
 
 
-def reauthenticate(request, session, admin, proof, factor=True):
+def elevated(request, session) -> bool:
+    return current_session(request, session).elevated_until > time.time()
+
+
+def reauthenticate(request, session, admin, proof, factor=True, allow_elevated=True):
+    if allow_elevated and elevated(request, session):
+        return
+    if not proof.password:
+        # 不计入失败次数：这是会话验证过期，而不是密码错误。
+        raise HTTPException(428, "身份验证已过期，请重新验证")
     try:
         valid = hasher.verify(admin.password_hash, proof.password)
     except VerificationError:
@@ -101,7 +111,21 @@ def reauthenticate(request, session, admin, proof, factor=True):
     if not valid or (factor and admin.totp_secret and not verify_factor(
         request.app.state.settings, admin, proof.otp
     )):
-        fail_login(session, "密码或两步验证码错误")
+        fail_login(session, "密码或两步验证码错误", 403)
+
+
+def elevate(request, session, current):
+    current.elevated_until = time.time() + ELEVATION_SECONDS
+    session.add(current)
+    session.commit()
+    return {"elevated_until": current.elevated_until}
+
+
+def unlock(request, session, proof):
+    admin = locked_admin(request, session)
+    reauthenticate(request, session, admin, proof, allow_elevated=False)
+    session.add(admin)  # 恢复码使用后需要保存
+    return elevate(request, session, current_session(request, session))
 
 
 def revoke_others(request, session):
@@ -139,7 +163,7 @@ def factor_action(request, session, proof, operation):
         # 只验证待绑定密钥；失败绝不将其保存为有效因素。
         pending = Administrator(username=admin.username, password_hash="", totp_secret=admin.pending_secret)
         if not verify_factor(settings, pending, proof.otp):
-            fail_login(session, "验证码错误，请检查设备时间")
+            fail_login(session, "验证码错误，请检查设备时间", 403)
         admin.totp_secret, admin.last_totp_step = admin.pending_secret, pending.last_totp_step
         admin.pending_secret, admin.pending_expires = None, 0
         result = {"recovery_codes": recovery_codes(admin)}
@@ -173,7 +197,7 @@ def passkey_context(request):
     return origin, parts.hostname
 
 
-def passkey_options(request, response, session, proof=None):
+def passkey_options(request, response, session, proof=None, step_up=False):
     origin, rp_id = passkey_context(request)
     session.connection().exec_driver_sql("BEGIN IMMEDIATE")
     session.expire_all()
@@ -194,6 +218,16 @@ def passkey_options(request, response, session, proof=None):
             exclude_credentials=[PublicKeyCredentialDescriptor(id=base64url_to_bytes(key.id)) for key in keys],
         )
         bound, kind = current.token_hash, "register"
+    elif step_up:
+        current = current_session(request, session, write=True)
+        if not keys:
+            raise HTTPException(409, "还没有绑定 Passkey，请使用密码验证")
+        options = generate_authentication_options(
+            rp_id=rp_id,
+            user_verification=UserVerificationRequirement.REQUIRED,
+            allow_credentials=[PublicKeyCredentialDescriptor(id=base64url_to_bytes(key.id)) for key in keys],
+        )
+        bound, kind = current.token_hash, "elevate"
     else:
         options = generate_authentication_options(
             rp_id=rp_id,
@@ -218,20 +252,21 @@ def passkey_options(request, response, session, proof=None):
     return {"options": json.loads(options_to_json(options)), "challenge_id": row.id}
 
 
-def passkey_verify(request, session, body, register=False):
+def passkey_verify(request, session, body, register=False, step_up=False):
     origin, rp_id = passkey_context(request)
     session.connection().exec_driver_sql("BEGIN IMMEDIATE")
     session.expire_all()
     rate_check(session)
     row = session.get(AuthChallenge, body.challenge_id)
     token = request.cookies.get(CHALLENGE_COOKIE, "")
-    if (not row or row.expires_at <= time.time() or row.kind != ("register" if register else "login")
+    status = 403 if register or step_up else 401
+    if (not row or row.expires_at <= time.time() or row.kind != ("register" if register else "elevate" if step_up else "login")
             or row.origin != origin or row.rp_id != rp_id or digest(token) != row.id):
-        fail_login(session, "验证请求已失效，请重试")
-    if register:
+        fail_login(session, "验证请求已失效，请重试", status)
+    if register or step_up:
         current = current_session(request, session, write=True)
         if current.token_hash != row.session_hash:
-            raise HTTPException(403, "绑定会话已改变")
+            raise HTTPException(403, "验证会话已改变")
     session.delete(row)
     try:
         if register:
@@ -247,7 +282,7 @@ def passkey_verify(request, session, body, register=False):
         else:
             key = session.get(Passkey, body.credential.get("id", ""))
             if not key:
-                fail_login(session, "未找到有效 Passkey")
+                fail_login(session, "未找到有效 Passkey", status)
             result = verify_authentication_response(
                 credential=body.credential, expected_challenge=base64url_to_bytes(row.challenge),
                 expected_rp_id=rp_id, expected_origin=origin,
@@ -256,12 +291,14 @@ def passkey_verify(request, session, body, register=False):
             )
             key.sign_count, key.last_used = result.new_sign_count, time.time()
     except (WebAuthnException, ValueError, TypeError, KeyError):
-        fail_login(session, "Passkey 验证失败，请重试")
+        fail_login(session, "Passkey 验证失败，请重试", status)
     session.add(key)
     session.exec(delete(LoginAttempt))
     if register:
         session.commit()
         return {"ok": True}
+    if step_up:
+        return elevate(request, session, current)
     return issue_session(request, session)
 
 

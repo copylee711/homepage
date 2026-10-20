@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { fetchJson } from '../content'
 import type { SiteContent } from '../types'
 import { useTheme } from '../composables/useTheme'
@@ -13,21 +13,45 @@ const { theme, toggle } = useTheme()
 const csrf = ref(''), loading = ref(true), busy = ref(false), error = ref(''), message = ref('')
 const username = ref('admin'), password = ref(''), otp = ref('')
 const tab = ref<'profile' | 'portals' | 'repos' | 'posts' | 'notes' | 'security'>('profile')
-type SecurityState = {totp_enabled:boolean; recovery_remaining:number; passkeys:{id:string; name:string; created_at:number; last_used:number|null}[]}
-const security = ref<SecurityState>(), securityPassword = ref(''), securityOtp = ref(''), keyName = ref('我的设备')
+type SecurityState = {elevated_until:number; totp_enabled:boolean; recovery_remaining:number; passkeys:{id:string; name:string; created_at:number; last_used:number|null}[]}
+const security = ref<SecurityState>(), securityOtp = ref(''), keyName = ref('我的设备')
 const enrollment = ref<{secret:string; qr:string}>(), recoveryCodes = ref<string[]>([])
 const canPasskey = computed(() => passkeyAvailable())
 async function loadSecurity() { security.value = await api<SecurityState>('/api/admin/security') }
-const securityPasswordInput = ref<HTMLInputElement>()
-// 绑定、撤销与两步验证都需再次确认密码；空值先在前端提示，避免显示接口的英文校验信息。
-function proof() {
-  if (!securityPassword.value) { securityPasswordInput.value?.focus(); throw new Error('请先在上方「确认当前密码」中输入登录密码。') }
-  return {password:securityPassword.value, otp:securityOtp.value}
+// 进入登录安全页面时验证一次身份（密码或 Passkey），10 分钟内修改安全设置无需重复输入。
+const stepUp = ref(false), stepPassword = ref(''), stepOtp = ref(''), stepInput = ref<HTMLInputElement>()
+const now = ref(Date.now())
+let clock: ReturnType<typeof setInterval> | undefined
+const elevatedMinutes = computed(() => Math.max(0, Math.ceil(((security.value?.elevated_until ?? 0) * 1000 - now.value) / 60000)))
+function openStepUp() {
+  stepUp.value = true; stepPassword.value = ''; stepOtp.value = ''
+  nextTick(() => stepInput.value?.focus())
 }
+function closeStepUp() { stepUp.value = false; if (!elevatedMinutes.value) tab.value = 'profile' }
+async function finishStepUp(work: () => Promise<{elevated_until: number}>) { await action(async () => {
+  const result = await work()
+  if (security.value) security.value.elevated_until = result.elevated_until
+  now.value = Date.now(); stepUp.value = false; stepPassword.value = ''; stepOtp.value = ''
+  message.value = '身份已验证，10 分钟内可直接修改安全设置。'
+}) }
+const unlockWithPassword = () => finishStepUp(() => api('/api/admin/security/unlock', 'POST', {password: stepPassword.value, otp: stepOtp.value}))
+const unlockWithPasskey = () => finishStepUp(async () => {
+  const options = await api<{options: Record<string, any>; challenge_id: string}>('/api/admin/security/unlock/passkey/options', 'POST')
+  const credential = await usePasskey(options.options)
+  return api('/api/admin/security/unlock/passkey/verify', 'POST', {challenge_id: options.challenge_id, credential})
+})
+watch(tab, async (next) => {
+  if (next !== 'security') return
+  await loadSecurity().catch(() => {})
+  now.value = Date.now()
+  if (!elevatedMinutes.value) openStepUp()
+})
+// 身份已验证时密码留空；开启两步验证时 otp 为验证器中的新验证码。
+function proof() { return {password: '', otp: securityOtp.value} }
 async function factorOperation(operation:string) { await action(async () => {
   const result = await api<{secret?:string; qr?:string; recovery_codes?:string[]}>(`/api/admin/security/2fa/${operation}`, 'POST', proof())
   if(operation==='setup') enrollment.value={secret:result.secret!,qr:result.qr!}
-  else { enrollment.value=undefined; securityPassword.value=''; securityOtp.value=''; recoveryCodes.value=result.recovery_codes ?? [] }
+  else { enrollment.value=undefined; securityOtp.value=''; recoveryCodes.value=result.recovery_codes ?? [] }
   await loadSecurity(); message.value=operation==='setup' ? '请扫描二维码，然后输入验证码确认绑定。' : '安全设置已更新，其他会话已撤销。'
 }) }
 async function keyLogin() { await action(async () => {
@@ -41,13 +65,13 @@ async function addPasskey() { await action(async () => {
   const options = await api<{options:Record<string,any>;challenge_id:string}>('/api/admin/security/passkeys/options','POST',{...proof(),name:keyName.value})
   const credential = await usePasskey(options.options,true)
   await api('/api/admin/security/passkeys/verify','POST',{challenge_id:options.challenge_id,credential,name:keyName.value})
-  securityPassword.value=''; securityOtp.value=''; await loadSecurity(); message.value='Passkey 已绑定，下次可以直接使用设备验证登录。'
+  await loadSecurity(); message.value='Passkey 已绑定，下次可以直接使用设备验证登录。'
 }) }
 async function removePasskey(id:string) { await action(async () => {
   const body = proof()
   if(!confirm('撤销后这个 Passkey 将不能再登录，继续吗？')) return
   await api(`/api/admin/security/passkeys/${encodeURIComponent(id)}/remove`,'POST',body)
-  securityPassword.value=''; securityOtp.value=''; await loadSecurity(); message.value='Passkey 已撤销，其他会话已退出。'
+  await loadSecurity(); message.value='Passkey 已撤销，其他会话已退出。'
 }) }
 const settings = ref<SiteContent>(), siteRevision = ref(0)
 const articles = ref<ArticleItem[]>([]), article = ref<Article>(), draft = ref<Draft>(emptyDraft())
@@ -126,6 +150,7 @@ async function action(work: () => Promise<void>) {
   busy.value = true; error.value = ''; message.value = ''
   try { await work() } catch(err) {
     if((err as {status?: number}).status===401) csrf.value=''
+    if((err as {status?: number}).status===428) { if (security.value) security.value.elevated_until = 0; openStepUp() }
     error.value = err instanceof Error ? err.message : '操作失败'
   }
   finally { busy.value = false }
@@ -149,7 +174,7 @@ async function logout() { await action(async () => {
   article.value = undefined; draft.value = emptyDraft(); lastDraft.value = JSON.stringify(draft.value)
   preview.value = ''; articles.value = []; syncState.value = undefined
   noteItems.value = []; notesConfig.value = undefined; noteEdit.value = undefined
-  security.value=undefined; securityPassword.value=''; securityOtp.value=''; enrollment.value=undefined; recoveryCodes.value=[]
+  security.value=undefined; securityOtp.value=''; stepUp.value=false; enrollment.value=undefined; recoveryCodes.value=[]
 }) }
 async function saveSettings() { await action(async () => {
   const result = await api<{revision: number}>('/api/admin/site', 'PUT', {revision: siteRevision.value, site: currentSite()})
@@ -249,6 +274,7 @@ function preventLeave(event: BeforeUnloadEvent) {
   if ((dirty.value && draft.value.title) || siteDirty.value) { event.preventDefault(); event.returnValue = '' }
 }
 onMounted(async () => {
+  clock = setInterval(() => { now.value = Date.now() }, 15000)
   lastDraft.value = JSON.stringify(draft.value)
   window.addEventListener('beforeunload', preventLeave)
   try {
@@ -257,7 +283,7 @@ onMounted(async () => {
   } catch(err) { if((err as {status?: number}).status !== 401) error.value = err instanceof Error ? err.message : '后台加载失败' }
   finally { loading.value = false }
 })
-onBeforeUnmount(() => window.removeEventListener('beforeunload', preventLeave))
+onBeforeUnmount(() => { window.removeEventListener('beforeunload', preventLeave); clearInterval(clock) })
 </script>
 
 <template>
@@ -276,7 +302,9 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', preventLeave))
         <button class="primary" type="submit">{{ busy ? '正在登录…' : '登录后台' }}</button></fieldset></form>
       <button @click="keyLogin" :disabled="busy || !canPasskey" class="passkey-login">使用 Passkey 登录</button>
       <p class="field-hint">已绑定的设备可使用指纹、面容或 PIN，无需输入密码。</p>
-      <p class="login-hint">HTTP 阶段请通过 SSH 隧道访问。忘记密码时在服务器重置账号。</p>
+      <details class="login-hint"><summary>忘记密码？</summary><p>SSH 登录服务器后执行（会撤销所有会话，保留 Passkey 与两步验证）：</p><pre>cd /opt/copylee-backend/current
+set -a; . /etc/copylee/backend.env; set +a
+runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pre><p>设备丢失、无法通过两步验证时，再执行以下命令清除 Passkey、两步验证与恢复码：</p><pre>runuser -u copylee -- .venv/bin/python -m app.cli reset-security --confirm</pre></details>
     </main>
     <div v-else class="admin-layout">
       <aside class="admin-nav"><p class="eyebrow">Workspace</p><button v-for="item in [{id:'profile',name:'主页设置'},{id:'portals',name:'入口卡片'},{id:'repos',name:'仓库展示'},{id:'posts',name:'文章管理'},{id:'notes',name:'笔记管理'},{id:'security',name:'登录安全'}]" :key="item.id" :class="{selected:tab===item.id}" @click="tab=item.id as typeof tab">{{ item.name }}<span>↗</span></button><p class="nav-note">内容保存后即可更新。<br>页面样式仍由代码管理。</p></aside>
@@ -284,7 +312,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', preventLeave))
         <template v-if="tab==='security'">
           <div class="section-head"><div><p class="eyebrow">Account access</p><h1>登录安全</h1></div></div>
           <p class="subtle">选择适合你的登录方式。Passkey 使用设备验证；开启 TOTP 后，密码登录还需要验证码。</p>
-          <div class="form-grid security-proof"><label>确认当前密码<span class="field-hint">绑定或撤销前再次确认</span><input ref="securityPasswordInput" v-model="securityPassword" type="password" autocomplete="current-password" maxlength="200"></label><label>验证码 / 恢复码<span class="field-hint">已开启 TOTP 时填写；绑定时填写新验证码</span><input v-model="securityOtp" autocomplete="one-time-code" maxlength="80"></label></div>
+          <div class="step-status" :class="{ ok: elevatedMinutes }"><span class="dot" aria-hidden="true"></span><span>{{ elevatedMinutes ? `已验证身份，约 ${elevatedMinutes} 分钟内可直接修改` : '尚未验证身份' }}</span><button v-if="!elevatedMinutes" @click="openStepUp">验证身份</button></div>
           <section class="edit-card security-card"><h2>Passkey</h2><p class="subtle">绑定后可用指纹、面容、设备 PIN 或安全密钥登录。可绑定多个设备，最多 10 个。</p>
             <div class="form-grid"><label>设备名称<input v-model="keyName" maxlength="80" placeholder="例如：我的手机"></label></div>
             <button @click="addPasskey" :disabled="!canPasskey">绑定 Passkey</button>
@@ -294,12 +322,12 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', preventLeave))
           </section>
           <section class="edit-card security-card"><h2>两步验证（TOTP）<span class="security-status">{{security?.totp_enabled ? '已开启' : '未开启'}}</span></h2>
             <p class="subtle">使用验证器 App 生成 6 位验证码。默认关闭，可随时开启；恢复码每个只能使用一次。</p>
-            <template v-if="enrollment"><img class="totp-qr" :src="enrollment.qr" alt="验证器绑定二维码"><label>手动绑定密钥<input :value="enrollment.secret" readonly autocomplete="off"></label><p class="field-hint">二维码和密钥请勿分享。绑定在 10 分钟后失效；在上方输入验证码确认。</p><button class="primary" @click="factorOperation('enable')">确认开启</button></template>
+            <template v-if="enrollment"><img class="totp-qr" :src="enrollment.qr" alt="验证器绑定二维码"><label>手动绑定密钥<input :value="enrollment.secret" readonly autocomplete="off"></label><label>验证器中的 6 位验证码<input v-model="securityOtp" autocomplete="one-time-code" inputmode="numeric" maxlength="6"></label><p class="field-hint">二维码和密钥请勿分享。绑定在 10 分钟后失效。</p><button class="primary" @click="factorOperation('enable')">确认开启</button></template>
             <button v-else-if="!security?.totp_enabled" @click="factorOperation('setup')">开始绑定验证器</button>
             <div v-else class="buttons"><button @click="factorOperation('recovery')">重新生成恢复码</button><button class="danger" @click="factorOperation('disable')">关闭两步验证</button><span class="field-hint">剩余恢复码：{{security.recovery_remaining}}</span></div>
           </section>
           <section v-if="recoveryCodes.length" class="edit-card"><h2>保存恢复码</h2><p class="subtle">这些恢复码仅显示一次。请保存到安全位置；重新生成后旧恢复码失效。</p><pre class="recovery-codes">{{recoveryCodes.join('\n')}}</pre><button @click="recoveryCodes=[]">我已保存恢复码</button></section>
-          <p class="field-hint">设备丢失时，可在服务器使用 reset-security 重置登录因素。重置密码保留已绑定因素；安全设置修改会撤销其他会话。</p>
+          <p class="field-hint">忘记密码或设备丢失时，可在服务器上重置，步骤见登录页底部。安全设置修改会撤销其他会话。</p>
         </template>
         <template v-if="tab !== 'posts' && tab !== 'notes' && tab !== 'security' && settings">
           <div class="section-head"><div><p class="eyebrow">Site content</p><h1>{{ tab==='profile' ? '主页设置' : tab==='portals' ? '入口卡片' : '仓库展示' }}</h1></div>
@@ -397,13 +425,45 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', preventLeave))
         </template>
       </fieldset></main>
     </div>
+    <Transition name="step">
+      <div v-if="stepUp" class="step-backdrop" @click.self="closeStepUp" @keydown.esc="closeStepUp">
+        <form class="step-dialog" role="dialog" aria-modal="true" aria-labelledby="step-title" @submit.prevent="unlockWithPassword">
+          <p class="eyebrow">Verify it's you</p><h2 id="step-title">验证身份</h2>
+          <p class="subtle">修改登录安全设置前需要确认身份，验证后 10 分钟内无需重复输入。</p>
+          <fieldset :disabled="busy">
+            <label>登录密码<input ref="stepInput" v-model="stepPassword" type="password" autocomplete="current-password" maxlength="200" required></label>
+            <label v-if="security?.totp_enabled">两步验证码 / 恢复码<input v-model="stepOtp" autocomplete="one-time-code" maxlength="80" required></label>
+            <button class="primary" type="submit">{{ busy ? '正在验证…' : '验证' }}</button>
+            <button v-if="security?.passkeys.length && canPasskey" type="button" class="passkey-step" @click="unlockWithPasskey">使用 Passkey 验证</button>
+            <button type="button" class="link-button" @click="closeStepUp">取消</button>
+          </fieldset>
+        </form>
+      </div>
+    </Transition>
   </div>
 </template>
 
 <style scoped>
 .admin-shell { min-height:100vh; }
 .passkey-login { margin-top:16px; width:100%; }
-.security-proof { margin:24px 0; }
+.step-status { display:flex; align-items:center; gap:10px; margin:8px 0 28px; padding:12px 16px; border:1px solid var(--line); border-radius:10px; font-size:13px; color:var(--muted); }
+.step-status .dot { width:8px; height:8px; border-radius:50%; background:var(--faint); }
+.step-status.ok { color:var(--text-2); }
+.step-status.ok .dot { background:#2fa36b; box-shadow:0 0 0 4px rgba(47,163,107,.15); }
+.step-status button { margin-left:auto; }
+.step-backdrop { position:fixed; inset:0; z-index:50; display:grid; place-items:center; padding:20px; background:rgba(12,13,16,.45); backdrop-filter:blur(6px); }
+.step-dialog { width:min(420px,100%); padding:32px; border:1px solid var(--line); border-radius:16px; background:var(--bg); box-shadow:0 30px 60px -20px rgba(0,0,0,.35); }
+.step-dialog h2 { font-size:26px; margin:6px 0 0; }
+.step-dialog label { margin-top:18px; }
+.step-dialog .primary { width:100%; margin-top:24px; padding:12px; }
+.passkey-step { width:100%; margin-top:10px; padding:12px; }
+.link-button { display:block; margin:14px auto 0; border:0; background:none; color:var(--muted); }
+.step-enter-active,.step-leave-active { transition:opacity .25s ease; }
+.step-enter-active .step-dialog,.step-leave-active .step-dialog { transition:transform .35s var(--ease); }
+.step-enter-from,.step-leave-to { opacity:0; }
+.step-enter-from .step-dialog,.step-leave-to .step-dialog { transform:translateY(16px) scale(.98); }
+.login-hint summary { cursor:pointer; color:var(--muted); }
+.login-hint pre { margin:10px 0; padding:12px; overflow:auto; border-radius:8px; background:var(--surface); border:1px solid var(--line); color:var(--text-2); font:12px/1.7 var(--font-mono); white-space:pre; }
 .security-card>button,.security-card>.buttons { margin-top:20px; }
 .security-card>.form-grid+button { margin-top:16px; }
 .security-card>.field-hint { margin-top:12px; }

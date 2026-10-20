@@ -90,7 +90,7 @@ def test_totp_expiry_disable_rotation_and_csrf(server, monkeypatch):
     new_codes = rotated.json()["recovery_codes"]
     assert not set(new_codes) & set(codes)
     assert post(client, headers, "/api/admin/security/2fa/disable", password=PASSWORD,
-                otp=codes[1]).status_code == 401
+                otp=codes[1]).status_code == 403
     assert post(client, headers, "/api/admin/security/2fa/disable", password=PASSWORD,
                 otp=new_codes[0]).status_code == 200
     setup = post(client, headers, "/api/admin/security/2fa/setup", password=PASSWORD).json()
@@ -144,7 +144,7 @@ def test_passkey_cryptographic_login_replay_revoke(server, tmp_path):
         assert connection.execute("SELECT id FROM passkey").fetchone()[0] == bytes_to_base64url(cred_id)
         assert connection.execute("SELECT count(*) FROM auth_challenge").fetchone()[0] == 0
     assert post(client, headers, "/api/admin/security/passkeys/verify",
-                challenge_id=options["challenge_id"], credential=data).status_code == 401
+                challenge_id=options["challenge_id"], credential=data).status_code == 403
     client.post("/api/auth/logout", headers=headers)
     options = client.post("/api/auth/passkey/options", headers={"Origin": ORIGIN}).json()
     data = credential(options["options"], private, cred_id, False)
@@ -211,9 +211,48 @@ def test_passkey_registration_access_and_domain(server):
     path = "/api/admin/security/passkeys/options"
     assert post(client, {"Origin": ORIGIN}, path, password=PASSWORD, name="device").status_code == 401
     headers = login(client)
-    assert post(client, headers, path, password="incorrect", name="device").status_code == 401
+    assert post(client, headers, path, password="incorrect", name="device").status_code == 403
     assert client.post("/api/auth/passkey/options", headers={"Origin": "http://localhost:5173"}).status_code == 403
     assert client.post("/api/auth/passkey/options").status_code == 403
     app.state.settings.site_url = "http://127.0.0.1:8000"
     app.state.settings.allowed_origins += ",http://127.0.0.1:8000"
     assert client.post("/api/auth/passkey/options", headers={"Origin": "http://127.0.0.1:8000"}).status_code == 403
+
+
+def test_step_up_with_password_and_passkey(server, monkeypatch):
+    client, app, settings = server
+    headers = login(client)
+    now = [time.time()]
+    monkeypatch.setattr(time, "time", lambda: now[0])
+    state = client.get("/api/admin/security").json()
+    assert state["elevated_until"] < now[0]
+    # 未验证时空密码返回 428，且不计入登录失败。
+    for _ in range(6):
+        assert post(client, headers, "/api/admin/security/2fa/setup").status_code == 428
+    assert post(client, headers, "/api/admin/security/unlock", password="wrong-password").status_code == 403
+    unlocked = post(client, headers, "/api/admin/security/unlock", password=PASSWORD)
+    assert unlocked.status_code == 200, unlocked.text
+    assert unlocked.json()["elevated_until"] == pytest.approx(now[0] + 600)
+    # 验证有效期内无需再输入密码。
+    private = ec.generate_private_key(ec.SECP256R1())
+    cred_id = b"step-up-credential-id-32-bytes!!"
+    options = post(client, headers, "/api/admin/security/passkeys/options", name="Phone").json()
+    data = credential(options["options"], private, cred_id, True)
+    assert post(client, headers, "/api/admin/security/passkeys/verify",
+                challenge_id=options["challenge_id"], credential=data, name="Phone").status_code == 200
+    # 过期后需要重新验证，Passkey 也可以完成验证。
+    now[0] += 601
+    assert post(client, headers, "/api/admin/security/2fa/setup").status_code == 428
+    options = client.post("/api/admin/security/unlock/passkey/options", headers=headers).json()
+    assert options["options"]["userVerification"] == "required"
+    data = credential(options["options"], private, cred_id, False)
+    verified = post(client, headers, "/api/admin/security/unlock/passkey/verify",
+                    challenge_id=options["challenge_id"], credential=data)
+    assert verified.status_code == 200, verified.text
+    assert client.get("/api/admin/security").json()["elevated_until"] > now[0]
+    assert post(client, headers, "/api/admin/security/2fa/setup").status_code == 200
+    # 登录用的挑战不能用于提升权限。
+    login_options = client.post("/api/auth/passkey/options", headers={"Origin": ORIGIN}).json()
+    data = credential(login_options["options"], private, cred_id, False, counter=2)
+    assert post(client, headers, "/api/admin/security/unlock/passkey/verify",
+                challenge_id=login_options["challenge_id"], credential=data).status_code == 403

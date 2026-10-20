@@ -109,7 +109,7 @@ def rate_check(session: Session):
         raise HTTPException(429, "登录失败过多，请 15 分钟后重试", headers={"Retry-After": "900"})
 
 
-def fail_login(session: Session, message: str):
+def fail_login(session: Session, message: str, status: int = 401):
     now = time.time()
     attempt = session.get(LoginAttempt, "admin") or LoginAttempt(key="admin", window_start=now)
     if now - attempt.window_start >= 900:
@@ -117,7 +117,8 @@ def fail_login(session: Session, message: str):
     attempt.failures += 1
     session.add(attempt)
     session.commit()
-    raise HTTPException(401, message)
+    # 已登录后的二次验证失败用 403，避免前端误判为会话过期而退出。
+    raise HTTPException(status, message)
 
 
 def set_admin(session: Session, username: str, password: str):

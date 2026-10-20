@@ -132,7 +132,8 @@ class Login(StrictModel):
 
 
 class SecurityProof(StrictModel):
-    password: str = Field(min_length=1, max_length=200)
+    # 已在本会话验证身份时可留空。
+    password: str = Field(default="", max_length=200)
     otp: str = Field(default="", max_length=80)
 
 

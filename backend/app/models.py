@@ -89,6 +89,8 @@ class LoginSession(SQLModel, table=True):
     token_hash: str = Field(primary_key=True)
     csrf: str
     expires_at: float
+    # 进入登录安全页面时验证一次身份，有效期内修改安全设置无需重复输入密码。
+    elevated_until: float = 0
 
 
 class LoginAttempt(SQLModel, table=True):

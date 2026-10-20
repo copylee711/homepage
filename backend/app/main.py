@@ -67,7 +67,13 @@ from .schemas import (
 )
 from .scut import public_scut
 from .scut import sync_loop as scut_sync_loop
-from .security import factor_action, passkey_options, passkey_verify, remove_passkey
+from .security import (
+    factor_action,
+    passkey_options,
+    passkey_verify,
+    remove_passkey,
+    unlock,
+)
 from .settings import Settings
 
 HERE = Path(__file__).parent
@@ -225,12 +231,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"csrf": row.csrf}
 
     @app.get("/api/admin/security")
-    def security_state(session: Session = Depends(authorized)):
+    def security_state(request: Request, session: Session = Depends(authorized)):
         admin = session.get(Administrator, 1)
-        return {"totp_enabled": bool(admin.totp_secret),
+        return {"elevated_until": current_session(request, session).elevated_until,
+                "totp_enabled": bool(admin.totp_secret),
                 "recovery_remaining": len(admin.recovery_hashes),
                 "passkeys": [{"id": key.id, "name": key.name, "created_at": key.created_at,
                               "last_used": key.last_used} for key in session.exec(select(Passkey)).all()]}
+
+    @app.post("/api/admin/security/unlock")
+    def security_unlock(body: SecurityProof, request: Request,
+                        session: Session = Depends(authorized)):
+        return unlock(request, session, body)
+
+    @app.post("/api/admin/security/unlock/passkey/options")
+    def security_unlock_options(request: Request, response: Response,
+                                session: Session = Depends(authorized)):
+        return passkey_options(request, response, session, step_up=True)
+
+    @app.post("/api/admin/security/unlock/passkey/verify")
+    def security_unlock_verify(body: PasskeyResponse, request: Request,
+                               session: Session = Depends(authorized)):
+        return passkey_verify(request, session, body, step_up=True)
 
     @app.post("/api/admin/security/2fa/{operation}")
     def factor_change(operation: str, body: SecurityProof, request: Request,
