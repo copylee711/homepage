@@ -45,6 +45,7 @@ from .models import Administrator, AuthChallenge, LoginAttempt, LoginSession, Pa
 
 CHALLENGE_COOKIE = "copylee_challenge"
 ELEVATION_SECONDS = 600
+OTP_REQUIRED = "请输入两步验证码或恢复码"
 
 
 def cipher(settings, create=False):
@@ -108,6 +109,9 @@ def reauthenticate(request, session, admin, proof, factor=True, allow_elevated=T
         valid = hasher.verify(admin.password_hash, proof.password)
     except VerificationError:
         valid = False
+    if valid and factor and admin.totp_secret and not proof.otp.strip():
+        # 密码正确但尚未输入验证码：前端据此弹出第二步，不计入失败次数。
+        raise HTTPException(403, OTP_REQUIRED)
     if not valid or (factor and admin.totp_secret and not verify_factor(
         request.app.state.settings, admin, proof.otp
     )):

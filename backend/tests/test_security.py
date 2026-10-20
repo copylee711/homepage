@@ -256,3 +256,17 @@ def test_step_up_with_password_and_passkey(server, monkeypatch):
     data = credential(login_options["options"], private, cred_id, False, counter=2)
     assert post(client, headers, "/api/admin/security/unlock/passkey/verify",
                 challenge_id=login_options["challenge_id"], credential=data).status_code == 403
+
+
+def test_unlock_asks_for_code_after_correct_password(server, monkeypatch):
+    client, app, settings = server
+    headers = login(client)
+    now = [time.time()]
+    secret, codes = bind_totp(client, headers, now, monkeypatch)
+    for _ in range(6):
+        missing = post(client, headers, "/api/admin/security/unlock", password=PASSWORD)
+        assert missing.status_code == 403 and missing.json()["detail"] == "请输入两步验证码或恢复码"
+    now[0] += 60
+    unlocked = post(client, headers, "/api/admin/security/unlock", password=PASSWORD,
+                    otp=pyotp.TOTP(secret).at(now[0]))
+    assert unlocked.status_code == 200, unlocked.text

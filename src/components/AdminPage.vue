@@ -11,7 +11,17 @@ type ArticleItem = { id: string; title: string; slug: string; published: boolean
 type SyncState = { last_success: string | null; last_error: string; items: unknown[] }
 const { theme, toggle } = useTheme()
 const csrf = ref(''), loading = ref(true), busy = ref(false), error = ref(''), message = ref('')
-const username = ref('admin'), password = ref(''), otp = ref('')
+const username = ref('admin'), password = ref('')
+// 两步验证码不常驻：密码通过后服务器提示需要验证码，再弹出第二步。
+const OTP_REQUIRED = '请输入两步验证码或恢复码'
+const otpFor = ref<null | 'login' | 'unlock'>(null), otpCode = ref(''), otpInput = ref<HTMLInputElement>()
+function needsOtp(err: unknown) { return err instanceof Error && err.message === OTP_REQUIRED }
+function askOtp(target: 'login' | 'unlock') {
+  otpFor.value = target; otpCode.value = ''; error.value = ''
+}
+// 请求结束、表单解除禁用后再聚焦验证码输入框。
+watch([otpFor, busy], ([target, working]) => { if (target && !working) nextTick(() => otpInput.value?.focus()) }, { flush: 'post' })
+function submitOtp() { return otpFor.value === 'login' ? login() : unlockWithPassword() }
 const tab = ref<'profile' | 'portals' | 'repos' | 'posts' | 'notes' | 'security'>('profile')
 type SecurityState = {elevated_until:number; totp_enabled:boolean; recovery_remaining:number; passkeys:{id:string; name:string; created_at:number; last_used:number|null}[]}
 const security = ref<SecurityState>(), securityOtp = ref(''), keyName = ref('我的设备')
@@ -19,22 +29,26 @@ const enrollment = ref<{secret:string; qr:string}>(), recoveryCodes = ref<string
 const canPasskey = computed(() => passkeyAvailable())
 async function loadSecurity() { security.value = await api<SecurityState>('/api/admin/security') }
 // 进入登录安全页面时验证一次身份（密码或 Passkey），10 分钟内修改安全设置无需重复输入。
-const stepUp = ref(false), stepPassword = ref(''), stepOtp = ref(''), stepInput = ref<HTMLInputElement>()
+const stepUp = ref(false), stepPassword = ref(''), stepInput = ref<HTMLInputElement>()
 const now = ref(Date.now())
 let clock: ReturnType<typeof setInterval> | undefined
 const elevatedMinutes = computed(() => Math.max(0, Math.ceil(((security.value?.elevated_until ?? 0) * 1000 - now.value) / 60000)))
 function openStepUp() {
-  stepUp.value = true; stepPassword.value = ''; stepOtp.value = ''
+  stepUp.value = true; stepPassword.value = ''; otpFor.value = null
   nextTick(() => stepInput.value?.focus())
 }
 function closeStepUp() { stepUp.value = false; if (!elevatedMinutes.value) tab.value = 'profile' }
-async function finishStepUp(work: () => Promise<{elevated_until: number}>) { await action(async () => {
+async function finishStepUp(work: () => Promise<{elevated_until: number} | null>) { await action(async () => {
   const result = await work()
+  if (!result) return
   if (security.value) security.value.elevated_until = result.elevated_until
-  now.value = Date.now(); stepUp.value = false; stepPassword.value = ''; stepOtp.value = ''
+  now.value = Date.now(); stepUp.value = false; stepPassword.value = ''; otpFor.value = null; otpCode.value = ''
   message.value = '身份已验证，10 分钟内可直接修改安全设置。'
 }) }
-const unlockWithPassword = () => finishStepUp(() => api('/api/admin/security/unlock', 'POST', {password: stepPassword.value, otp: stepOtp.value}))
+const unlockWithPassword = () => finishStepUp(async () => {
+  try { return await api<{elevated_until: number}>('/api/admin/security/unlock', 'POST', {password: stepPassword.value, otp: otpFor.value ? otpCode.value : ''}) }
+  catch (err) { if (needsOtp(err)) { askOtp('unlock'); return null } throw err }
+})
 const unlockWithPasskey = () => finishStepUp(async () => {
   const options = await api<{options: Record<string, any>; challenge_id: string}>('/api/admin/security/unlock/passkey/options', 'POST')
   const credential = await usePasskey(options.options)
@@ -58,7 +72,7 @@ async function keyLogin() { await action(async () => {
   const options = await api<{options:Record<string,any>;challenge_id:string}>('/api/auth/passkey/options','POST')
   const credential = await usePasskey(options.options)
   const result = await api<{csrf:string}>('/api/auth/passkey/verify','POST',{challenge_id:options.challenge_id,credential})
-  csrf.value=result.csrf; password.value=''; otp.value=''
+  csrf.value=result.csrf; password.value=''
   await loadSettings(); await listArticles(); await loadSecurity(); await loadNotes()
 }) }
 async function addPasskey() { await action(async () => {
@@ -164,8 +178,10 @@ async function loadSettings() {
 }
 async function listArticles() { articles.value = await api<ArticleItem[]>('/api/admin/posts') }
 async function login() { await action(async () => {
-  const data = await api<{csrf: string}>('/api/auth/login', 'POST', {username: username.value, password: password.value,otp:otp.value})
-  csrf.value = data.csrf; password.value = ''; otp.value=''
+  let data: {csrf: string}
+  try { data = await api<{csrf: string}>('/api/auth/login', 'POST', {username: username.value, password: password.value, otp: otpFor.value ? otpCode.value : ''}) }
+  catch (err) { if (needsOtp(err)) { askOtp('login'); return } throw err }
+  csrf.value = data.csrf; password.value = ''; otpFor.value = null; otpCode.value = ''
   await loadSettings(); await listArticles(); await loadSecurity(); await loadNotes()
 }) }
 async function logout() { await action(async () => {
@@ -298,7 +314,6 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', preventLeave)
       <p class="eyebrow">Your personal space</p><h1>欢迎回来。</h1><p class="subtle">登录后编辑主页，或写下新的一篇。</p>
       <form @submit.prevent="login"><fieldset :disabled="busy"><label>管理员账号<input v-model="username" autocomplete="username" required maxlength="80"></label>
         <label>密码<input v-model="password" type="password" autocomplete="current-password" required maxlength="200"></label>
-        <label>两步验证码 / 恢复码<span class="field-hint">开启 TOTP 后填写；未开启时留空</span><input v-model="otp" autocomplete="one-time-code" maxlength="80"></label>
         <button class="primary" type="submit">{{ busy ? '正在登录…' : '登录后台' }}</button></fieldset></form>
       <button @click="keyLogin" :disabled="busy || !canPasskey" class="passkey-login">使用 Passkey 登录</button>
       <p class="field-hint">已绑定的设备可使用指纹、面容或 PIN，无需输入密码。</p>
@@ -430,12 +445,26 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
         <form class="step-dialog" role="dialog" aria-modal="true" aria-labelledby="step-title" @submit.prevent="unlockWithPassword">
           <p class="eyebrow">Verify it's you</p><h2 id="step-title">验证身份</h2>
           <p class="subtle">修改登录安全设置前需要确认身份，验证后 10 分钟内无需重复输入。</p>
+          <p v-if="error && !otpFor" class="dialog-error" role="alert">{{ error }}</p>
           <fieldset :disabled="busy">
             <label>登录密码<input ref="stepInput" v-model="stepPassword" type="password" autocomplete="current-password" maxlength="200" required></label>
-            <label v-if="security?.totp_enabled">两步验证码 / 恢复码<input v-model="stepOtp" autocomplete="one-time-code" maxlength="80" required></label>
             <button class="primary" type="submit">{{ busy ? '正在验证…' : '验证' }}</button>
             <button v-if="security?.passkeys.length && canPasskey" type="button" class="passkey-step" @click="unlockWithPasskey">使用 Passkey 验证</button>
             <button type="button" class="link-button" @click="closeStepUp">取消</button>
+          </fieldset>
+        </form>
+      </div>
+    </Transition>
+    <Transition name="step">
+      <div v-if="otpFor" class="step-backdrop otp-backdrop" @click.self="otpFor = null">
+        <form class="step-dialog" role="dialog" aria-modal="true" aria-labelledby="otp-title" @submit.prevent="submitOtp">
+          <p class="eyebrow">Two-step verification</p><h2 id="otp-title">输入验证码</h2>
+          <p class="subtle">打开验证器 App，输入当前的 6 位验证码；也可以使用一次性恢复码。</p>
+          <p v-if="error" class="dialog-error" role="alert">{{ error }}</p>
+          <fieldset :disabled="busy">
+            <label>验证码 / 恢复码<input ref="otpInput" v-model="otpCode" class="otp-input" autocomplete="one-time-code" inputmode="text" maxlength="80" required></label>
+            <button class="primary" type="submit">{{ busy ? '正在验证…' : '验证' }}</button>
+            <button type="button" class="link-button" @click="otpFor = null">返回</button>
           </fieldset>
         </form>
       </div>
@@ -454,6 +483,9 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
 .step-backdrop { position:fixed; inset:0; z-index:50; display:grid; place-items:center; padding:20px; background:rgba(12,13,16,.45); backdrop-filter:blur(6px); }
 .step-dialog { width:min(420px,100%); padding:32px; border:1px solid var(--line); border-radius:16px; background:var(--bg); box-shadow:0 30px 60px -20px rgba(0,0,0,.35); }
 .step-dialog h2 { font-size:26px; margin:6px 0 0; }
+.otp-backdrop { z-index:60; }
+.otp-input { font:500 22px var(--font-mono); letter-spacing:.3em; text-align:center; }
+.dialog-error { margin:12px 0 0; padding:10px 14px; border-radius:8px; color:#d15c5c; background:rgba(209,92,92,.08); font-size:13px; }
 .step-dialog label { margin-top:18px; }
 .step-dialog .primary { width:100%; margin-top:24px; padding:12px; }
 .passkey-step { width:100%; margin-top:10px; padding:12px; }
