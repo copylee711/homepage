@@ -31,6 +31,7 @@ from .models import (
     Content,
     EmailCode,
     Favorite,
+    GameScore,
     History,
     LoginAttempt,
     Note,
@@ -346,7 +347,7 @@ def change_password(session, user: User, current: UserSession, body):
 def delete_account(session, user: User, password: str, media_dir):
     if not verify_password(user.password_hash, password):
         raise HTTPException(403, "密码不正确")
-    for table in (Favorite, History, UserSession, ScutReading):
+    for table in (Favorite, History, UserSession, ScutReading, GameScore):
         session.exec(delete(table).where(table.user_id == user.id))
     session.exec(delete(EmailCode).where(EmailCode.email == user.email))
     remove_avatar(user, media_dir)

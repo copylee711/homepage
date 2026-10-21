@@ -15,6 +15,7 @@ const links = [
 const path = location.pathname.replace(/\/$/, '')
 const isScut = path === '/scut'
 const isAccount = path === '/account'
+const isGames = path.startsWith('/games')
 // 非首页时，锚点链接回到首页对应区块。
 const onHome = path === ''
 // 入口区没有单独的导航项，滚动到那里时仍高亮 Home
@@ -84,6 +85,7 @@ onBeforeUnmount(() => {
           {{ link.label }}
         </a>
         <a href="/scut" :class="{ active: isScut }" :aria-current="isScut ? 'page' : undefined">SCUT</a>
+        <a href="/games" :class="{ active: isGames }" :aria-current="isGames ? 'page' : undefined">Games</a>
         <a href="/posts">Articles</a>
         <a href="/notes">Notes</a>
         <a :href="site.cloud" target="_blank" rel="noopener">Cloud</a>

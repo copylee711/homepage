@@ -5,6 +5,8 @@ import type { AccountEntry, AccountUser } from '../account'
 import { fetchJson } from '../content'
 import { vReveal } from '../composables/useReveal'
 import PageHeading from './PageHeading.vue'
+import { games, loadMine } from '../games/api'
+import type { GameBest, GameId } from '../games/api'
 
 type Mode = 'login' | 'register' | 'reset'
 const mode = ref<Mode>('login')
@@ -14,6 +16,7 @@ const email = ref(''), password = ref(''), code = ref(''), name = ref(''), agree
 const cooldown = ref(0)
 const config = ref<{ registrationOpen: boolean; allowedDomains: string[] }>()
 const favorites = ref<AccountEntry[]>([]), history = ref<AccountEntry[]>([])
+const gameBests = ref<Partial<Record<GameId, GameBest | null>>>({})
 const editName = ref(''), currentPassword = ref(''), newPassword = ref(''), deletePassword = ref('')
 let timer: ReturnType<typeof setInterval> | undefined
 
@@ -59,6 +62,7 @@ const submit = () => run(async () => {
 async function loadLists() {
   const [fav, hist] = await Promise.all([accountApi<{ items: AccountEntry[] }>('/favorites'), accountApi<{ items: AccountEntry[] }>('/history')])
   favorites.value = fav.items; history.value = hist.items
+  gameBests.value = await loadMine().catch(() => ({}))
 }
 const removeFavorite = (item: AccountEntry) => run(async () => {
   await accountApi('/favorites/remove', 'POST', { kind: item.kind, slug: item.slug })
@@ -165,6 +169,9 @@ onBeforeUnmount(() => clearInterval(timer))
           <p class="email">{{ account.email }}</p>
           <p class="joined">加入于 {{ date(account.created_at) }}</p>
           <div class="stats"><div><strong>{{ favorites.length }}</strong><span>收藏</span></div><div><strong>{{ history.length }}</strong><span>浏览</span></div></div>
+          <ul class="game-bests" aria-label="游戏最佳成绩">
+            <li v-for="g in games" :key="g.id"><a :href="`/games/${g.id}`">{{ g.name }}</a><span>{{ gameBests[g.id] ? `${gameBests[g.id]!.best} ${g.unit} · ${gameBests[g.id]!.plays} 局` : '未玩过' }}</span></li>
+          </ul>
           <button class="ghost wide" type="button" @click="logout">退出登录</button>
         </aside>
         <div v-reveal="120" class="panel">
@@ -259,6 +266,11 @@ button:disabled { opacity:.5; cursor:default; }
 .stats div+div { border-left:1px solid var(--line); }
 .stats strong { display:block; font-size:22px; }
 .stats span { color:var(--muted); font-size:12px; }
+.game-bests { list-style:none; margin:16px 0 0; padding:0; text-align:left; font-size:13px; }
+.game-bests li { display:flex; justify-content:space-between; gap:8px; padding:6px 0; }
+.game-bests a { color:var(--text-2); }
+.game-bests a:hover { color:var(--accent); }
+.game-bests span { color:var(--muted); font-family:var(--font-mono); font-size:12px; }
 .panel { min-width:0; }
 .tabs { max-width:420px; }
 .panel-actions { display:flex; justify-content:flex-end; margin-top:16px; }

@@ -21,7 +21,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, select
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import accounts
+from . import accounts, games
 from .accounts import USER_COOKIE, current_user, profile
 from .auth import COOKIE, authenticate, check_origin, current_session
 from .content import (
@@ -47,6 +47,7 @@ from .models import (
     Administrator,
     Article,
     Favorite,
+    GameScore,
     History,
     Note,
     Passkey,
@@ -85,6 +86,7 @@ from .schemas import (
     ReadingWrite,
     Register,
     Revision,
+    ScoreWrite,
     SecurityProof,
     SiteWrite,
     Target,
@@ -461,6 +463,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session.commit()
         return {"updated_at": row.updated_at}
 
+    @app.get("/api/games/{game}/leaderboard")
+    def game_leaderboard(game: str, request: Request, session: Session = Depends(database)):
+        try:
+            user, _ = current_user(request, session)
+        except HTTPException:
+            user = None
+        return games.leaderboard(session, game, user)
+
+    @app.get("/api/account/games")
+    def account_games(request: Request, session: Session = Depends(database)):
+        user, _ = current_user(request, session)
+        return games.mine(session, user)
+
+    @app.post("/api/account/games/{game}")
+    def account_game_submit(game: str, body: ScoreWrite, request: Request,
+                            session: Session = Depends(database)):
+        user, _ = current_user(request, session, write=True)
+        return games.submit(session, user, game, body)
+
     # —— 后台：注册与邮件配置、用户管理 ——
 
     @app.get("/api/admin/accounts")
@@ -511,7 +532,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         user = session.get(User, user_id)
         if user is None:
             raise HTTPException(404, "用户不存在")
-        for table in (Favorite, History, UserSession, ScutReading):
+        for table in (Favorite, History, UserSession, ScutReading, GameScore):
             session.exec(delete(table).where(table.user_id == user.id))
         accounts.remove_avatar(user, settings.media_dir)
         session.delete(user)

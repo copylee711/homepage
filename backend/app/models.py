@@ -179,3 +179,16 @@ class ScutReading(SQLModel, table=True):
     user_id: str = Field(primary_key=True)
     state: dict = Field(sa_column=Column(JSON, nullable=False))
     updated_at: str
+
+
+class GameScore(SQLModel, table=True):
+    """小游戏最高分；detail 为同分时的次要指标（羊了个羊为用时秒数，越小越好）。"""
+
+    __tablename__ = "game_score"
+    user_id: str = Field(primary_key=True)
+    game: str = Field(primary_key=True)
+    best: int = Field(index=True)
+    detail: int = 0
+    plays: int = 0
+    best_at: str
+    updated_at: str

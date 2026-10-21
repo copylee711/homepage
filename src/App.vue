@@ -12,10 +12,12 @@ import SiteHeader from './components/SiteHeader.vue'
 import NoteSection from './components/NoteSection.vue'
 import PostSection from './components/PostSection.vue'
 import ScutSection from './components/ScutSection.vue'
+import GamesPage from './games/GamesPage.vue'
 import { startScut } from './scut'
 const isAdmin = location.pathname === '/admin' || location.pathname.startsWith('/admin/')
 const isScut = location.pathname.replace(/\/$/, '') === '/scut'
 const isAccount = location.pathname.replace(/\/$/, '') === '/account'
+const isGames = /^\/games(\/|$)/.test(location.pathname)
 let stop: (() => void) | undefined
 let stopScut: (() => void) | undefined
 onMounted(() => { if (!isAdmin) { stop = startContent(); stopScut = startScut() } })
@@ -27,9 +29,10 @@ onBeforeUnmount(() => { stop?.(); stopScut?.() })
   <template v-else-if="ready">
   <SiteHeader />
   <p v-if="contentStatus.stale" class="content-banner" role="status">暂时无法检查更新，正在显示已加载的内容。<button @click="reloadContent">重试</button></p>
-  <main :id="isScut || isAccount ? 'top' : undefined">
+  <main :id="isScut || isAccount || isGames ? 'top' : undefined">
     <ScutSection v-if="isScut" full />
     <AccountPage v-else-if="isAccount" />
+    <GamesPage v-else-if="isGames" />
     <template v-else>
     <HeroSection />
     <PortalGrid />

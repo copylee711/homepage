@@ -279,3 +279,8 @@ class ReadingState(StrictModel):
 
 class ReadingWrite(StrictModel):
     state: ReadingState
+
+
+class ScoreWrite(StrictModel):
+    score: int = Field(ge=0)
+    duration: int = Field(ge=0, le=86400)
