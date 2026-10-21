@@ -28,7 +28,7 @@ def test_submit_requires_login_and_csrf(site):  # noqa: F811
 def test_best_only_increases(site):  # noqa: F811
     client, _, _, sent = site
     headers = signup(client, sent)
-    assert client.get("/api/account/games").json() == {"watermelon": None, "sheep": None}
+    assert client.get("/api/account/games").json() == {"watermelon": None, "sheep": None, "dungeon": None}
     assert submit(client, headers, "watermelon", 500).json() == {
         "best": 500, "plays": 1, "improved": True}
     assert submit(client, headers, "watermelon", 300).json() == {
@@ -36,7 +36,8 @@ def test_best_only_increases(site):  # noqa: F811
     assert submit(client, headers, "watermelon", 800).json() == {
         "best": 800, "plays": 3, "improved": True}
     assert client.get("/api/account/games").json() == {
-        "watermelon": {"best": 800, "detail": 0, "plays": 3}, "sheep": None}
+        "watermelon": {"best": 800, "detail": 0, "plays": 3}, "sheep": None,
+        "dungeon": None}
     result = board(client, "watermelon")
     assert result["items"] == [{"rank": 1, "name": "读者", "avatar": "", "best": 800, "detail": 0}]
     assert result["me"] == {"best": 800, "detail": 0, "plays": 3, "rank": 1}
@@ -107,3 +108,16 @@ def test_account_delete_removes_scores(site):  # noqa: F811
     assert board(client, "sheep") == {"items": [], "me": None}
     with Session(app.state.engine) as session:
         assert session.exec(select(GameScore)).all() == []
+
+
+def test_dungeon_records_floor_and_checks_rate(site):  # noqa: F811
+    client, _, _, sent = site
+    headers = signup(client, sent)
+    def post(score, duration, floor):
+        return client.post("/api/account/games/dungeon",
+                           json={"score": score, "duration": duration, "floor": floor}, headers=headers)
+    assert post(4200, 600, 3).json()["improved"] is True
+    assert post(50_000, 10, 2).status_code == 422
+    assert post(4000, 600, 9).json()["improved"] is False
+    assert board(client, "dungeon")["items"][0] | {"name": "", "avatar": ""} == {
+        "rank": 1, "name": "", "avatar": "", "best": 4200, "detail": 3}

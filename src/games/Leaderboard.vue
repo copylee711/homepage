@@ -29,7 +29,7 @@ watch(() => [props.refresh, account.value?.id], load)
         <img v-if="row.avatar" :src="row.avatar" alt="" loading="lazy">
         <span v-else class="initial" aria-hidden="true">{{ row.name.slice(0, 1).toUpperCase() }}</span>
         <span class="name">{{ row.name }}</span>
-        <span class="score">{{ row.best }}<small>{{ unit }}</small><em v-if="game === 'sheep'">{{ formatDuration(row.detail) }}</em></span>
+        <span class="score">{{ row.best }}<small>{{ unit }}</small><em v-if="game === 'sheep'">{{ formatDuration(row.detail) }}</em><em v-else-if="game === 'dungeon'">第 {{ row.detail }} 层</em></span>
       </li>
     </ol>
     <p v-else-if="board" class="muted">还没有人上榜，来当第一个吧。</p>

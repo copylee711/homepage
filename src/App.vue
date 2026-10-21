@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from 'vue'
+import { defineAsyncComponent, onBeforeUnmount, onMounted } from 'vue'
 import { contentStatus, ready, reloadContent, startContent } from './content'
 import AccountPage from './components/AccountPage.vue'
 import AdminPage from './components/AdminPage.vue'
@@ -12,8 +12,9 @@ import SiteHeader from './components/SiteHeader.vue'
 import NoteSection from './components/NoteSection.vue'
 import PostSection from './components/PostSection.vue'
 import ScutSection from './components/ScutSection.vue'
-import GamesPage from './games/GamesPage.vue'
 import { startScut } from './scut'
+// 小游戏代码较大，只在 /games 页面按需加载
+const GamesPage = defineAsyncComponent(() => import('./games/GamesPage.vue'))
 const isAdmin = location.pathname === '/admin' || location.pathname.startsWith('/admin/')
 const isScut = location.pathname.replace(/\/$/, '') === '/scut'
 const isAccount = location.pathname.replace(/\/$/, '') === '/account'

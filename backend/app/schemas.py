@@ -284,3 +284,4 @@ class ReadingWrite(StrictModel):
 class ScoreWrite(StrictModel):
     score: int = Field(ge=0)
     duration: int = Field(ge=0, le=86400)
+    floor: int = Field(default=0, ge=0, le=1000)

@@ -11,10 +11,12 @@ from .accounts import record_failure, throttle
 from .content import timestamp
 from .models import GameScore, User
 
-GAMES = {"watermelon": 100_000, "sheep": 500}
+GAMES = {"watermelon": 100_000, "sheep": 500, "dungeon": 5_000_000}
 LEADERBOARD_SIZE = 50
 SUBMIT_LIMIT = 30
 SECONDS_PER_LEVEL = 5
+# 地牢每秒得分的合理上限（含开局余量）
+DUNGEON_POINTS_PER_SECOND = 400
 
 
 def require_game(game: str) -> int:
@@ -23,8 +25,10 @@ def require_game(game: str) -> int:
     return GAMES[game]
 
 
-def detail_of(game: str, duration: int) -> int:
-    return duration if game == "sheep" else 0
+def detail_of(game: str, body) -> int:
+    if game == "dungeon":
+        return body.floor
+    return body.duration if game == "sheep" else 0
 
 
 def submit(session: Session, user: User, game: str, body) -> dict:
@@ -33,12 +37,14 @@ def submit(session: Session, user: User, game: str, body) -> dict:
         raise HTTPException(422, "成绩超出上限")
     if game == "sheep" and body.duration < body.score * SECONDS_PER_LEVEL:
         raise HTTPException(422, "用时不合理")
+    if game == "dungeon" and body.score > (body.duration + 30) * DUNGEON_POINTS_PER_SECOND:
+        raise HTTPException(422, "用时不合理")
     key = f"game:{user.id}"
     throttle(session, key, SUBMIT_LIMIT, "提交过于频繁，请稍后再试")
     record_failure(session, key)
     now = timestamp()
     row = session.get(GameScore, (user.id, game))
-    detail = detail_of(game, body.duration)
+    detail = detail_of(game, body)
     improved = row is None or body.score > row.best or (
         game == "sheep" and body.score == row.best and detail < row.detail
     )
