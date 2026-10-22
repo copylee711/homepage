@@ -12,7 +12,11 @@
         format json
     }
 }
-copylee.cn, www.copylee.cn {
+www.copylee.cn {
+    import access_log copylee
+    redir https://copylee.cn{uri} permanent
+}
+copylee.cn {
     import access_log copylee
     encode zstd gzip
     @backend path /api /api/* /posts /posts/* /notes /notes/* /privacy /sitemap.xml /feed.xml /robots.txt /content-assets/*

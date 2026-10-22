@@ -40,9 +40,7 @@
 
 百度等平台的站点验证文件保存在仓库的 `public/` 根目录，构建时会复制到 `dist/` 根目录。更新验证文件时应同步提交到 Git，避免仅上传服务器后被下一次 `rsync --delete` 部署删除。验证成功后保留文件。
 
-HTTPS Caddy 示例让 `copylee.cn` 与 `www.copylee.cn` 共用路由，直接提供同一份内容。修改仓库示例不会自动更新服务器的 `/etc/caddy/Caddyfile`；前端部署流程只同步静态产物。手动应用配置前先备份服务器原文件，执行 `caddy validate --config /etc/caddy/Caddyfile`，通过后执行 `systemctl reload caddy`。
-
-若启用两个域名，后端 `COPYLEE_ALLOWED_ORIGINS` 应保留原有来源并包含 `https://copylee.cn,https://www.copylee.cn`，修改后重启后端。`COPYLEE_SITE_URL` 仍设为 `https://copylee.cn`，用于 canonical、站点地图等正式链接；Passkey 仅支持在这个正式地址使用。两个域名的登录 Cookie 独立，登录状态不自动共享。
+HTTPS Caddy 示例将 `www.copylee.cn` 永久重定向到 `https://copylee.cn`，保留请求路径与查询参数。站点验证使用正式地址 `https://copylee.cn`。修改仓库示例不会自动更新服务器的 `/etc/caddy/Caddyfile`；前端部署流程只同步静态产物。
 
 ## GitHub Actions
 
