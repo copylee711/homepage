@@ -1,0 +1,8 @@
+# 部署到 Linux 服务器的文本文件保持 LF 换行
+*.sh text eol=lf
+*.env text eol=lf
+*.service text eol=lf
+*.timer text eol=lf
+deploy/Caddyfile* text eol=lf
+deploy/sftpgo/99copylee-sftpgo text eol=lf
+*.png binary
