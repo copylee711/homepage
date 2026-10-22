@@ -8,6 +8,7 @@ import warnings
 from contextlib import asynccontextmanager, suppress
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import quote
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -832,13 +833,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/sitemap.xml")
     def sitemap(session: Session = Depends(database)):
         root = Element("urlset", xmlns="http://www.sitemaps.org/schemas/sitemap/0.9")
-        for path, modified in [("/", None), ("/scut", None), ("/posts", None)] + [
+        for path, modified in [
+            ("/", None), ("/scut", None), ("/games", None),
+            *[(f"/games/{game}", None) for game in games.GAMES],
+            ("/posts", None),
+        ] + [
             (f"/posts/{p['slug']}", p["updated_at"]) for p in published_posts(session)
         ] + [("/notes", None), ("/privacy", None)] + [
             (f"/notes/{n['slug']}", n["updated_at"]) for n in public_notes(session)
         ]:
             entry = SubElement(root, "url")
-            SubElement(entry, "loc").text = settings.site_url + path
+            SubElement(entry, "loc").text = settings.site_url + quote(path, safe="/")
             if modified:
                 SubElement(entry, "lastmod").text = modified
         return Response(

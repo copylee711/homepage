@@ -2,6 +2,7 @@ import asyncio
 import sqlite3
 from contextlib import closing
 from io import BytesIO
+from xml.etree.ElementTree import fromstring
 
 import httpx
 import pytest
@@ -59,6 +60,26 @@ def create_post(client, headers, **changes):
     response = client.post("/api/admin/posts", json=draft, headers=headers)
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def test_sitemap_public_routes_and_robots(server):
+    client, _, _ = server
+    response = client.get("/sitemap.xml")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/xml")
+    namespace = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
+    root = fromstring(response.content)
+    assert root.tag == namespace + "urlset"
+    urls = [entry.findtext(namespace + "loc") for entry in root]
+    assert len(urls) == len(set(urls))
+    expected = {
+        "/", "/scut", "/posts", "/notes", "/privacy", "/games",
+        "/games/watermelon", "/games/sheep", "/games/dungeon",
+    }
+    assert {ORIGIN + path for path in expected}.issubset(urls)
+    assert all(url.startswith(ORIGIN + "/") for url in urls)
+    assert not any("/admin" in url or "/api/" in url or "/account" in url for url in urls)
+    assert f"Sitemap: {ORIGIN}/sitemap.xml" in client.get("/robots.txt").text
 
 
 def test_seed_is_idempotent_and_public_configuration(server):

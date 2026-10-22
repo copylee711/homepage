@@ -42,6 +42,12 @@
 
 HTTPS Caddy 示例将 `www.copylee.cn` 永久重定向到 `https://copylee.cn`，保留请求路径与查询参数。站点验证使用正式地址 `https://copylee.cn`。修改仓库示例不会自动更新服务器的 `/etc/caddy/Caddyfile`；前端部署流程只同步静态产物。
 
+## 搜索引擎 Sitemap
+
+提交地址为 `https://copylee.cn/sitemap.xml`。后端动态生成标准 XML urlset，包含主页、SCUT 通知页、游戏大厅和游戏页面、文章与笔记列表、隐私政策，以及已发布文章和公开笔记。发布、撤下文章或更改笔记可见性后，下一次请求即反映变化，无需重新构建前端。
+
+所有链接使用正式域名 `copylee.cn`，中文路径按 UTF-8 URL 编码；文章和笔记的 `lastmod` 使用实际内容更新时间，静态页面不虚构修改时间。后台、API、账号页和草稿不加入 sitemap。`robots.txt` 已声明 sitemap 地址。百度平台填写上述地址即可，提交额度以平台页面为准。
+
 ## GitHub Actions
 
 [Deploy](../.github/workflows/deploy.yml) 和 [Deploy backend](../.github/workflows/deploy-backend.yml) 均手动触发，共享部署并发组。前端流程构建并同步静态产物；后端流程执行检查、上传新版本、同步依赖、备份、数据库迁移、重启与健康检查。首次服务器安装需按部署文档单独完成。
