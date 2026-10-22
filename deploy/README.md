@@ -38,6 +38,12 @@
 
 在仓库根目录执行 `npm ci` 和 `npm run build`，将 `dist/` 的全部内容上传到 `/var/www/copylee`，包括 `.vite/manifest.json`。文章模板通过该清单复用前端公共样式。Caddy 路由与初次安装步骤见 [后端部署](backend/README.md)。
 
+百度等平台的站点验证文件保存在仓库的 `public/` 根目录，构建时会复制到 `dist/` 根目录。更新验证文件时应同步提交到 Git，避免仅上传服务器后被下一次 `rsync --delete` 部署删除。验证成功后保留文件。
+
+HTTPS Caddy 示例让 `copylee.cn` 与 `www.copylee.cn` 共用路由，直接提供同一份内容。修改仓库示例不会自动更新服务器的 `/etc/caddy/Caddyfile`；前端部署流程只同步静态产物。手动应用配置前先备份服务器原文件，执行 `caddy validate --config /etc/caddy/Caddyfile`，通过后执行 `systemctl reload caddy`。
+
+若启用两个域名，后端 `COPYLEE_ALLOWED_ORIGINS` 应保留原有来源并包含 `https://copylee.cn,https://www.copylee.cn`，修改后重启后端。`COPYLEE_SITE_URL` 仍设为 `https://copylee.cn`，用于 canonical、站点地图等正式链接；Passkey 仅支持在这个正式地址使用。两个域名的登录 Cookie 独立，登录状态不自动共享。
+
 ## GitHub Actions
 
 [Deploy](../.github/workflows/deploy.yml) 和 [Deploy backend](../.github/workflows/deploy-backend.yml) 均手动触发，共享部署并发组。前端流程构建并同步静态产物；后端流程执行检查、上传新版本、同步依赖、备份、数据库迁移、重启与健康检查。首次服务器安装需按部署文档单独完成。
