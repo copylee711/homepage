@@ -15,6 +15,9 @@ RestartSec=5
 UMask=0077
 StateDirectory=copylee
 StateDirectoryMode=0711
+# 审计日志 /var/log/copylee/audit.log（按天滚动，保留 190 天）
+LogsDirectory=copylee
+LogsDirectoryMode=0750
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     scut_sync_enabled: bool = True
     github_token: str = ""
     session_hours: int = 12
+    # 审计日志目录；留空时写入 data_dir/logs
+    log_dir: Path | None = None
 
     @field_validator("site_url")
     @classmethod
@@ -29,6 +31,10 @@ class Settings(BaseSettings):
     @property
     def db_path(self) -> Path:
         return self.data_dir / "content.db"
+
+    @property
+    def audit_dir(self) -> Path:
+        return self.log_dir or self.data_dir / "logs"
 
     @property
     def media_dir(self) -> Path:

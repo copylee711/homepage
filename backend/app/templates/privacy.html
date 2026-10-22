@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% from "macros.html" import chars, grid %}
+{%- set contact = (site.socials | selectattr("platform", "equalto", "email") | first) -%}
+{% block content %}
+<div class="page-heading">{{ grid() }}<div class="container page-heading-content">
+<p class="label reading-rise">Legal</p><h1 class="page-title" aria-label="Privacy">{{ chars("Privacy") }}</h1>
+<p class="page-intro reading-rise" style="--delay:160ms">隐私政策<span>生效日期：{{ effective }}。本政策说明 {{ site.name }} 收集哪些信息、如何使用与保存。</span></p><a class="page-back reading-rise" style="--delay:240ms" href="/">返回主页 <span aria-hidden="true">↗</span></a>
+</div></div>
+<div class="container policy-content"><article class="prose reading-rise" style="--delay:300ms">
+<h2>适用范围</h2>
+<p>本政策适用于 {{ site_host }} 及其子域名提供的个人网站服务，包括主页、文章、笔记、SCUT 通知、小游戏、访客账户，以及仅向受邀用户开放的云盘（{{ site.cloud | replace("https://", "") | replace("http://", "") }}）。本站为个人非经营性网站，不投放广告，不使用第三方统计或追踪服务。</p>
+
+<h2>我们收集的信息</h2>
+<ul>
+<li><strong>访问日志</strong>：访问本站时，服务器自动记录 IP 地址、访问时间、请求地址、状态码、来源页面与浏览器标识（User-Agent）。</li>
+<li><strong>账户信息</strong>：注册时提供的邮箱、昵称，以及你主动上传的头像。密码仅以不可逆的哈希形式保存，我们无法得知原始密码。</li>
+<li><strong>使用记录</strong>：登录后产生的收藏、浏览记录、SCUT 通知已读状态和小游戏成绩，用于跨设备同步。</li>
+<li><strong>安全记录</strong>：注册、登录、退出、找回密码、修改密码与注销账户时的时间、IP 地址、账户邮箱与操作结果；验证码请求会记录 IP 地址的哈希值以限制频率。</li>
+<li><strong>云盘</strong>：受邀用户上传的文件，以及登录、上传、下载、删除等操作日志。</li>
+</ul>
+
+<h2>Cookie 与本地存储</h2>
+<p>本站仅在你登录时设置必要的会话 Cookie（HttpOnly，到期或退出后失效），不用于跨站追踪。浏览器本地存储（localStorage）仅保存主题偏好、游戏音效开关、未登录时的游戏成绩与 SCUT 已读状态，这些数据只留在你的设备上。</p>
+
+<h2>使用目的</h2>
+<p>上述信息仅用于提供和改进网站功能、账户登录与数据同步、发送验证码邮件、防止滥用与攻击、排查故障，以及履行法律法规规定的义务。我们不会将其用于营销或画像。</p>
+
+<h2>日志留存</h2>
+<p>依据《中华人民共和国网络安全法》，访问日志与安全记录留存不少于六个月，到期后自动删除。日志仅供网站安全管理和依法配合主管部门调查使用。</p>
+
+<h2>共享与披露</h2>
+<p>我们不会出售、出租或主动向第三方提供你的个人信息，以下情形除外：</p>
+<ul>
+<li>发送验证码邮件时，你的邮箱地址会经由邮件服务商（SMTP）投递；</li>
+<li>根据法律法规、司法机关或行政主管部门的要求依法提供；</li>
+<li>为保护本站、用户或公众的人身财产安全所必需。</li>
+</ul>
+
+<h2>存储与安全</h2>
+<p>所有数据存储在中华人民共和国境内的服务器上，全站使用 HTTPS 加密传输。数据库与上传文件定期备份，管理后台启用多因素认证。尽管如此，互联网环境不存在绝对安全，如发生个人信息安全事件，我们将及时告知并采取补救措施。</p>
+
+<h2>你的权利</h2>
+<ul>
+<li>在 <a href="/account">账户页</a> 查看与修改昵称、头像和密码，查看浏览记录、取消收藏；</li>
+<li>在账户页注销账户：账户信息、收藏、浏览记录、已读状态与游戏成绩将立即删除；依法留存的日志在留存期满后删除；</li>
+<li>对本政策或个人信息处理有疑问，可通过下方方式联系我们。</li>
+</ul>
+
+<h2>未成年人</h2>
+<p>若你未满十四周岁，请在监护人同意和指导下注册使用访客账户。</p>
+
+<h2>政策更新</h2>
+<p>本政策可能随网站功能调整而更新，更新后会在本页公布并修改生效日期。重大变更将在网站显著位置提示。</p>
+
+<h2>联系我们</h2>
+<p>{% if contact %}邮箱：<a href="{{ contact.url }}">{{ contact.url | replace("mailto:", "") }}</a>{% else %}可通过页脚的 <a href="https://github.com/{{ site.github }}" target="_blank" rel="noopener">GitHub</a> 与我们联系。{% endif %}我们会在十五个工作日内答复。</p>
+</article></div>
+{% endblock %}

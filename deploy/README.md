@@ -13,6 +13,19 @@
 | `/var/lib/copylee` | 数据库、上传图片与认证数据 |
 | `/etc/copylee/backend.env` | 后端环境配置 |
 
+## 日志留存
+
+按公安备案审核意见，网络日志留存不少于六个月。各日志自动滚动，保留 190 天后自动删除：
+
+| 路径 | 内容 | 滚动方式 |
+| --- | --- | --- |
+| `/var/log/caddy/copylee.log` | 主站（含 www）访问日志：时间、IP、请求、状态码、UA、Referer | Caddy，50MiB 滚动并压缩 |
+| `/var/log/caddy/cloud.log`、`dav.log` | 云盘网页与 WebDAV 访问日志 | 同上 |
+| `/var/log/copylee/audit.log` | 访客注册/登录/退出/找回密码/改密/注销，管理员登录与退出 | 后端每日零点（UTC）滚动 |
+| `/var/log/sftpgo/sftpgo.log` | SFTPGo 登录、上传、下载、删除等操作 | SFTPGo，50MB 滚动并压缩 |
+
+配置分别在 [Caddyfile.example](Caddyfile.example) 的 `access_log` 片段、[copylee-backend.service](backend/copylee-backend.service) 的 `LogsDirectory` 与 `COPYLEE_LOG_DIR`、[sftpgo.env](sftpgo/sftpgo.env)。日志含 IP 与邮箱，目录仅限 root 与对应服务用户读取。隐私政策页面为 `/privacy`，模板在 `backend/app/templates/privacy.html`。
+
 ## 文档与配置
 
 - [后端部署](backend/README.md)：初次安装、systemd、HTTP 验收、HTTPS 启用与后续部署。

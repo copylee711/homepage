@@ -7,7 +7,7 @@ from sqlalchemy import update
 from sqlmodel import Session, select
 
 from .models import Article, Content
-from .schemas import Site
+from .schemas import Police, Site
 
 
 def accounts_defaults() -> dict:
@@ -48,8 +48,15 @@ def versions(session: Session) -> dict:
     }
 
 
-def public_site(session: Session) -> dict:
+def stored_site(session: Session) -> dict:
     value = dict(require_content(session, "site").value)
+    # 旧数据的公安备案文字与编号分开存放，读取时补成完整备案号。
+    value["police"] = Police.model_validate(value.get("police") or {}).model_dump()
+    return value
+
+
+def public_site(session: Session) -> dict:
+    value = stored_site(session)
     value["portals"] = [p for p in value["portals"] if p.get("visible", True)]
     value["socials"] = [s for s in value.get("socials", []) if s.get("visible") and s.get("url")]
     return value

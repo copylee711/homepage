@@ -2,12 +2,13 @@
 :root, [data-bs-theme=light] { --bs-primary:#3b6ef5; --bs-primary-active:#2f5ed8; --bs-primary-light:rgba(59,110,245,.1); --bs-text-primary:#3b6ef5; }
 [data-bs-theme=dark] { --bs-primary:#6d93ff; --bs-primary-active:#5a82f5; --bs-primary-light:rgba(109,147,255,.16); --bs-text-primary:#6d93ff; }
 body.app-blank { background:linear-gradient(120deg,var(--bs-body-bg) 35%,rgba(59,110,245,.08)); }
-/* 备案号：登录页底部居中，链接工信部备案查询 */
-a[href="https://beian.miit.gov.cn/"] { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); padding:0 !important; color:var(--bs-gray-600) !important; font-size:13px; white-space:nowrap; z-index:10; }
-a[href="https://beian.miit.gov.cn/"]:hover { color:var(--bs-primary) !important; }
+/* 备案号：登录页底部居中。ICP 链接来自 branding.env，公安备案号与隐私政策由 patch-login.sh 加入模板 */
+div:has(> a[href="https://beian.miit.gov.cn/"]) { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); display:flex; flex-wrap:wrap; justify-content:center; gap:6px 20px; width:max-content; max-width:calc(100vw - 32px); font-size:13px; z-index:10; }
+div:has(> a[href="https://beian.miit.gov.cn/"]) > a { display:inline-flex; align-items:center; gap:6px; padding:0 !important; color:var(--bs-gray-600) !important; white-space:nowrap; }
+div:has(> a[href="https://beian.miit.gov.cn/"]) > a:hover { color:var(--bs-primary) !important; }
 /* 顶部只保留居中的 Logo */
 #sign_in_form > .container .row > .col-7 { display:none; }
 #sign_in_form > .container .row > .col-5 { flex:0 0 100%; max-width:100%; display:flex; justify-content:center; }
 /* 私有云提示 */
 #sign_in_form::after { content:"私有云 · 仅限受邀账号"; display:block; margin-top:4px; color:var(--bs-gray-500); font-size:12px; text-align:center; }
-.flex-root > .flex-column-fluid { padding-bottom:56px; }
+.flex-root > .flex-column-fluid { padding-bottom:80px; }

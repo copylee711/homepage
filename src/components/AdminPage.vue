@@ -93,6 +93,7 @@ const preview = ref(''), syncState = ref<SyncState>(), lastDraft = ref('')
 const lastSite = ref(''), rolesText = ref(''), hiddenText = ref('')
 const dirty = computed(() => JSON.stringify(draft.value) !== lastDraft.value)
 const siteDirty = computed(() => !!settings.value && JSON.stringify(currentSite()) !== lastSite.value)
+const policeCode = computed(() => settings.value?.police.text.replace(/\D/g, '') ?? '')
 function currentSite() { return settings.value ? {...settings.value, roles:lines(rolesText.value), hiddenRepos:lines(hiddenText.value)} : undefined }
 function lines(value: string) { return value.split('\n').map(v => v.trim()).filter(Boolean) }
 type NoteItem = {id:string; slug:string; title:string; summary:string; category:string; updated_at:string; source:'github'|'manual'; path:string|null; visible:boolean; revision:number; markdown?:string}
@@ -374,16 +375,27 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
         <template v-if="tab !== 'posts' && tab !== 'notes' && tab !== 'accounts' && tab !== 'security' && settings">
           <div class="section-head"><div><p class="eyebrow">Site content</p><h1>{{ tab==='profile' ? '主页设置' : tab==='portals' ? '入口卡片' : '仓库展示' }}</h1></div>
             <div class="buttons"><button @click="reloadSettings">重新加载</button><button class="primary" @click="saveSettings">{{busy ? '处理中…' : '保存设置'}}</button></div></div>
-          <div v-if="tab==='profile'" class="form-grid">
-            <label>显示名称<input v-model="settings.name" maxlength="80"></label><label>问候语<input v-model="settings.greeting" maxlength="100"></label>
-            <label class="wide">个人简介<textarea v-model="settings.intro" rows="3" maxlength="2000"></textarea></label>
-            <label>身份标签<span class="field-hint">每行一个</span><textarea v-model="rolesText" rows="4"></textarea></label>
-            <label>GitHub 用户名<input v-model="settings.github" maxlength="39"></label>
-            <label>Cloud 地址<input v-model="settings.cloud" type="url"></label>
-            <label>ICP备案号<input v-model="settings.icp" maxlength="100"></label><label>公安备案文字<input v-model="settings.police.text" maxlength="100"></label>
-            <label>公安备案编号<input v-model="settings.police.code" inputmode="numeric"></label>
-          </div>
           <template v-if="tab==='profile'">
+            <h2 class="group-title first">基本信息</h2><p class="subtle">显示在主页首屏。</p>
+            <div class="form-grid">
+              <label>显示名称<input v-model="settings.name" maxlength="80"></label><label>问候语<input v-model="settings.greeting" maxlength="100"></label>
+              <label class="wide">个人简介<textarea v-model="settings.intro" rows="3" maxlength="2000"></textarea></label>
+              <label class="wide"><span class="label-line">身份标签<span class="field-hint">每行一个</span></span><textarea v-model="rolesText" rows="3"></textarea></label>
+            </div>
+            <h2 class="group-title">链接</h2><p class="subtle">导航栏与页脚中的 GitHub、Cloud 入口。</p>
+            <div class="form-grid">
+              <label>GitHub 用户名<input v-model="settings.github" maxlength="39"></label>
+              <label>Cloud 地址<input v-model="settings.cloud" type="url" placeholder="https://…"></label>
+            </div>
+            <h2 class="group-title">备案信息</h2><p class="subtle">显示在全站页脚右下角，留空则不显示。</p>
+            <div class="form-grid">
+              <label>ICP 备案号<input v-model="settings.icp" maxlength="100" placeholder="粤ICP备XXXXXXXXXX号-1"><span class="field-hint">链接到工信部备案查询 beian.miit.gov.cn</span></label>
+              <label>公安备案号<input v-model="settings.police.text" maxlength="100" placeholder="粤公网安备XXXXXXXXXXXXXX号"><span class="field-hint">填写完整备案号，查询链接编号自动识别：{{ policeCode || '—' }}</span></label>
+              <div v-if="settings.icp || settings.police.text" class="wide beian-preview">
+                <span class="field-hint">页脚预览</span>
+                <p><span v-if="settings.icp">{{ settings.icp }}</span><span v-if="settings.police.text"><img src="/beian-police.png" alt="" width="14" height="16">{{ settings.police.text }}</span></p>
+              </div>
+            </div>
             <h2 class="group-title">社交主页</h2><p class="subtle">图标显示在页脚。关闭“公开显示”或留空地址的条目不会出现在网站上。</p>
             <div v-for="(social,index) in settings.socials" :key="index" class="social-row">
               <label>平台<select v-model="social.platform"><option v-for="[value,name] in socialPlatforms" :key="value" :value="value">{{ name }}</option></select></label>
@@ -632,6 +644,11 @@ input:read-only { color:var(--muted); }
 .user-face { flex:none; display:grid; place-items:center; width:36px; height:36px; border-radius:50%; overflow:hidden; background:linear-gradient(135deg,var(--accent),#7ea2ff); color:#fff; font-weight:700; }
 .user-face img { width:100%; height:100%; object-fit:cover; }
 .hidden-repos { max-width:500px; }.group-title { margin-top:36px; }
+.group-title.first { margin-top:0; }
+.label-line { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+.beian-preview { display:flex; flex-direction:column; gap:10px; padding:16px 18px; border:1px dashed var(--line-strong); border-radius:8px; }
+.beian-preview p { display:flex; flex-wrap:wrap; gap:8px 20px; margin:0; color:var(--faint); font-size:13px; }
+.beian-preview p span { display:inline-flex; align-items:center; gap:6px; }
 .feedback { padding:14px 24px; margin:16px 40px 0; border-radius:8px; font-size:14px; }
 .error { color:#d15c5c; background:rgba(209,92,92,.08); }.success { color:var(--accent); background:var(--accent-soft); }
 .login-panel { max-width:440px; margin:12vh auto; padding:0 24px; }

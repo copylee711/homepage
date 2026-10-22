@@ -17,6 +17,7 @@ export default defineConfig({
       '/sitemap.xml': 'http://127.0.0.1:8000',
       '/feed.xml': 'http://127.0.0.1:8000',
       '/notes': 'http://127.0.0.1:8000',
+      '/privacy': 'http://127.0.0.1:8000',
       '/robots.txt': 'http://127.0.0.1:8000',
     },
   },

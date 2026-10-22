@@ -2,7 +2,7 @@ import re
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def safe_link(value: str, allow_media: bool = False, allow_internal: bool = False) -> str:
@@ -42,8 +42,21 @@ class RepoGroup(StrictModel):
 
 
 class Police(StrictModel):
+    """公安备案：text 为完整备案号（如 粤公网安备44011302006057号），code 为其中的数字，用于查询链接。"""
+
     text: str = Field(default="", max_length=100)
     code: str = Field(default="", max_length=50, pattern=r"^[0-9]*$")
+
+    @model_validator(mode="after")
+    def derive_code(self):
+        self.text = self.text.strip()
+        digits = re.sub(r"\D", "", self.text)
+        if digits:
+            self.code = digits
+        elif self.text and self.code:
+            # 旧数据只填了省份前缀，编号单独存放：合成为完整备案号。
+            self.text = f"{self.text}{self.code}号"
+        return self
 
 
 SocialPlatform = Literal[

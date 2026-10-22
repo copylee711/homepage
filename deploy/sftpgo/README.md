@@ -12,7 +12,13 @@
 - `landing/dav.html`：仅浏览器直接打开 dav.copylee.cn 根路径时显示；WebDAV 客户端请求照常转给 SFTPGo。
 - `branding/` 与 `branding.env`：SFTPGo 自带的品牌配置（居中 Logo、登录页备案号链接与私有云提示），通过 `/etc/sftpgo/env.d/branding.env` 生效，不修改 `sftpgo.json`，也不修改 SFTPGo 源码或模板，升级软件包后仍然保留。
 
+- 公安备案号与隐私政策链接：SFTPGo 品牌配置只支持一个声明链接，[patch-login.sh](patch-login.sh) 把它们加入软件包的登录模板；[99copylee-sftpgo](99copylee-sftpgo) APT 钩子在每次软件包升级后重新执行该脚本（已修改过则跳过）。
+
 更新品牌或落地页：把本目录上传到服务器后以 root 执行 `bash install-branding.sh`（会重启 SFTPGo，中断数秒）。Caddy 配置见 [../Caddyfile.example](../Caddyfile.example)。
+
+## 日志
+
+服务器使用 deb 软件包运行 SFTPGo。将 [sftpgo.env](sftpgo.env) 安装为 `/etc/sftpgo/sftpgo.env`，创建 `/var/log/sftpgo`（属主 sftpgo，0750）后重启服务，日志写入 `/var/log/sftpgo/sftpgo.log` 并保留 190 天。
 
 ## 启动
 

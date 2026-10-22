@@ -36,6 +36,8 @@
 
 /* 文章列表 */
 .reading-list-content { padding-top:16px; padding-bottom:64px; }
+.policy-content { padding-top:16px; padding-bottom:80px; }
+.policy-content .prose { max-width:760px; }
 .article-total { display:inline-block; margin-left:18px; color:var(--faint); font-size:16px; font-weight:500; letter-spacing:0; vertical-align:super; animation:reading-fade .8s ease .7s backwards; }
 .post-list { border-top:1px solid var(--line); }
 .post-item { position:relative; isolation:isolate; display:grid; grid-template-columns:104px 1fr 24px; gap:24px; padding:28px 16px; margin-inline:-16px; border-radius:var(--radius-sm); transition:opacity .3s,background-color .4s; }
@@ -192,6 +194,8 @@
 .reading-admin { margin-left:14px; opacity:.55; transition:opacity .3s,color .3s; }
 .reading-footer .reading-admin:hover { opacity:1; color:var(--accent); }
 .reading-beian { display:flex; flex-wrap:wrap; gap:8px 20px; }
+.reading-copyright>a { margin-left:14px; }
+.reading-police { display:inline-flex; align-items:center; gap:6px; }
 .float-top { position:fixed; right:24px; bottom:24px; z-index:9; display:grid; place-items:center; width:44px; height:44px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--header-bg); color:var(--muted); -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px); opacity:0; visibility:hidden; transform:translateY(12px); transition:opacity .4s,transform .4s var(--ease),visibility .4s,color .2s,border-color .2s; }
 .float-top.shown { opacity:1; visibility:visible; transform:none; }
 .float-top:hover { color:var(--accent); border-color:var(--line-strong); }

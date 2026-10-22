@@ -1,10 +1,25 @@
 # 备案完成后的 HTTPS 配置（需安全组放行 443）。HTTP 阶段使用 Caddyfile.http.example。
+
+# 访问日志：JSON 格式，按 50MiB 滚动并 gzip 压缩，保留 190 天（网络日志留存不少于六个月）。
+# Cookie、Authorization 等敏感请求头由 Caddy 默认脱敏。
+(access_log) {
+    log {
+        output file /var/log/caddy/{args[0]}.log {
+            roll_size 50MiB
+            roll_keep 2000
+            roll_keep_for 4560h
+        }
+        format json
+    }
+}
 www.copylee.cn {
+    import access_log copylee
     redir https://copylee.cn{uri} permanent
 }
 copylee.cn {
+    import access_log copylee
     encode zstd gzip
-    @backend path /api /api/* /posts /posts/* /notes /notes/* /sitemap.xml /feed.xml /robots.txt /content-assets/*
+    @backend path /api /api/* /posts /posts/* /notes /notes/* /privacy /sitemap.xml /feed.xml /robots.txt /content-assets/*
     handle @backend {
         reverse_proxy 127.0.0.1:8000
     }
@@ -46,10 +61,12 @@ copylee.cn {
     }
 }
 cloud.copylee.cn {
+    import access_log cloud
     # 根路径由 SFTPGo 跳转到登录页，登录页底部显示备案号（deploy/sftpgo/branding）
     reverse_proxy 127.0.0.1:8080
 }
 dav.copylee.cn {
+    import access_log dav
     # 仅浏览器直接打开根路径时显示说明页；WebDAV 客户端使用 PROPFIND 或带认证请求，不受影响
     @browser {
         method GET HEAD

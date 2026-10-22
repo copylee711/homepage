@@ -1,3 +1,4 @@
+import json
 from io import BytesIO
 
 import pytest
@@ -178,3 +179,35 @@ def test_scut_reading_follows_the_account(site):
                       headers=headers).status_code == 422
     client.post("/api/account/logout", headers=headers)
     assert client.get("/api/account/scut").status_code == 401
+
+
+def test_audit_log_records_account_events(site):
+    client, _, settings, sent = site
+    headers = signup(client, sent)
+    client.post("/api/account/logout", headers=headers)
+    client.post("/api/account/login", headers={"Origin": ORIGIN},
+                json={"email": EMAIL, "password": "wrong-pass"})
+    lines = (settings.audit_dir / "audit.log").read_text(encoding="utf-8").splitlines()
+    events = [json.loads(line) for line in lines]
+    assert [(e["event"], e["ok"]) for e in events if e["event"].startswith("account.")] == [
+        ("account.register", True), ("account.logout", True), ("account.login", False)]
+    assert events[-1]["email"] == EMAIL and events[-1]["status"] == 401
+    assert all("password" not in line for line in lines)
+    assert any(e["event"] == "admin.login" and e["ok"] for e in events)
+
+
+def test_privacy_page_and_police_number(site):
+    client, _, _, _ = site
+    page = client.get("/privacy")
+    assert page.status_code == 200 and "日志留存" in page.text and "六个月" in page.text
+    admin = login(client)
+    current = client.get("/api/admin/site", headers=admin).json()
+    current["site"]["police"] = {"text": "粤公网安备", "code": "44011302006057"}
+    assert current["site"]["police"]  # 旧格式：文字与编号分开
+    saved = client.put("/api/admin/site", headers=admin,
+                       json={"revision": current["revision"], "site": current["site"]})
+    assert saved.status_code == 200, saved.text
+    police = client.get("/api/site").json()["site"]["police"]
+    assert police == {"text": "粤公网安备44011302006057号", "code": "44011302006057"}
+    html = client.get("/posts").text
+    assert "code=44011302006057" in html and "beian-police.png" in html and "/privacy" in html

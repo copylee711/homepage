@@ -1,0 +1,2 @@
+// 安装到 /etc/apt/apt.conf.d/：SFTPGo 升级覆盖登录模板后重新加入公安备案号。
+DPkg::Post-Invoke { "[ -x /usr/local/sbin/copylee-sftpgo-patch ] && /usr/local/sbin/copylee-sftpgo-patch || true"; };

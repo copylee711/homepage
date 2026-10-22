@@ -26,18 +26,21 @@ const year = new Date().getFullYear()
       <SocialLinks :socials="site.socials ?? []" />
 
       <div class="legal">
-        <span>© {{ year }} {{ site.name }}<a class="admin" href="/admin" rel="nofollow">Admin</a></span>
+        <span class="copyright">
+          © {{ year }} {{ site.name }}<a href="/privacy">隐私政策</a><a class="admin" href="/admin" rel="nofollow">Admin</a>
+        </span>
         <span v-if="site.icp || site.police.text" class="beian">
           <a v-if="site.icp" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">
             {{ site.icp }}
           </a>
           <a
             v-if="site.police.text"
+            class="police"
             :href="`https://beian.mps.gov.cn/#/query/webSearch?code=${site.police.code}`"
             target="_blank"
-            rel="noopener"
+            rel="noreferrer"
           >
-            {{ site.police.text }}
+            <img src="/beian-police.png" alt="" width="14" height="16">{{ site.police.text }}
           </a>
         </span>
       </div>
@@ -86,11 +89,13 @@ const year = new Date().getFullYear()
 }
 
 .links a,
+.copyright a,
 .beian a {
   transition: color 0.2s ease;
 }
 
 .links a:hover,
+.copyright a:hover,
 .beian a:hover {
   color: var(--text);
 }
@@ -112,8 +117,11 @@ const year = new Date().getFullYear()
   padding-block: 0 28px;
 }
 
-.admin {
+.copyright a {
   margin-left: 14px;
+}
+
+.admin {
   color: var(--faint);
   opacity: 0.55;
   transition:
@@ -121,7 +129,7 @@ const year = new Date().getFullYear()
     color 0.3s ease;
 }
 
-.admin:hover {
+.copyright .admin:hover {
   opacity: 1;
   color: var(--accent);
 }
@@ -130,5 +138,15 @@ const year = new Date().getFullYear()
   display: flex;
   flex-wrap: wrap;
   gap: 8px 20px;
+}
+
+.police {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.police img {
+  flex: none;
 }
 </style>

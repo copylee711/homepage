@@ -36,7 +36,7 @@
         if (beian) {
           const links = [];
           if (site.icp) { const a=document.createElement('a'); a.href='https://beian.miit.gov.cn/'; a.textContent=site.icp; links.push(a); }
-          if (site.police?.text) { const a=document.createElement('a'); a.href='https://beian.mps.gov.cn/#/query/webSearch?code='+encodeURIComponent(site.police.code); a.textContent=site.police.text; links.push(a); }
+          if (site.police?.text) { const a=document.createElement('a'), img=document.createElement('img'); a.href='https://beian.mps.gov.cn/#/query/webSearch?code='+encodeURIComponent(site.police.code); a.className='reading-police'; img.src='/beian-police.png'; img.alt=''; img.width=14; img.height=16; a.append(img, site.police.text); links.push(a); }
           for (const a of links) { a.target='_blank'; a.rel='noopener'; }
           beian.replaceChildren(...links);
         }

@@ -21,7 +21,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, select
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import accounts, games
+from . import accounts, audit, games
 from .accounts import USER_COOKIE, current_user, profile
 from .auth import COOKIE, authenticate, check_origin, current_session
 from .content import (
@@ -34,6 +34,7 @@ from .content import (
     reading_stats,
     require_content,
     save_site,
+    stored_site,
     summaries,
     timestamp,
     update_article,
@@ -108,6 +109,7 @@ from .settings import Settings
 HERE = Path(__file__).parent
 logger = logging.getLogger(__name__)
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+PRIVACY_EFFECTIVE = "2026 年 10 月 22 日"
 PLAIN_404_PREFIXES = ("/api/", "/media/", "/content-assets/", "/assets/")
 Image.MAX_IMAGE_PIXELS = 20_000_000
 
@@ -115,6 +117,7 @@ Image.MAX_IMAGE_PIXELS = 20_000_000
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     engine = make_engine(settings)
+    audit.setup(settings.audit_dir)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -231,7 +234,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def login(
         body: Login, request: Request, response: Response, session: Session = Depends(database)
     ):
-        token, row = authenticate(request, session, body)
+        with audit.outcome("admin.login", request, username=body.username[:80]):
+            token, row = authenticate(request, session, body)
         response.set_cookie(
             COOKIE,
             token,
@@ -254,7 +258,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/auth/passkey/verify")
     def key_login(body: PasskeyResponse, request: Request, response: Response,
                   session: Session = Depends(database)):
-        token, row = passkey_verify(request, session, body)
+        with audit.outcome("admin.login_passkey", request):
+            token, row = passkey_verify(request, session, body)
         response.set_cookie(COOKIE, token, max_age=settings.session_hours * 3600,
                             httponly=True, secure=settings.secure_cookie, samesite="lax", path="/api")
         response.delete_cookie("copylee_challenge", path="/api")
@@ -308,6 +313,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         row = current_session(request, session, write=True)
         session.delete(row)
         session.commit()
+        audit.record("admin.logout", request, ok=True)
         response.delete_cookie(COOKIE, path="/api")
         return {"ok": True}
 
@@ -338,23 +344,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/account/register")
     def account_register(body: Register, request: Request, response: Response,
                          session: Session = Depends(database)):
-        return accounts.register(request, response, session, body)
+        with audit.outcome("account.register", request, email=body.email.strip().lower()):
+            return accounts.register(request, response, session, body)
 
     @app.post("/api/account/login")
     def account_login(body: UserLogin, request: Request, response: Response,
                       session: Session = Depends(database)):
-        return accounts.login(request, response, session, body)
+        with audit.outcome("account.login", request, email=body.email.strip().lower()):
+            return accounts.login(request, response, session, body)
 
     @app.post("/api/account/reset")
     def account_reset(body: PasswordReset, request: Request, response: Response,
                       session: Session = Depends(database)):
-        return accounts.reset_password(request, response, session, body)
+        with audit.outcome("account.reset_password", request, email=body.email.strip().lower()):
+            return accounts.reset_password(request, response, session, body)
 
     @app.post("/api/account/logout")
     def account_logout(request: Request, response: Response, session: Session = Depends(database)):
-        _, row = current_user(request, session, write=True)
+        user, row = current_user(request, session, write=True)
         session.delete(row)
         session.commit()
+        audit.record("account.logout", request, ok=True, user=user.id, email=user.email)
         response.delete_cookie(USER_COOKIE, path="/api")
         return {"ok": True}
 
@@ -375,7 +385,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def account_password(body: PasswordChange, request: Request,
                          session: Session = Depends(database)):
         user, row = current_user(request, session, write=True)
-        accounts.change_password(session, user, row, body)
+        with audit.outcome("account.change_password", request, user=user.id, email=user.email):
+            accounts.change_password(session, user, row, body)
         return {"ok": True}
 
     @app.post("/api/account/avatar")
@@ -398,7 +409,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def account_delete(body: AccountDelete, request: Request, response: Response,
                        session: Session = Depends(database)):
         user, _ = current_user(request, session, write=True)
-        accounts.delete_account(session, user, body.password, settings.media_dir)
+        with audit.outcome("account.delete", request, user=user.id, email=user.email):
+            accounts.delete_account(session, user, body.password, settings.media_dir)
         response.delete_cookie(USER_COOKIE, path="/api")
         return {"ok": True}
 
@@ -542,7 +554,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/admin/site")
     def admin_site(session: Session = Depends(authorized)):
         row = require_content(session, "site")
-        return {"site": row.value, "revision": row.revision}
+        return {"site": stored_site(session), "revision": row.revision}
 
     @app.put("/api/admin/site")
     def admin_save_site(body: SiteWrite, session: Session = Depends(authorized)):
@@ -822,7 +834,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         root = Element("urlset", xmlns="http://www.sitemaps.org/schemas/sitemap/0.9")
         for path, modified in [("/", None), ("/scut", None), ("/posts", None)] + [
             (f"/posts/{p['slug']}", p["updated_at"]) for p in published_posts(session)
-        ] + [("/notes", None)] + [
+        ] + [("/notes", None), ("/privacy", None)] + [
             (f"/notes/{n['slug']}", n["updated_at"]) for n in public_notes(session)
         ]:
             entry = SubElement(root, "url")
@@ -838,6 +850,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body = atom_feed(public_site(session), published_posts(session)[:20], settings.site_url)
         return Response(body, media_type="application/atom+xml; charset=utf-8")
 
+    @app.get("/privacy", response_class=HTMLResponse)
+    def privacy(request: Request, session: Session = Depends(database)):
+        context = page_context(session, "/privacy", "隐私政策", "本站如何收集、使用与保存个人信息")
+        context.update(
+            nav_active="", effective=PRIVACY_EFFECTIVE, site_host=settings.site_url.split("://", 1)[1]
+        )
+        return templates.TemplateResponse(request=request, name="privacy.html", context=context)
+
     @app.get("/robots.txt", response_class=PlainTextResponse)
     def robots():
         return f"User-agent: *\nDisallow: /admin\nDisallow: /api/\nSitemap: {settings.site_url}/sitemap.xml\n"
@@ -846,11 +866,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
     app.mount("/content-assets", StaticFiles(directory=HERE / "static"), name="content-assets")
     @app.get("/favicon.svg", include_in_schema=False)
-    def favicon():
-        icon = settings.static_dir / "favicon.svg"
+    @app.get("/beian-police.png", include_in_schema=False)
+    def public_icon(request: Request):
+        icon = settings.static_dir / request.url.path.lstrip("/")
         if not icon.is_file():
             raise HTTPException(404)
-        return FileResponse(icon, media_type="image/svg+xml")
+        return FileResponse(icon)
 
     if (settings.static_dir / "assets").is_dir():
         app.mount("/assets", StaticFiles(directory=settings.static_dir / "assets"), name="assets")
