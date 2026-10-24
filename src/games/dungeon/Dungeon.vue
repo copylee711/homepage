@@ -42,7 +42,8 @@ const canFullscreen = computed(() => typeof document !== 'undefined' && !!docume
 function resize() {
   const el = canvas.value
   if (!el) return
-  const turn = immersive.value && window.innerHeight > window.innerWidth
+  const root = document.documentElement
+  const turn = immersive.value && Math.min(window.innerHeight, root.clientHeight) > Math.min(window.innerWidth, root.clientWidth)
   if (turn !== rotated.value) {
     rotated.value = controls.rotated = turn
     nextTick(resize)
@@ -96,10 +97,13 @@ function giveUp() {
 
 async function enterImmersive() {
   immersive.value = true
+  // 先按页面内全屏排版；微信等浏览器的横屏锁定可能永远不返回，不能等它
+  nextTick(resize)
+  setTimeout(resize, 350)
   try {
     await shell.value?.requestFullscreen?.({ navigationUI: 'hide' })
     await (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape')
-  } catch { /* iOS 等不支持时退回页面内全屏 */ }
+  } catch { /* iOS、微信等不支持时退回页面内全屏并旋转画面 */ }
   requestAnimationFrame(resize)
 }
 function exitImmersive() {
@@ -230,7 +234,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .shell { position:relative; width:100%; aspect-ratio:16/9; max-height:calc(100dvh - var(--header-h) - 120px); min-height:300px; border-radius:20px; overflow:hidden; background:#07080d; box-shadow:0 0 0 1px var(--line),0 30px 60px -40px rgba(17,24,39,.6); user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
 .shell.immersive { position:fixed; inset:0; z-index:1000; width:100vw; height:100dvh; max-height:none; aspect-ratio:auto; border-radius:0; }
-.shell.immersive.rotated { inset:0 auto auto 0; width:100dvh; height:100vw; transform-origin:0 0; transform:rotate(90deg) translateY(-100%); }
+.shell.immersive.rotated { inset:0 auto auto 0; width:100vh; width:100dvh; height:100vw; transform-origin:0 0; transform:rotate(90deg) translateY(-100%); }
 .shell:fullscreen { width:100vw; height:100vh; max-height:none; border-radius:0; }
 .screen { display:block; width:100%; height:100%; touch-action:none; cursor:crosshair; }
 .corner { position:absolute; z-index:6; top:calc(env(safe-area-inset-top) + 62px); left:calc(env(safe-area-inset-left) + 12px); display:flex; gap:6px; }

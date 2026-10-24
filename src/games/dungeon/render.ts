@@ -74,6 +74,7 @@ export function render(ctx: CanvasRenderingContext2D, game: Game, view: View, to
   drawLighting(ctx, game, view, theme, time)
 
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * ox, dpr * oy)
+  if (touch?.active && touch.firing && game.state === 'play') drawAimGuide(ctx, game, touch, time)
   if (game.prompt && game.state === 'play') {
     const p = game.player
     const text = touch?.active ? game.prompt : `E  ${game.prompt}`
@@ -826,18 +827,65 @@ function drawTouch(ctx: CanvasRenderingContext2D, game: Game, view: View, touch:
     if (ready < 1) { ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.arc(b.x, b.y, b.r, -Math.PI / 2, -Math.PI / 2 + (1 - ready) * Math.PI * 2); ctx.fill() }
     text(ctx, label, b.x, b.y + b.r * 0.18, '#fff', b.r * 0.42, 'center', 700)
   }
-  button(L.fire, '射击', touch.firing, game.weapon.color, 1, 10)
-  if (touch.aim) {
-    ctx.strokeStyle = 'rgba(255,255,255,.5)'
-    ctx.beginPath(); ctx.moveTo(L.fire.x, L.fire.y); ctx.lineTo(L.fire.x + Math.cos(touch.aim) * L.fire.r, L.fire.y + Math.sin(touch.aim) * L.fire.r); ctx.stroke()
+  // 射击键：按住时外圈亮起；拖动瞄准时按钮跟手偏移，并在边缘显示方向弧与箭头
+  const aim = touch.aim, color = game.weapon.color, R = L.fire.r
+  const shift = aim !== null ? touch.drag * R * 0.34 : 0
+  const fire = { x: L.fire.x + (aim !== null ? Math.cos(aim) * shift : 0), y: L.fire.y + (aim !== null ? Math.sin(aim) * shift : 0), r: R }
+  const ring = (front: boolean) => {
+    if (!touch.firing) return
+    ctx.save()
+    if (!front) {
+      ctx.strokeStyle = hexA(color, 0.3); ctx.lineWidth = 3
+      ctx.beginPath(); ctx.arc(L.fire.x, L.fire.y, R * 1.25, 0, 7); ctx.stroke()
+    } else if (aim !== null) {
+      ctx.strokeStyle = color; ctx.lineWidth = 7; ctx.lineCap = 'round'
+      ctx.shadowColor = color; ctx.shadowBlur = 12
+      ctx.beginPath(); ctx.arc(L.fire.x, L.fire.y, R * 1.25, aim - 0.5, aim + 0.5); ctx.stroke()
+      const ax = L.fire.x + Math.cos(aim) * R * 1.55, ay = L.fire.y + Math.sin(aim) * R * 1.55
+      ctx.fillStyle = color
+      ctx.beginPath()
+      ctx.moveTo(ax + Math.cos(aim) * R * 0.22, ay + Math.sin(aim) * R * 0.22)
+      ctx.lineTo(ax + Math.cos(aim + 2.4) * R * 0.17, ay + Math.sin(aim + 2.4) * R * 0.17)
+      ctx.lineTo(ax + Math.cos(aim - 2.4) * R * 0.17, ay + Math.sin(aim - 2.4) * R * 0.17)
+      ctx.fill()
+    } else {
+      // 自动瞄准：外圈四段刻度缓慢旋转
+      ctx.strokeStyle = hexA(color, 0.85); ctx.lineWidth = 4; ctx.lineCap = 'round'
+      for (let i = 0; i < 4; i++) { const a = time * 2 + (i * Math.PI) / 2; ctx.beginPath(); ctx.arc(L.fire.x, L.fire.y, R * 1.25, a - 0.18, a + 0.18); ctx.stroke() }
+    }
+    ctx.restore()
   }
+  ring(false)
+  button(fire, '射击', touch.firing, color, 1, 10)
+  ring(true)
   const p = game.player
   button(L.dash, '翻滚', false, '#8ab4ff', p.dashCd > 0 ? 1 - p.dashCd / (0.85 * p.stats.dash) : 1, 11)
   if (p.weapons.length > 1) button(L.swap, '换枪', false, '#ffd166', 1, 12)
   const w = game.weapon
   text(ctx, w.cost ? `${w.name} · ${w.cost}能量` : w.name, L.fire.x + L.fire.r * 0.6, L.swap.y - L.swap.r - 10, w.color, Math.max(11, L.fire.r * 0.26), 'right', 700)
   if (game.prompt) button(L.interact, '拾取', false, '#7cffb2', 1, 13)
-  void time
+}
+
+/** 触屏射击时在场景中显示瞄准方向：手动为虚线准星，自动为锁定框。 */
+function drawAimGuide(ctx: CanvasRenderingContext2D, game: Game, touch: TouchState, time: number) {
+  const p = game.player, color = game.weapon.color
+  ctx.save()
+  if (touch.aim !== null) {
+    const a = touch.aim, len = 150
+    const g = ctx.createLinearGradient(p.x, p.y, p.x + Math.cos(a) * len, p.y + Math.sin(a) * len)
+    g.addColorStop(0, hexA(color, 0.75)); g.addColorStop(1, hexA(color, 0))
+    ctx.strokeStyle = g; ctx.lineWidth = 2; ctx.setLineDash([6, 6]); ctx.lineDashOffset = -time * 40
+    ctx.beginPath(); ctx.moveTo(p.x + Math.cos(a) * 18, p.y + Math.sin(a) * 18); ctx.lineTo(p.x + Math.cos(a) * len, p.y + Math.sin(a) * len); ctx.stroke()
+  } else {
+    const t = game.nearestEnemy()
+    if (t) {
+      const r = t.r + 7 + Math.sin(time * 8) * 1.5
+      ctx.strokeStyle = '#ff5d5d'; ctx.lineWidth = 2.2; ctx.lineCap = 'round'
+      ctx.translate(t.x, t.y - t.z); ctx.rotate(time * 1.5)
+      for (let i = 0; i < 4; i++) { ctx.rotate(Math.PI / 2); ctx.beginPath(); ctx.moveTo(r, -5); ctx.lineTo(r, -r * 0.2 + 2); ctx.moveTo(r, 5); ctx.lineTo(r, r * 0.2 - 2); ctx.stroke() }
+    }
+  }
+  ctx.restore()
 }
 
 // —— 小工具 ——

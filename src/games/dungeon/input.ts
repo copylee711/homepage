@@ -7,6 +7,8 @@ export interface TouchState {
   moveX: number; moveY: number
   firing: boolean
   aim: number | null
+  /** 射击键拖动幅度 0–1，用于按钮偏移与指示强度 */
+  drag: number
 }
 
 interface Circle { x: number; y: number; r: number }
@@ -28,7 +30,7 @@ const inside = (c: Circle, x: number, y: number, pad = 1.25) => Math.hypot(x - c
 
 export class Controls {
   keys = new Set<string>()
-  touch: TouchState = { active: false, stick: null, moveX: 0, moveY: 0, firing: false, aim: null }
+  touch: TouchState = { active: false, stick: null, moveX: 0, moveY: 0, firing: false, aim: null, drag: 0 }
   private mouse = { x: 0, y: 0, down: false, last: -1e9 }
   private stickId: number | null = null
   private fireId: number | null = null
@@ -71,7 +73,7 @@ export class Controls {
 
   private releaseTouch() {
     this.stickId = this.fireId = null
-    Object.assign(this.touch, { stick: null, moveX: 0, moveY: 0, firing: false, aim: null })
+    Object.assign(this.touch, { stick: null, moveX: 0, moveY: 0, firing: false, aim: null, drag: 0 })
   }
 
   private keydown = (e: KeyboardEvent) => {
@@ -119,6 +121,8 @@ export class Controls {
         this.fireStart = inside(L.fire, x, y, 1.6) ? { x: L.fire.x, y: L.fire.y } : { x, y }
         this.touch.firing = true
         this.touch.aim = null
+        this.touch.drag = 0
+        navigator.vibrate?.(8)
       }
       return
     }
@@ -148,14 +152,19 @@ export class Controls {
       this.touch.moveX = dx; this.touch.moveY = dy
     } else if (e.pointerId === this.fireId) {
       const dx = x - this.fireStart.x, dy = y - this.fireStart.y
-      this.touch.aim = Math.hypot(dx, dy) > L.fire.r * 0.35 ? Math.atan2(dy, dx) : null
+      const len = Math.hypot(dx, dy)
+      const manual = len > L.fire.r * 0.35
+      // 从自动瞄准切到手动瞄准时轻震一下
+      if (manual && this.touch.aim === null) navigator.vibrate?.(6)
+      this.touch.aim = manual ? Math.atan2(dy, dx) : null
+      this.touch.drag = Math.min(1, len / L.fire.r)
     }
   }
 
   private up = (e: PointerEvent) => {
     if (e.pointerType !== 'touch') { if (e.button === 0) this.mouse.down = false; return }
     if (e.pointerId === this.stickId) { this.stickId = null; Object.assign(this.touch, { stick: null, moveX: 0, moveY: 0 }) }
-    if (e.pointerId === this.fireId) { this.fireId = null; this.touch.firing = false; this.touch.aim = null }
+    if (e.pointerId === this.fireId) { this.fireId = null; this.touch.firing = false; this.touch.aim = null; this.touch.drag = 0 }
   }
 
   /** 游戏实际处理过输入后再清除单次按键。 */
