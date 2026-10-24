@@ -482,7 +482,14 @@ onBeforeUnmount(() => cancelAnimationFrame(frame))
   }
 }
 
+/* 窄屏内容较短：从上方开始排布，避免在 820px 高的首屏里垂直居中而留出大片空白 */
 @media (max-width: 859px) {
+  .hero {
+    align-items: flex-start;
+    min-height: min(88svh, 720px);
+    padding-top: calc(var(--header-h) + clamp(40px, 9svh, 96px));
+  }
+
   .art {
     top: auto;
     right: -14%;

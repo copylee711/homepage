@@ -124,15 +124,29 @@ const kindLabel = (kind: string) => (kind === 'note' ? 'Note' : 'Article')
 const date = (value: string) => value?.slice(0, 10) ?? ''
 watch(account, value => { editName.value = value?.name ?? '' }, { immediate: true })
 
+// 人机验证 SDK 体积大（约 1.3MB 脚本并采集设备信息），只在需要邮箱验证码的注册/找回表单预热，
+// 并推迟到浏览器空闲时，避免与页面入场动画争抢主线程。已登录或登录表单不加载。
+let warmup: ReturnType<typeof setTimeout> | undefined
+function warmCaptcha() {
+  const captcha = config.value?.captcha
+  if (!captcha?.enabled || !accountChecked.value || account.value || mode.value === 'login' || warmup !== undefined) return
+  const prepare = () => { void prepareEmailCaptcha(captcha).catch(() => {}) }
+  // 入场动画约 1.2 秒，结束后再等空闲时段加载
+  warmup = setTimeout(() => {
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(prepare, { timeout: 3000 })
+    else prepare()
+  }, 1200)
+}
+watch([mode, account, accountChecked, config], warmCaptcha)
+
 onMounted(async () => {
   document.title = 'Account · Copy Lee'
   config.value = await fetchJson<AccountConfig>('/api/account/config').catch(() => undefined)
-  if (config.value?.captcha) void prepareEmailCaptcha(config.value.captcha).catch(() => {})
   if (new URLSearchParams(location.search).get('mode') === 'register') mode.value = 'register'
   await loadAccount()
   if (account.value) await loadLists().catch(() => {})
 })
-onBeforeUnmount(() => { clearInterval(timer); captchaLifetime.abort(); cancelEmailCaptcha() })
+onBeforeUnmount(() => { clearInterval(timer); clearTimeout(warmup); captchaLifetime.abort(); cancelEmailCaptcha() })
 </script>
 
 <template>
