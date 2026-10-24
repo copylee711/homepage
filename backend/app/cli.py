@@ -205,6 +205,13 @@ def main():
     load.add_argument("--target", type=Path, required=True)
     move = sub.add_parser("images-migrate", help="把文章与手写笔记中的 /media 图片迁移到图床")
     move.add_argument("--apply", action="store_true", help="实际执行；默认只统计")
+    drive = sub.add_parser("drive-import", help="从旧网盘（SFTPGo SQLite）导入账户、挂载点与分享")
+    drive.add_argument("--source-db", type=Path, required=True)
+    drive.add_argument("--map", action="append", required=True, metavar="旧用户名=站点邮箱")
+    drive.add_argument("--copy-files", action="store_true", help="同时复制旧主目录中的文件")
+    drive.add_argument("--apply", action="store_true", help="实际执行；默认只列出计划")
+    scan = sub.add_parser("drive-rescan", help="重新统计网盘用量")
+    scan.add_argument("--email", help="只统计这个用户；默认全部")
     args = parser.parse_args()
     settings = Settings()
     if args.action == "migrate":
@@ -259,6 +266,41 @@ def main():
             print(f"引用的图片不存在，已跳过：/media/{name}")
         if not args.apply and result["images"]:
             print("确认无误后先执行 backup，再加 --apply 实际迁移")
+    elif args.action == "drive-import":
+        from .drive.importer import run
+
+        mapping = {}
+        for item in args.map:
+            name, _, email = item.partition("=")
+            if not name or "@" not in email:
+                parser.error(f"--map 格式应为 旧用户名=站点邮箱：{item}")
+            mapping[name] = email
+        engine = make_engine(settings)
+        try:
+            for line in run(settings, engine, args.source_db, mapping, args.apply,
+                            args.copy_files):
+                print(line)
+        finally:
+            engine.dispose()
+        if not args.apply:
+            print("确认无误后先执行 backup，再加 --apply 实际导入")
+    elif args.action == "drive-rescan":
+        from sqlmodel import select
+
+        from .drive.vfs import rescan
+        from .models import DriveMount, User
+
+        engine = make_engine(settings)
+        with Session(engine) as session:
+            query = select(DriveMount.user_id).distinct()
+            if args.email:
+                query = query.join(User, User.id == DriveMount.user_id).where(
+                    User.email == args.email.strip().lower())
+            users = session.exec(query).all()
+        for user_id in users:
+            for row in rescan(engine, settings, user_id):
+                print(f"{user_id} {row['path']}：{row['size']} 字节 / {row['files']} 个文件")
+        engine.dispose()
     elif args.action == "reset-security":
         reset_security(settings)
         print("登录因素与旧会话已清除，管理员密码保留")
