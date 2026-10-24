@@ -167,11 +167,14 @@ def test_admin_uploads_and_tokens_unlimited(site):  # noqa: F811
     token = client.post("/api/admin/images/tokens", json={"name": "PicList"}, headers=admin).json()
     assert upload(client, token["token"], picture(900, noise=True)).status_code == 200
     data = client.get("/api/admin/images", headers=admin).json()
-    assert data["total"] == 2 and data["usage"][0]["label"] == ADMIN_EMAIL
-    assert data["items"][0]["owner"] == "admin-user"
-    assert client.post(f"/api/admin/images/{data['items'][0]['id']}/remove",
-                       headers=admin).status_code == 200
-    assert client.get("/api/admin/images?owner=admin-user", headers=admin).json()["total"] == 1
+    # 编辑器上传进系统图床，PicList 上传记在管理员自己的账户下。
+    assert data["total"] == 2
+    assert {row["owner"]: row["label"] for row in data["usage"]} == {
+        "system": "系统（文章与笔记）", "admin-user": ADMIN_EMAIL}
+    own = next(item for item in data["items"] if item["owner"] == "admin-user")
+    assert client.post(f"/api/admin/images/{own['id']}/remove", headers=admin).status_code == 200
+    assert client.get("/api/admin/images?owner=admin-user", headers=admin).json()["total"] == 0
+    assert client.get("/api/admin/images?owner=system", headers=admin).json()["total"] == 1
 
 
 def test_migrate_media_and_backup(site, tmp_path):  # noqa: F811
@@ -206,3 +209,32 @@ def test_migrate_media_and_backup(site, tmp_path):  # noqa: F811
                         scut_sync_enabled=False)
     with TestClient(create_app(restored), base_url=ORIGIN) as other:
         assert other.get(article["cover"]).content == picture(color=(5, 5, 5))
+
+
+def test_editor_images_follow_articles(server):
+    from sqlmodel import Session
+
+    from app.images import prune_system
+    from app.models import HostedImage
+
+    client, app, settings = server
+    admin = login(client)
+    uploaded = client.post("/api/admin/media", content=picture(noise=True), headers=admin)
+    assert uploaded.status_code == 201, uploaded.text
+    url = uploaded.json()["url"]
+    image_id = url.rsplit("/", 1)[1].split(".")[0]
+    listing = client.get("/api/admin/images", headers=admin).json()
+    assert listing["items"][0]["owner"] == "system"
+    assert client.post(f"/api/admin/images/{image_id}/remove", headers=admin).status_code == 409
+    post = create_post(client, admin, markdown=f"![图]({url})")
+    with Session(app.state.engine) as session:
+        # 被文章引用时即使过了宽限期也保留
+        assert prune_system(session, settings, grace=0) == 0
+    draft = {**post["draft"], "markdown": "不再引用图片"}
+    assert client.put(f"/api/admin/posts/{post['id']}", headers=admin,
+                      json={"revision": post["revision"], "draft": draft}).status_code == 200
+    with Session(app.state.engine) as session:
+        # 刚上传不足 24 小时：保存时不会删除
+        assert session.get(HostedImage, image_id) is not None
+        assert prune_system(session, settings, grace=0) == 1
+        assert session.get(HostedImage, image_id) is None

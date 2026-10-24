@@ -8,9 +8,11 @@
 from sqlalchemy import func
 from sqlmodel import Session, select
 
-from .models import DriveMount, HostedImage, StoragePlan, User
+from .models import DriveMount, HostedImage, StoragePlan
 
 ADMIN = "admin"
+# 文章与笔记引用的图片：随内容自动增减，不属于任何人，也不计入配额。
+SYSTEM = "system"
 MIB = 1024 * 1024
 
 
@@ -39,7 +41,7 @@ def shared_used(session: Session, user_id: str) -> int:
 
 def unlimited(session: Session, user_id: str) -> bool:
     """只有旧的独立管理员（owner 为 "admin"）不受配额限制；管理员用户按自己的方案计算，避免占满磁盘。"""
-    return user_id == ADMIN
+    return user_id in {ADMIN, SYSTEM}
 
 
 def remaining(session: Session, user_id: str) -> int | None:
@@ -75,8 +77,3 @@ def save(session: Session, user_id: str, *, drive_enabled: bool | None = None,
     session.add(row)
     return row
 
-
-def admin_owner(session: Session) -> str:
-    """图片归属的管理员：第一个管理员用户；尚未设置时沿用旧的 "admin"。"""
-    user = session.exec(select(User).where(User.is_admin).order_by(User.created_at)).first()
-    return user.id if user else ADMIN

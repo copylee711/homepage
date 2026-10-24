@@ -113,7 +113,7 @@ def fail_login(session: Session, message: str, status: int = 401):
 
 
 def set_admin(session: Session, email: str) -> User:
-    """把站点用户设为管理员；原管理员名下的图床图片与令牌转给该用户。"""
+    """把站点用户设为管理员；原管理员名下的上传令牌与（未被文章引用的）图片转给该用户。"""
     user = session.exec(select(User).where(User.email == email.strip().lower())).first()
     if user is None:
         raise ValueError("该邮箱尚未注册，请先在网站注册")

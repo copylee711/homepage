@@ -26,7 +26,7 @@ from .auth import digest
 from .content import bump, timestamp
 from .models import Article, HostedImage, ImageToken, Note, StoragePlan, User
 from .notes import bump_notes
-from .storage import ADMIN, admin_owner, images_used, plan, shared_used, unlimited
+from .storage import ADMIN, SYSTEM, images_used, plan, shared_used, unlimited
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 TOKEN_LIMIT = 10
@@ -226,6 +226,38 @@ def listing(session: Session, settings, owner: str | None, page: int) -> dict:
             "page_size": PAGE_SIZE}
 
 
+# —— 系统图床：文章与笔记的图片 ——
+
+SYSTEM_GRACE = 86400
+
+
+def referenced_paths(session: Session) -> set[str]:
+    """文章（草稿与公开版本）和笔记中引用的图床路径；按 年/月/id.扩展名 匹配，与域名无关。"""
+    texts = [json.dumps([a.draft, a.published], ensure_ascii=False)
+             for a in session.exec(select(Article)).all()]
+    texts += [note.markdown + note.html for note in session.exec(select(Note)).all()]
+    return {match for text in texts for match in PATH.findall(text)}
+
+
+def prune_system(session: Session, settings, grace: float = SYSTEM_GRACE) -> int:
+    """删除不再被任何文章或笔记引用的系统图片。
+
+    刚上传、编辑器里尚未保存的图片在 grace 秒内不会被删除。
+    """
+    used = referenced_paths(session)
+    cutoff = datetime.now(timezone.utc).timestamp() - grace
+    removed = 0
+    for row in session.exec(select(HostedImage).where(HostedImage.owner == SYSTEM)).all():
+        if row.path in used or datetime.fromisoformat(row.created_at).timestamp() > cutoff:
+            continue
+        (settings.images_dir / row.path).unlink(missing_ok=True)
+        session.delete(row)
+        removed += 1
+    if removed:
+        session.commit()
+    return removed
+
+
 # —— 上传令牌 ——
 
 
@@ -357,8 +389,7 @@ def migrate_media(session: Session, settings, apply: bool = False) -> dict:
             continue
         source = settings.media_dir / name
         modified = datetime.fromtimestamp(source.stat().st_mtime, timezone.utc)
-        row, created = store(session, settings, admin_owner(session), source.read_bytes(),
-                             modified)
+        row, created = store(session, settings, SYSTEM, source.read_bytes(), modified)
         imported += created
         mapping[name] = url(settings, row.path)
 

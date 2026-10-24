@@ -172,6 +172,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         current_session(request, session, request.method not in {"GET", "HEAD", "OPTIONS"})
         return session
 
+    def prune_images(session: Session):
+        """文章或笔记变更后清理不再被引用的系统图片；失败不影响内容保存。"""
+        try:
+            images.prune_system(session, settings)
+        except Exception:  # noqa: BLE001
+            logger.exception("清理系统图片失败")
+
     def admin_user(request: Request, session: Session) -> str:
         """当前后台会话对应的管理员用户 id；管理员的图片与令牌都记在该用户名下。"""
         return current_session(request, session).user_id
@@ -719,7 +726,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ).all()
         users = {u.id: u for u in session.exec(select(User)).all()}
         usage = [{"owner": key, "count": count, "size": size,
-                  "label": "旧管理员" if key == images.ADMIN else
+                  "label": "系统（文章与笔记）" if key == images.SYSTEM else
+                  "旧管理员" if key == images.ADMIN else
                   users[key].email if key in users else key} for key, count, size in rows]
         return {**images.listing(session, settings, owner or None, page), "usage": usage,
                 "tokens": images.tokens(session, admin_user(request, session)), "upload_url": settings.upload_url}
@@ -728,6 +736,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def admin_image_remove(image_id: str, request: Request,
                            session: Session = Depends(authorized)):
         row = images.get_image(session, image_id)
+        if row.owner == images.SYSTEM:
+            raise HTTPException(409, "文章与笔记引用的图片会随内容自动清理，不能单独删除")
         audit.record("admin.image_remove", request, ok=True, image=row.id, owner=row.owner)
         images.remove(session, settings, row)
         return {"ok": True}
@@ -815,6 +825,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             session, row, body.revision, draft=body.draft.model_dump(), slug=body.draft.slug
         )
         session.commit()
+        prune_images(session)
         return {"revision": body.revision + 1}
 
     @app.post("/api/admin/posts/{article_id}/publish")
@@ -852,6 +863,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if result.rowcount != 1:
             raise HTTPException(409, "文章已被其他窗口修改，请重新加载后再操作")
         session.commit()
+        prune_images(session)
         return {"ok": True}
 
     @app.get("/api/admin/notes")
@@ -886,7 +898,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.put("/api/admin/notes/{note_id}")
     def save_note(note_id: str, body: NoteWrite, session: Session = Depends(authorized)):
-        return admin_view(save_manual(session, get_note(session, note_id), body), full=True)
+        result = admin_view(save_manual(session, get_note(session, note_id), body), full=True)
+        prune_images(session)
+        return result
 
     @app.post("/api/admin/notes/{note_id}/visibility")
     def note_visibility(
@@ -911,6 +925,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session.delete(note)
         bump_notes(session)
         session.commit()
+        prune_images(session)
         return {"ok": True}
 
     @app.post("/api/admin/preview")
@@ -919,10 +934,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/admin/media", status_code=201)
     async def upload(request: Request, session: Session = Depends(authorized)):
-        # 编辑器上传的图片存入图床，返回公开地址。
+        # 编辑器上传的图片存入系统图床：随文章与笔记的引用自动保留或清理，不能单独删除。
         payload = await images.read_upload(request, images.MAX_IMAGE_BYTES)
-        owner = admin_user(request, session)
-        row, _ = await asyncio.to_thread(images.store, session, settings, owner, payload)
+        row, _ = await asyncio.to_thread(images.store, session, settings, images.SYSTEM, payload)
         return {"url": images.url(settings, row.path)}
 
     def page_context(session, path, title, description):

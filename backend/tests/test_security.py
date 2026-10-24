@@ -122,7 +122,7 @@ def test_admin_passkey_login_with_account_passkey(server):
     assert client.get("/api/auth/me").status_code == 200
 
 
-def test_admin_images_belong_to_admin_account(server):
+def test_admin_quota_and_system_images(server):
     client, _, settings = server
     from test_images import picture
 
@@ -130,11 +130,11 @@ def test_admin_images_belong_to_admin_account(server):
     response = client.post("/api/admin/media", content=picture(), headers=headers)
     assert response.status_code == 201, response.text
     listing = client.get("/api/admin/images").json()
-    assert listing["items"][0]["owner"] == "admin-user"
+    assert listing["items"][0]["owner"] == "system"  # 编辑器图片进系统图床，不占个人配额
     account_login(client)
     mine = client.get("/api/account/images").json()
     assert mine["limits"]["enabled"] is True and mine["limits"]["quota"] == 20 * 1024 ** 3
-    assert mine["total"] == 1
+    assert mine["total"] == 0
 
 
 def test_feedback_inbox_and_limits(site):  # noqa: F811

@@ -471,7 +471,7 @@ runuser -u copylee -- .venv/bin/python -m app.cli reset-security --email you@exa
         <template v-if="tab==='storage'">
           <AdminStorage :api="api" @notify="text => message = text" @fail="text => error = text" />
           <div class="section-head images-head"><div><p class="eyebrow">Image hosting</p><h2 class="images-title">图床图片</h2></div><div class="buttons"><button @click="action(() => loadImages())">刷新</button><label class="upload-button primary">上传图片<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" @change="uploadToHost"></label></div></div>
-          <p class="subtle">管理员的图片计入自己的存储方案；文章与笔记编辑器的“上传图片”也存入图床。用户的图床与网盘在上方的存储方案中开通。</p>
+          <p class="subtle">文章与笔记编辑器上传的图片存入系统图床：不计配额、不能单独删除，内容不再引用 24 小时后自动清理。管理员用 PicList 等上传的图片计入自己的存储方案。用户的图床与网盘在上方的存储方案中开通。</p>
           <section v-if="imagesState" class="edit-card"><h2>用量</h2>
             <ul class="note-list"><li v-for="row in imagesState.usage" :key="row.owner"><div class="note-info"><strong>{{ row.label }}</strong><span>{{ row.count }} 张 · {{ mib(row.size) }}</span></div><button @click="imageOwner = row.owner">只看此用户</button></li></ul>
             <p v-if="!imagesState.usage.length" class="subtle">还没有图片。</p>
@@ -484,8 +484,8 @@ runuser -u copylee -- .venv/bin/python -m app.cli reset-security --email you@exa
           <section v-if="imagesState" class="edit-card"><h2>全部图片<span class="security-status">{{ imagesState.total }} 张</span></h2>
             <div class="buttons"><AnimatedSelect v-model="imageOwner" label="上传者" :options="[{value:'',label:'全部'}, ...imagesState.usage.map(row => ({value:row.owner,label:row.label}))]" /></div>
             <ul class="image-grid"><li v-for="item in imagesState.items" :key="item.id"><a :href="item.url" target="_blank" rel="noopener"><img :src="item.url" :alt="`图片 ${item.id}`" loading="lazy"></a>
-              <p class="field-hint">{{ item.width }}×{{ item.height }} · {{ mib(item.size) }} · {{ item.owner === 'admin' ? '旧管理员' : siteUsers.find(u => u.id === item.owner)?.email ?? item.owner }}</p>
-              <div class="buttons"><button @click="copyText(`![](${item.url})`)">Markdown</button><button @click="copyText(item.url)">URL</button><button class="danger" @click="removeImage(item)">删除</button></div></li></ul>
+              <p class="field-hint">{{ item.width }}×{{ item.height }} · {{ mib(item.size) }} · {{ item.owner === 'system' ? '系统（文章与笔记）' : item.owner === 'admin' ? '旧管理员' : siteUsers.find(u => u.id === item.owner)?.email ?? item.owner }}</p>
+              <div class="buttons"><button @click="copyText(`![](${item.url})`)">Markdown</button><button @click="copyText(item.url)">URL</button><button v-if="item.owner !== 'system'" class="danger" @click="removeImage(item)">删除</button><span v-else class="field-hint" title="不再被文章或笔记引用 24 小时后自动删除">随内容自动清理</span></div></li></ul>
             <div v-if="imagePages > 1" class="buttons pager"><button :disabled="imagesState.page <= 1" @click="action(() => loadImages(imagesState!.page - 1))">上一页</button><span class="field-hint">{{ imagesState.page }} / {{ imagePages }}</span><button :disabled="imagesState.page >= imagePages" @click="action(() => loadImages(imagesState!.page + 1))">下一页</button></div>
           </section>
         </template>
