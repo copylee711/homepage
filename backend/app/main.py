@@ -643,6 +643,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session.commit()
         return {"revision": body.revision + 1}
 
+    @app.post("/api/admin/posts/{article_id}/delete")
+    def delete_post(article_id: str, body: Revision, session: Session = Depends(authorized)):
+        row = get_article(session, article_id)
+        if row.published is not None:
+            raise HTTPException(409, "请先撤下文章再删除")
+        result = session.exec(
+            delete(Article).where(Article.id == row.id, Article.revision == body.revision)
+        )
+        if result.rowcount != 1:
+            raise HTTPException(409, "文章已被其他窗口修改，请重新加载后再操作")
+        session.commit()
+        return {"ok": True}
+
     @app.get("/api/admin/notes")
     def admin_notes(session: Session = Depends(authorized)):
         rows = session.exec(select(Note)).all()

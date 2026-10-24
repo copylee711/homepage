@@ -469,3 +469,21 @@ def test_reading_stats_counts_cjk_and_words():
 
     stats = reading_stats("# 标题\n\n你好世界 hello world\n\n```py\nignored code\n```")
     assert stats == {"words": 8, "minutes": 1}
+
+
+def test_delete_only_after_unpublish_and_frees_slug(server):
+    client, _, _ = server
+    headers = login(client)
+    identifier = create_post(client, headers)["id"]
+    url = f"/api/admin/posts/{identifier}"
+    assert client.post(url + "/publish", json={"revision": 1}, headers=headers).status_code == 200
+    # 公开中的文章不能直接删除
+    assert client.post(url + "/delete", json={"revision": 2}, headers=headers).status_code == 409
+    assert client.post(url + "/unpublish", json={"revision": 2}, headers=headers).status_code == 200
+    # 旧版本号不能删除
+    assert client.post(url + "/delete", json={"revision": 2}, headers=headers).status_code == 409
+    assert client.post(url + "/delete", json={"revision": 3}, headers=headers).status_code == 200
+    assert client.get(url, headers=headers).status_code == 404
+    assert all(p["id"] != identifier for p in client.get("/api/admin/posts", headers=headers).json())
+    # 固定链接已释放，可再次使用
+    assert create_post(client, headers)["slug"] == "first-post"

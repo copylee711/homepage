@@ -15,6 +15,9 @@ type ArticleItem = { id: string; title: string; slug: string; published: boolean
 type SyncState = { last_success: string | null; last_error: string; items: unknown[] }
 const { theme, toggle } = useTheme()
 const csrf = ref(''), loading = ref(true), busy = ref(false), error = ref(''), message = ref('')
+// 成功提示 4 秒后自动消失；错误提示保留到手动关闭或下一次操作。
+let messageTimer: ReturnType<typeof setTimeout> | undefined
+watch(message, value => { clearTimeout(messageTimer); if (value) messageTimer = setTimeout(() => { message.value = '' }, 4000) })
 const username = ref('admin'), password = ref('')
 // 两步验证码不常驻：密码通过后服务器提示需要验证码，再弹出第二步。
 const OTP_REQUIRED = '请输入两步验证码或恢复码'
@@ -306,6 +309,13 @@ async function unpublish() { await action(async () => {
   current.revision = result.revision; current.published = null
   await listArticles(); message.value = '文章已撤下，编辑内容仍保留。'
 }) }
+async function deleteArticle() { await action(async () => {
+  const current = article.value!
+  if(!confirm(`删除「${current.draft.title}」？草稿与固定链接将一并释放，无法恢复。`)) return
+  await api(`/api/admin/posts/${current.id}/delete`, 'POST', {revision: current.revision})
+  article.value = undefined; draft.value = emptyDraft(); lastDraft.value = JSON.stringify(draft.value); preview.value = ''
+  await listArticles(); message.value = '文章已删除。'
+}) }
 async function renderPreview() { await action(async () => {
   preview.value = (await api<{html: string}>('/api/admin/preview', 'POST', {markdown: draft.value.markdown})).html
 }) }
@@ -368,8 +378,8 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', preventLeave)
     <header class="admin-top"><a href="/" class="admin-brand"><LogoMark class="admin-logo" />Copy Lee<span>内容管理</span></a>
       <div class="top-actions"><a href="/" target="_blank">查看网站 ↗</a><button class="icon-button" @click="toggle" :aria-label="theme === 'dark' ? '切换浅色主题' : '切换深色主题'"><AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" /></button><button v-if="csrf" @click="logout" :disabled="busy">退出</button></div>
     </header>
-    <p v-if="error" class="feedback error" role="alert">{{ error }}</p>
-    <p v-if="message" class="feedback success" role="status">{{ message }}</p>
+    <Transition name="toast"><p v-if="error" class="feedback error" role="alert">{{ error }}<button class="toast-close" aria-label="关闭提示" @click="error = ''">×</button></p></Transition>
+    <Transition name="toast"><p v-if="message && !error" class="feedback success" role="status">{{ message }}<button class="toast-close" aria-label="关闭提示" @click="message = ''">×</button></p></Transition>
     <main v-if="loading" class="login-panel"><p>正在加载后台…</p></main>
     <main v-else-if="!csrf" class="login-panel">
       <p class="eyebrow">Your personal space</p><h1>欢迎回来。</h1><p class="subtle">登录后编辑主页，或写下新的一篇。</p>
@@ -531,15 +541,15 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
           <div class="writing-layout"><aside class="article-sidebar"><p v-if="!articles.length" class="subtle">还没有文章，从右侧开始写作。</p><button v-for="item in articles" :key="item.id" :class="{selected:article?.id===item.id}" @click="selectArticle(item.id)"><strong>{{ item.title }}</strong><span>{{ item.published ? '已发布' : '草稿' }} · {{ item.updated_at.slice(0,10) }}</span></button></aside>
             <div class="editor"><div class="editor-status"><span>{{ article?.published ? '已有公开版本' : '尚未发布' }}</span><span v-if="dirty">有未保存修改</span></div>
               <label>标题<input v-model="draft.title" maxlength="200" placeholder="写下标题"></label>
-              <label>固定链接<span class="slug-field"><span class="slug-prefix">/posts/</span><input v-model="draft.slug" :readonly="article?.slug_locked" placeholder="根据标题自动生成" maxlength="120"></span><span class="field-hint">{{ article?.slug_locked ? '已发布，固定链接已锁定。' : '根据标题自动生成，中文转为拼音；可手动修改，清空后恢复自动生成。首次发布后锁定。' }}</span></label>
+              <label>固定链接<span class="slug-field"><span class="slug-prefix">/posts/</span><input v-model="draft.slug" :readonly="article?.slug_locked" placeholder="根据标题自动生成" maxlength="120"></span><span class="field-hint">{{ article?.slug_locked ? (article.published ? '已发布，固定链接已锁定。' : '曾经发布过，固定链接已锁定；删除文章可释放该链接。') : '根据标题自动生成，中文转为拼音；可手动修改，清空后恢复自动生成。首次发布后锁定。' }}</span></label>
               <label>摘要<textarea v-model="draft.summary" rows="2" maxlength="1000"></textarea></label>
               <label>封面地址<input v-model="draft.cover" placeholder="https://… 或 /media/…"></label>
               <div class="markdown-tools"><span class="eyebrow">Markdown</span><div class="buttons"><label class="upload-button">上传图片<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" @change="upload"></label><button @click="renderPreview">预览</button></div></div>
               <textarea v-model="draft.markdown" class="markdown-input" rows="18" aria-label="Markdown 正文" placeholder="从这里开始…"></textarea>
               <p class="field-hint">图片上传后可公开访问，单张上限 10 MiB；上传会将图片链接插入正文。</p>
               <section v-if="preview" class="preview-panel"><h2>预览</h2><div class="prose" v-html="preview"></div></section>
-              <div class="editor-actions"><button @click="saveDraft">保存草稿</button><button class="primary" @click="publish">{{article?.published ? '发布更新' : '发布文章'}}</button><button v-if="article?.published" class="danger" @click="unpublish">撤下</button><a v-if="article?.published" :href="`/posts/${article.draft.slug}`" target="_blank">查看公开版本 ↗</a></div>
-              <p class="field-hint">保存草稿不会修改公开内容。发布会先保存当前编辑内容，再更新公开版本。</p>
+              <div class="editor-actions"><button @click="saveDraft">保存草稿</button><button class="primary" @click="publish">{{article?.published ? '发布更新' : '发布文章'}}</button><button v-if="article?.published" class="danger" @click="unpublish">撤下</button><button v-else-if="article" class="danger" @click="deleteArticle">删除</button><a v-if="article?.published" :href="`/posts/${article.draft.slug}`" target="_blank">查看公开版本 ↗</a></div>
+              <p class="field-hint">保存草稿不会修改公开内容。发布会先保存当前编辑内容，再更新公开版本。撤下后可删除文章并释放固定链接。</p>
             </div></div>
         </template>
       </fieldset></main>
@@ -702,6 +712,11 @@ input:read-only { color:var(--muted); }
 .beian-preview p span { display:inline-flex; align-items:center; gap:6px; }
 .feedback { position:fixed; z-index:40; left:50%; top:76px; transform:translateX(-50%); width:max-content; max-width:min(640px,calc(100vw - 32px)); margin:0; padding:12px 20px; border-radius:12px; font-size:14px; box-shadow:0 16px 40px -16px rgba(0,0,0,.25); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); animation:toast-in .4s var(--ease); }
 @keyframes toast-in { from { opacity:0; transform:translate(-50%,-8px); } }
+.feedback { display:flex; align-items:center; gap:12px; }
+.toast-close { flex:none; display:grid; place-items:center; width:24px; height:24px; margin-right:-6px; padding:0; border:0; border-radius:6px; background:none; color:inherit; font-size:18px; line-height:1; opacity:.6; }
+.toast-close:hover:not(:disabled) { opacity:1; color:inherit; background:color-mix(in srgb,currentColor 10%,transparent); }
+.toast-leave-active { transition:opacity .25s ease,transform .25s ease; }
+.toast-leave-to { opacity:0; transform:translate(-50%,-6px); }
 .error { color:#d15c5c; background:color-mix(in srgb,var(--surface) 90%,#d15c5c); border:1px solid rgba(209,92,92,.25); }.success { color:var(--accent); background:color-mix(in srgb,var(--surface) 90%,var(--accent)); border:1px solid color-mix(in srgb,var(--accent) 25%,transparent); }
 .login-panel { max-width:440px; margin:10vh auto; padding:40px 36px; border:1px solid var(--line); border-radius:20px; background:var(--surface); box-shadow:0 30px 60px -36px rgba(17,24,39,.25); }
 .login-panel h1 { font-size:40px; }.login-panel label { margin-top:24px; }.login-panel .primary { width:100%; margin-top:28px; padding:13px; }
