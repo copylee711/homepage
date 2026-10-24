@@ -76,6 +76,8 @@ copylee.cn {
 }
 image.copylee.cn {
     import access_log image
+    # 由 ESA 提供边缘证书；源站证书仅用于 ESA 回源加密，ESA 的 ACME 校验无法回源。
+    tls internal
     # 图床：静态图片直接由 Caddy 提供，仅上传接口转发到后端；前置 ESA 时上传路径需设为不缓存。
     @upload path /api/upload
     handle @upload {

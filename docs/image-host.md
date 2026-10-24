@@ -73,7 +73,7 @@ runuser -u copylee -- .venv/bin/python -m app.cli images-migrate --apply
 图片是不可变的静态文件，适合放在 ESA 后面：边缘提供 HTTPS 证书，令牌在客户端到边缘这一段是加密传输的。需要注意：
 
 - **缓存规则**：`image.copylee.cn/api/*` 设为不缓存。其余路径遵循源站的 `Cache-Control`。
-- **回源**：源站仍然是 HTTP 阶段时，ESA 用 HTTP 回源即可。`COPYLEE_IMAGE_URL` 始终填写 `https://` 地址。
+- **证书**：Let's Encrypt 的校验请求经 ESA 回源时会超时（522），源站拿不到公开证书。因此 HTTPS 配置里 image 站点使用 `tls internal`：浏览器看到的是 ESA 的边缘证书，源站的自签证书只用于 ESA 回源加密（ESA 不校验源站证书）。ESA 的「始终使用HTTPS」需要关闭，HTTP 跳转由 Caddy 完成。`COPYLEE_IMAGE_URL` 始终填写 `https://` 地址。
 - **删除后的缓存**：删除图片后，边缘节点上可能仍有缓存。如需立即失效，在 ESA 控制台刷新对应的 URL。
 - **上传大小**：确认 ESA 套餐允许的请求体大小不小于 20 MiB。
 - **真实 IP**：经过 ESA 后，Caddy 看到的是 ESA 节点的 IP，令牌失败限流会按节点 IP 计数（全站登录限流也是如此）。如需按真实客户端 IP 限流，需要在 Caddy 的 `servers { trusted_proxies … }` 中信任 ESA 的回源网段。
