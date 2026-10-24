@@ -6,6 +6,11 @@ import { DOOR, DOOR_TILE, PIT, ROCK, WALL, rng, tileAt } from './map'
 import type { Dir, Room } from './map'
 import type { TouchState } from './input'
 import { touchLayout } from './input'
+import {
+  drawBulletsArt, drawCorpses, drawDoorsArt, drawEnemyArt, drawParticleArt, drawPickupArt, drawPlayerArt, drawSwingsArt,
+  drawTorchesArt, itemIcon, paintRoomArt, uiIcon, weaponIcon,
+} from './render-art'
+import { artVersion } from './sprites'
 
 interface Theme { floor: string; floor2: string; grout: string; wall: string; wallTop: string; wallDark: string; rock: string; moss: string; dark: string }
 
@@ -17,7 +22,7 @@ const THEMES: Theme[] = [
 ]
 
 const FONT = 'Outfit Variable, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif'
-const cache = new WeakMap<Room, { canvas: HTMLCanvasElement; scale: number; theme: number }>()
+const cache = new WeakMap<Room, { canvas: HTMLCanvasElement; scale: number; theme: number; version: number }>()
 let light: HTMLCanvasElement | undefined
 let flashing = false
 const col = (c: string) => (flashing ? '#ffffff' : c)
@@ -39,13 +44,15 @@ export function render(ctx: CanvasRenderingContext2D, game: Game, view: View, to
 
   const shake = game.shake
   const sx = shake ? (Math.random() - 0.5) * shake * 1.4 : 0, sy = shake ? (Math.random() - 0.5) * shake * 1.4 : 0
-  ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * (ox + sx * scale), dpr * (oy + sy * scale))
+  const kx = sx + game.kickX, ky = sy + game.kickY
+  ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * (ox + kx * scale), dpr * (oy + ky * scale))
 
   drawRoom(ctx, game, theme, dpr * scale)
   drawDoors(ctx, game, theme, time)
   drawTorches(ctx, game, time)
   for (const p of game.roomPickups) drawPickup(ctx, p, time, game)
   drawTelegraphs(ctx, game, time)
+  drawCorpses(ctx, game)
 
   // 影子先画，角色按 y 排序
   const actors: ({ y: number; draw: () => void })[] = []
@@ -53,8 +60,8 @@ export function render(ctx: CanvasRenderingContext2D, game: Game, view: View, to
     shadow(ctx, e.x, e.y + e.r * 0.85, e.r * (e.boss ? 1.05 : 0.95), e.z)
     actors.push({ y: e.y, draw: () => drawEnemy(ctx, e, game, time) })
   }
-  if (game.state !== 'dead') {
-    shadow(ctx, game.player.x, game.player.y + 9, 9, 0)
+  if (game.state !== 'dead' || artVersion) {
+    if (game.state !== 'dead') shadow(ctx, game.player.x, game.player.y + 9, 9, 0)
     actors.push({ y: game.player.y, draw: () => drawPlayer(ctx, game, time) })
   }
   actors.sort((a, b) => a.y - b.y).forEach(a => a.draw())
@@ -74,7 +81,8 @@ export function render(ctx: CanvasRenderingContext2D, game: Game, view: View, to
   }
   for (const p of game.particles) if (p.kind === 'text') {
     ctx.globalAlpha = Math.min(1, p.life / p.max * 1.6)
-    label(ctx, p.text!, p.x, p.y, p.color, 9, false)
+    const pop = 1 + Math.max(0, (p.life / p.max - 0.75) * 2.4)
+    label(ctx, p.text!, p.x, p.y, p.color, p.size * 0.9 * pop, false)
   }
   ctx.globalAlpha = 1
 
@@ -99,13 +107,13 @@ export function render(ctx: CanvasRenderingContext2D, game: Game, view: View, to
 function drawRoom(ctx: CanvasRenderingContext2D, game: Game, theme: Theme, pixel: number) {
   const themeIndex = (game.level - 1) % THEMES.length
   let entry = cache.get(game.room)
-  if (!entry || Math.abs(entry.scale - pixel) > 0.01 || entry.theme !== themeIndex) {
+  if (!entry || Math.abs(entry.scale - pixel) > 0.01 || entry.theme !== themeIndex || entry.version !== artVersion) {
     const canvas = document.createElement('canvas')
     canvas.width = Math.ceil(WORLD_W * pixel); canvas.height = Math.ceil(WORLD_H * pixel)
     const g = canvas.getContext('2d')!
     g.scale(pixel, pixel)
-    paintRoom(g, game.room, theme)
-    entry = { canvas, scale: pixel, theme: themeIndex }
+    if (!paintRoomArt(g, game.room, game.level)) paintRoom(g, game.room, theme)
+    entry = { canvas, scale: pixel, theme: themeIndex, version: artVersion }
     cache.set(game.room, entry)
   }
   ctx.drawImage(entry.canvas, 0, 0, WORLD_W, WORLD_H)
@@ -195,6 +203,7 @@ function paintRoom(g: CanvasRenderingContext2D, room: Room, t: Theme) {
 }
 
 function drawDoors(ctx: CanvasRenderingContext2D, game: Game, theme: Theme, time: number) {
+  if (drawDoorsArt(ctx, game)) return
   const room = game.room
   for (const [dir, other] of Object.entries(room.doors) as [Dir, Room][]) {
     const [tx, ty] = DOOR_TILE[dir]
@@ -228,6 +237,7 @@ function torchSpots(room: Room): [number, number][] {
 }
 
 function drawTorches(ctx: CanvasRenderingContext2D, game: Game, time: number) {
+  if (drawTorchesArt(ctx, game, time)) return
   for (const [x, y] of torchSpots(game.room)) {
     ctx.fillStyle = '#4a3423'
     ctx.fillRect(x - 2, y - 2, 4, 9)
@@ -245,6 +255,15 @@ function drawTorches(ctx: CanvasRenderingContext2D, game: Game, time: number) {
 
 function drawPickup(ctx: CanvasRenderingContext2D, p: Pickup, time: number, game: Game) {
   const bob = Math.sin(time * 3 + p.x) * 2
+  if (p.kind === 'energy') { ctx.globalCompositeOperation = 'lighter'; halo(ctx, p.x, p.y, 9, '#4dd2ff', 0.45); ctx.globalCompositeOperation = 'source-over' }
+  if (p.kind === 'item' || p.kind === 'weapon') halo(ctx, p.x, p.y - (p.kind === 'item' ? 12 : 0) + bob, 22, p.kind === 'item' ? p.item!.color : WEAPONS[p.weapon!].color, 0.3)
+  if (drawPickupArt(ctx, p, time)) {
+    const near = Math.hypot(game.player.x - p.x, game.player.y - p.y)
+    if (p.kind === 'weapon' && near < 50) label(ctx, WEAPONS[p.weapon!].name, p.x, p.y + 18, WEAPONS[p.weapon!].color, 8)
+    if (p.kind === 'item' && near < 60) label(ctx, p.item!.name, p.x, p.y + 24, p.item!.color, 8)
+    if (p.kind === 'stairs') label(ctx, '下一层', p.x, p.y - 22, '#8ab4ff', 8)
+    return
+  }
   switch (p.kind) {
     case 'energy':
       glowDot(ctx, p.x, p.y, 3, '#4dd2ff')
@@ -303,6 +322,8 @@ function drawPickup(ctx: CanvasRenderingContext2D, p: Pickup, time: number, game
 // —— 角色 ——
 
 function drawPlayer(ctx: CanvasRenderingContext2D, game: Game, time: number) {
+  if (drawPlayerArt(ctx, game, time)) return
+  if (game.state === 'dead') return
   const p = game.player
   if (p.invuln > 0 && Math.floor(time * 20) % 2) ctx.globalAlpha = 0.45
   const face = Math.cos(p.aim) >= 0 ? 1 : -1
@@ -396,6 +417,7 @@ export function drawWeapon(ctx: CanvasRenderingContext2D, id: string, recoil: nu
 }
 
 function drawEnemy(ctx: CanvasRenderingContext2D, e: Enemy, game: Game, time: number) {
+  if (drawEnemyArt(ctx, e, game, time)) return
   if (e.spawn > 0) {
     // 刷怪法阵
     const t = Math.max(0, 1 - e.spawn / 0.7)
@@ -598,6 +620,7 @@ function drawBullets(ctx: CanvasRenderingContext2D, game: Game) {
     }
   }
   ctx.globalCompositeOperation = 'source-over'
+  if (drawBulletsArt(ctx, game)) return
   for (const b of game.bullets) {
     if (b.enemy) {
       ctx.fillStyle = b.color; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 7); ctx.fill()
@@ -609,6 +632,7 @@ function drawBullets(ctx: CanvasRenderingContext2D, game: Game) {
 }
 
 function drawSwings(ctx: CanvasRenderingContext2D, game: Game) {
+  if (drawSwingsArt(ctx, game)) return
   for (const s of game.swings) {
     const t = 1 - s.life / s.max
     const start = s.angle - 1.25 + t * 0.3, end = s.angle - 1.25 + Math.min(1, t * 1.6) * 2.5
@@ -625,6 +649,7 @@ function drawSwings(ctx: CanvasRenderingContext2D, game: Game) {
 
 function drawParticles(ctx: CanvasRenderingContext2D, game: Game) {
   for (const p of game.particles) {
+    if (drawParticleArt(ctx, p)) continue
     const a = Math.max(0, p.life / p.max)
     if (p.kind === 'spark') {
       ctx.globalCompositeOperation = 'lighter'
@@ -701,11 +726,11 @@ function drawHud(ctx: CanvasRenderingContext2D, game: Game, view: View, touch: T
   const y = pad + 10 * s
   for (let i = 0; i < p.maxHp / 2; i++) {
     const fill = Math.max(0, Math.min(1, (p.hp - i * 2) / 2))
-    heart(ctx, x, y, 8 * s, '#ff4d6d', fill)
+    if (!uiIcon(ctx, fill >= 1 ? 0 : fill > 0 ? 1 : 2, x, y, 18 * s)) heart(ctx, x, y, 8 * s, '#ff4d6d', fill)
     x += 20 * s
   }
   for (let i = 0; i < p.maxArmor; i++) {
-    shieldIcon(ctx, x, y, 8 * s, i < p.armor)
+    if (!uiIcon(ctx, i < p.armor ? 3 : 4, x, y, 18 * s)) shieldIcon(ctx, x, y, 8 * s, i < p.armor)
     x += 20 * s
   }
   // 能量条
@@ -727,7 +752,7 @@ function drawHud(ctx: CanvasRenderingContext2D, game: Game, view: View, touch: T
     ctx.fillStyle = 'rgba(10,12,20,.65)'; roundRect(ctx, wx, wy, 150 * s, 44 * s, 10 * s); ctx.fill()
     ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 1; ctx.stroke()
     const w = game.weapon
-    ctx.save(); ctx.translate(wx + 26 * s, wy + 22 * s); ctx.scale(1.6 * s, 1.6 * s); drawWeapon(ctx, w.id, -6, 1); ctx.restore()
+    if (!weaponIcon(ctx, w.id, wx + 27 * s, wy + 22 * s, 40 * s)) { ctx.save(); ctx.translate(wx + 26 * s, wy + 22 * s); ctx.scale(1.6 * s, 1.6 * s); drawWeapon(ctx, w.id, -6, 1); ctx.restore() }
     text(ctx, w.name, wx + 54 * s, wy + 19 * s, w.color, 12 * s, 'left', 700)
     text(ctx, w.cost ? `${w.cost} 能量/发` : '无消耗', wx + 54 * s, wy + 34 * s, 'rgba(255,255,255,.6)', 10 * s, 'left')
     if (p.weapons.length > 1) {
@@ -772,6 +797,7 @@ function drawMinimap(ctx: CanvasRenderingContext2D, game: Game, right: number, t
     ctx.fillStyle = r === game.room ? '#ffffff' : r.visited ? 'rgba(170,180,210,.7)' : 'rgba(120,130,160,.3)'
     roundRect(ctx, x, y, cw, ch, 2); ctx.fill()
     const icon = r.type === 'boss' ? '#ff4d5e' : r.type === 'treasure' ? '#ffd166' : r.type === 'heal' ? '#5ee7ff' : ''
+    if ((r.type === 'boss' || r.type === 'treasure') && uiIcon(ctx, r.type === 'boss' ? 14 : 15, x + cw / 2, y + ch / 2, ch * 1.3)) continue
     if (icon) { ctx.fillStyle = icon; ctx.beginPath(); ctx.arc(x + cw / 2, y + ch / 2, 2.6 * s, 0, 7); ctx.fill() }
   }
 }
@@ -781,30 +807,36 @@ function drawTouch(ctx: CanvasRenderingContext2D, game: Game, view: View, touch:
   ctx.lineWidth = 2
   // 左摇杆
   const base = touch.stick ?? { x: L.stick.x, y: L.stick.y }
-  ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.strokeStyle = 'rgba(255,255,255,.22)'
-  ctx.beginPath(); ctx.arc(base.x, base.y, L.stick.r, 0, 7); ctx.fill(); ctx.stroke()
   const knob = touch.stick ? { x: base.x + touch.moveX * L.stick.r, y: base.y + touch.moveY * L.stick.r } : base
-  ctx.fillStyle = 'rgba(255,255,255,.35)'
-  ctx.beginPath(); ctx.arc(knob.x, knob.y, L.stick.r * 0.42, 0, 7); ctx.fill()
+  if (!uiIcon(ctx, 8, base.x, base.y, L.stick.r * 2, 0.75) || !uiIcon(ctx, 9, knob.x, knob.y, L.stick.r * 0.9, 0.85)) {
+    ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.strokeStyle = 'rgba(255,255,255,.22)'
+    ctx.beginPath(); ctx.arc(base.x, base.y, L.stick.r, 0, 7); ctx.fill(); ctx.stroke()
+    ctx.fillStyle = 'rgba(255,255,255,.35)'
+    ctx.beginPath(); ctx.arc(knob.x, knob.y, L.stick.r * 0.42, 0, 7); ctx.fill()
+  }
   // 右侧按钮
-  const button = (b: { x: number; y: number; r: number }, label: string, active: boolean, color: string, ready = 1) => {
+  const button = (b: { x: number; y: number; r: number }, label: string, active: boolean, color: string, ready = 1, icon = -1) => {
+    if (icon >= 0 && uiIcon(ctx, icon, b.x, b.y, b.r * 2 * (active ? 0.92 : 1), active ? 1 : 0.82)) {
+      if (ready < 1) { ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.arc(b.x, b.y, b.r * 0.86, -Math.PI / 2, -Math.PI / 2 + (1 - ready) * Math.PI * 2); ctx.fill() }
+      return
+    }
     ctx.fillStyle = active ? hexA(color, 0.45) : 'rgba(255,255,255,.1)'
     ctx.strokeStyle = hexA(color, 0.7)
     ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 7); ctx.fill(); ctx.stroke()
     if (ready < 1) { ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.arc(b.x, b.y, b.r, -Math.PI / 2, -Math.PI / 2 + (1 - ready) * Math.PI * 2); ctx.fill() }
     text(ctx, label, b.x, b.y + b.r * 0.18, '#fff', b.r * 0.42, 'center', 700)
   }
-  button(L.fire, '射击', touch.firing, game.weapon.color)
+  button(L.fire, '射击', touch.firing, game.weapon.color, 1, 10)
   if (touch.aim) {
     ctx.strokeStyle = 'rgba(255,255,255,.5)'
     ctx.beginPath(); ctx.moveTo(L.fire.x, L.fire.y); ctx.lineTo(L.fire.x + Math.cos(touch.aim) * L.fire.r, L.fire.y + Math.sin(touch.aim) * L.fire.r); ctx.stroke()
   }
   const p = game.player
-  button(L.dash, '翻滚', false, '#8ab4ff', p.dashCd > 0 ? 1 - p.dashCd / (0.85 * p.stats.dash) : 1)
-  if (p.weapons.length > 1) button(L.swap, '换枪', false, '#ffd166')
+  button(L.dash, '翻滚', false, '#8ab4ff', p.dashCd > 0 ? 1 - p.dashCd / (0.85 * p.stats.dash) : 1, 11)
+  if (p.weapons.length > 1) button(L.swap, '换枪', false, '#ffd166', 1, 12)
   const w = game.weapon
   text(ctx, w.cost ? `${w.name} · ${w.cost}能量` : w.name, L.fire.x + L.fire.r * 0.6, L.swap.y - L.swap.r - 10, w.color, Math.max(11, L.fire.r * 0.26), 'right', 700)
-  if (game.prompt) button(L.interact, '拾取', false, '#7cffb2')
+  if (game.prompt) button(L.interact, '拾取', false, '#7cffb2', 1, 13)
   void time
 }
 
@@ -852,6 +884,11 @@ function shieldIcon(ctx: CanvasRenderingContext2D, x: number, y: number, r: numb
   ctx.moveTo(x, y - r); ctx.lineTo(x + r * 0.85, y - r * 0.6); ctx.lineTo(x + r * 0.7, y + r * 0.3); ctx.lineTo(x, y + r); ctx.lineTo(x - r * 0.7, y + r * 0.3); ctx.lineTo(x - r * 0.85, y - r * 0.6); ctx.closePath()
   ctx.fillStyle = full ? '#8ab4ff' : 'rgba(0,0,0,.5)'; ctx.fill()
   ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.lineWidth = 1.2; ctx.stroke()
+}
+
+/** 道具图标：优先用雪碧图。 */
+export function itemGlyph(ctx: CanvasRenderingContext2D, item: { id: string; glyph: string; color: string; name: string; text: string }, x: number, y: number, size: number) {
+  if (!itemIcon(ctx, item, x, y, size * 2)) glyph(ctx, item.glyph, x, y, size, item.color)
 }
 
 export function glyph(ctx: CanvasRenderingContext2D, kind: string, x: number, y: number, r: number, color: string) {

@@ -6,7 +6,8 @@ import GameOver from '../GameOver.vue'
 import type { ItemDef } from './data'
 import { Game } from './game'
 import { Controls } from './input'
-import { computeView, glyph, render } from './render'
+import { computeView, itemGlyph, render } from './render'
+import { heroUrl, loadArt } from './sprites'
 import type { View } from './render'
 import { WORLD_H, WORLD_W } from './data'
 
@@ -22,6 +23,7 @@ const best = ref(localBest('dungeon'))
 const result = ref<{ improved: boolean; synced: boolean; error?: string }>()
 const summary = ref({ score: 0, level: 1, kills: 0, time: 0, items: [] as ItemDef[] })
 const pausedItems = ref<ItemDef[]>([])
+const artProgress = ref(0)
 
 let game: Game | undefined
 const controls = new Controls()
@@ -130,10 +132,11 @@ function itemIcon(el: Element | null, item: ItemDef) {
   const g = c.getContext('2d')!
   c.width = c.height = 64
   g.clearRect(0, 0, 64, 64)
-  glyph(g, item.glyph, 32, 32, 20, item.color)
+  itemGlyph(g, item, 32, 32, 22)
 }
 
 onMounted(() => {
+  loadArt((done, total) => { artProgress.value = done / total })
   resize()
   observer = new ResizeObserver(resize)
   observer.observe(canvas.value!)
@@ -161,7 +164,7 @@ onBeforeUnmount(() => {
       <button v-else type="button" class="wide" @click="exitImmersive">退出全屏</button>
     </div>
 
-    <div v-if="phase === 'menu'" class="panel menu">
+    <div v-if="phase === 'menu'" class="panel menu" :style="{ '--hero': `url(${heroUrl})` }">
       <p class="eyebrow">ROGUELIKE · 地牢闯关</p>
       <h2>深渊骑士</h2>
       <p class="lead">一层层深入地牢，清空房间、收集武器与宝物，击败每层首领。死亡后从头开始。</p>
@@ -181,6 +184,7 @@ onBeforeUnmount(() => {
         </template>
       </div>
       <button type="button" class="go" @click="start">开始冒险</button>
+      <p v-if="artProgress < 1" class="best">正在加载美术素材 {{ Math.round(artProgress * 100) }}%</p>
       <p v-if="best" class="best">最佳 {{ best.best }} 分 · 第 {{ best.detail }} 层</p>
     </div>
 
@@ -218,7 +222,8 @@ onBeforeUnmount(() => {
 .corner { position:absolute; z-index:6; top:calc(env(safe-area-inset-top) + 62px); left:calc(env(safe-area-inset-left) + 12px); display:flex; gap:6px; }
 .corner button { white-space:nowrap; height:32px; min-width:32px; padding:0 10px; border:1px solid rgba(255,255,255,.18); border-radius:9px; background:rgba(10,12,20,.6); color:#e8ecf5; font:600 12px var(--font); cursor:pointer; }
 .panel { position:absolute; inset:0; z-index:5; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:24px; background:rgba(5,6,12,.55); color:#e8ecf5; text-align:center; backdrop-filter:blur(3px); overflow:auto; }
-.menu { background:transparent; backdrop-filter:none; }
+.menu { background:linear-gradient(90deg,rgba(5,6,12,.15) 0%,rgba(5,6,12,.55) 45%,rgba(5,6,12,.88) 100%),var(--hero) center/cover no-repeat; backdrop-filter:none; align-items:flex-end; padding-right:clamp(24px,7%,90px); text-align:right; }
+.menu .keys { justify-items:end; }
 .eyebrow { color:#ffd166; font:600 12px var(--font); letter-spacing:.2em; }
 .panel h2 { font-size:clamp(28px,6vw,52px); font-weight:800; letter-spacing:.04em; text-shadow:0 6px 30px rgba(255,140,60,.35); }
 .lead { max-width:520px; color:rgba(232,236,245,.75); font-size:14px; line-height:1.7; }

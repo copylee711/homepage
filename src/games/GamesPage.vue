@@ -11,6 +11,7 @@ import Sheep from './sheep/Sheep.vue'
 import { ICONS } from './sheep/icons'
 import Watermelon from './watermelon/Watermelon.vue'
 import Dungeon from './dungeon/Dungeon.vue'
+import { heroUrl } from './dungeon/sprites'
 
 const id = location.pathname.replace(/\/$/, '').split('/')[2] as GameId | undefined
 const game = games.find(g => g.id === id)
@@ -65,16 +66,7 @@ onMounted(() => {
                 <circle cx="44" cy="96" r="20" fill="#ff9a1f" /><circle cx="158" cy="100" r="16" fill="#e8344e" /><circle cx="150" cy="62" r="11" fill="#8e5bd6" /><circle cx="52" cy="58" r="13" fill="#ffe14d" />
                 <circle cx="88" cy="70" r="4" fill="#2b1d14" /><circle cx="112" cy="70" r="4" fill="#2b1d14" /><path d="M92 82q8 7 16 0" stroke="#2b1d14" stroke-width="3" fill="none" stroke-linecap="round" />
               </svg>
-              <svg v-else-if="g.id === 'dungeon'" class="knight" viewBox="0 0 220 130">
-                <defs><radialGradient id="dl" cx="50%" cy="60%" r="60%"><stop offset="0" stop-color="#ffb347" stop-opacity=".45" /><stop offset="1" stop-color="#ffb347" stop-opacity="0" /></radialGradient></defs>
-                <ellipse cx="110" cy="75" rx="100" ry="55" fill="url(#dl)" />
-                <g fill="#3d4256"><rect x="20" y="96" width="180" height="10" rx="2" /><rect x="34" y="20" width="14" height="76" /><rect x="172" y="20" width="14" height="76" /></g>
-                <ellipse cx="96" cy="100" rx="14" ry="4" fill="rgba(0,0,0,.4)" /><path d="M84 72q-10 14-4 26h24z" fill="#3157d6" />
-                <rect x="86" y="74" width="20" height="18" rx="6" fill="#c9d2e3" /><circle cx="96" cy="64" r="13" fill="#e6ebf4" /><rect x="96" y="60" width="12" height="6" rx="3" fill="#151824" />
-                <path d="M93 52q-12-9-16 2 7-3 13 3z" fill="#ff5d5d" /><rect x="106" y="78" width="22" height="6" rx="2" fill="#585f78" /><circle cx="140" cy="81" r="4" fill="#ffd166" /><circle cx="152" cy="81" r="3" fill="#ffd166" opacity=".6" />
-                <g transform="translate(160 78)"><ellipse cy="20" rx="14" ry="4" fill="rgba(0,0,0,.4)" /><path d="M-13 18q0-26 13-26t13 26z" fill="#5fd068" /><circle cx="-5" cy="6" r="2.4" fill="#1b1b22" /><circle cx="4" cy="6" r="2.4" fill="#1b1b22" /></g>
-                <g transform="translate(58 46)"><path d="M-4 0l-14-6 4 8-6 4h16zM4 0l14-6-4 8 6 4H4z" fill="#5b3c9e" /><circle r="6" fill="#9b6bff" /><circle cx="-2" cy="-1" r="1.3" fill="#ff4d6d" /><circle cx="2" cy="-1" r="1.3" fill="#ff4d6d" /></g>
-              </svg>
+              <img v-else-if="g.id === 'dungeon'" class="cover" :src="heroUrl" alt="" loading="lazy">
               <div v-else class="stack">
                 <svg v-for="(n, k) in [15, 0, 5, 7, 2]" :key="k" viewBox="0 0 48 48" :style="{ '--k': k }" v-html="ICONS[n]" />
               </div>
@@ -107,6 +99,8 @@ onMounted(() => {
 .art.watermelon { background:linear-gradient(180deg,#fff6e3,#ffe2b8); }
 .art.sheep { background:linear-gradient(180deg,#d9f2c4,#b8e39b); }
 .art.dungeon { background:radial-gradient(ellipse at 50% 70%,#24283a,#0b0c12); }
+.art .cover { width:100%; height:100%; object-fit:cover; object-position:30% 40%; transition:transform .6s var(--ease); }
+.card:hover .art .cover { transform:scale(1.04); }
 :root[data-theme='dark'] .art.watermelon { background:linear-gradient(180deg,#1d2233,#2a2620); }
 :root[data-theme='dark'] .art.sheep { background:linear-gradient(180deg,#1f3322,#18281b); }
 .art > svg { width:min(80%,280px); transition:transform .5s var(--ease); }

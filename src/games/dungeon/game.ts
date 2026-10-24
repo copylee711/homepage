@@ -55,6 +55,12 @@ export interface Enemy {
   z: number
   flying: boolean
   anim: number
+  /** 距上次攻击动作的时间，用于播放攻击帧 */
+  pose: number
+  /** 击退速度 */
+  kx: number; ky: number
+  /** 受击挤压动画 0→1 */
+  squash: number
 }
 
 export interface Bullet {
@@ -71,6 +77,8 @@ export interface Bullet {
   hit: Set<number>
   trail: number
   big?: boolean
+  /** fx 雪碧图中的帧序号 */
+  sprite?: number
 }
 
 export interface Swing { x: number; y: number; angle: number; range: number; life: number; max: number; damage: number; hit: Set<number>; color: string }
@@ -78,11 +86,16 @@ export interface Swing { x: number; y: number; angle: number; range: number; lif
 export type PickupKind = 'heart' | 'energy' | 'weapon' | 'item' | 'stairs' | 'chest' | 'fountain'
 export interface Pickup { kind: PickupKind; x: number; y: number; vx: number; vy: number; weapon?: string; item?: ItemDef; used?: boolean; t: number }
 
-export interface Particle { x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number; kind: 'spark' | 'dust' | 'ring' | 'text' | 'ghost' | 'flash'; text?: string; angle?: number; owner?: number; sum?: number }
+export interface Particle { x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number; kind: 'spark' | 'dust' | 'ring' | 'text' | 'ghost' | 'flash' | 'explosion' | 'impact' | 'shell'; text?: string; angle?: number; owner?: number; sum?: number }
+
+export interface Corpse { kind: EnemyKind | BossKind; x: number; y: number; t: number; flip: boolean; scale: number }
 
 export interface Banner { title: string; text: string; life: number; color: string }
 
 const STEP = 1 / 60
+/** 武器与敌方子弹颜色对应的 fx 帧 */
+const PLAYER_FX: Record<string, number> = { pistol: 0, smg: 1, laser: 2, rocket: 3, bouncer: 4, frost: 5 }
+const ENEMY_FX: Record<string, number> = { '#ff6b6b': 8, '#ffa94d': 9, '#ffc078': 9, '#b388ff': 10, '#ff8fab': 10, '#7bed9f': 11, '#c8c3b9': 12 }
 const SOLID_WALK = new Set([WALL, ROCK, PIT])
 
 let nextId = 1
@@ -97,6 +110,12 @@ export class Game {
   swings: Swing[] = []
   pickups = new Map<Room, Pickup[]>()
   particles: Particle[] = []
+  corpses: Corpse[] = []
+  /** 正在行动的怪物：它发射子弹时记为一次攻击动作 */
+  private acting?: Enemy
+  /** 镜头冲击：开火时向后、受击时随伤害方向偏移 */
+  kickX = 0
+  kickY = 0
   banner: Banner | null = null
   shake = 0
   hitStop = 0
@@ -111,6 +130,7 @@ export class Game {
   private flowTimer = 0
   private carry = 0
   hurtFlash = 0
+  deadTime = 0
   lowEnergyHint = 0
   prompt = ''
   onSound: (s: Sound) => void = () => {}
@@ -162,7 +182,7 @@ export class Game {
     this.player.x = (tx + 0.5) * TILE + dx * TILE * 1.3
     this.player.y = (ty + 0.5) * TILE + dy * TILE * 1.3
     this.bullets = []; this.swings = []
-    this.enemies = []
+    this.enemies = []; this.corpses = []
     if (!room.visited) {
       room.visited = true
       if (room.type === 'normal') this.spawnWave(room)
@@ -196,7 +216,7 @@ export class Game {
       id: nextId++, kind, boss: false, x, y, vx: 0, vy: 0, r: def.radius * (elite ? 1.2 : 1),
       hp, maxHp: hp, speed: def.speed * (elite ? 1.15 : 1) * (1 + Math.min(0.3, (this.level - 1) * 0.04)),
       state: 'idle', timer: Math.random() * 1.2, cd: 1 + Math.random() * 1.5, flash: 0, slow: 0, spawn: delay,
-      elite, angle: Math.random() * Math.PI * 2, tx: x, ty: y, phase: Math.random() * 10, z: 0, flying: !!def.flying, anim: Math.random() * 10,
+      elite, angle: Math.random() * Math.PI * 2, tx: x, ty: y, phase: Math.random() * 10, z: 0, flying: !!def.flying, anim: Math.random() * 10, pose: 9, kx: 0, ky: 0, squash: 1,
     }
     this.enemies.push(e)
     return e
@@ -209,7 +229,7 @@ export class Game {
     this.enemies.push({
       id: nextId++, kind, boss: true, x: WORLD_W / 2, y: WORLD_H / 2 - TILE, vx: 0, vy: 0, r: def.radius,
       hp, maxHp: hp, speed: 40, state: 'intro', timer: 1.4, cd: 0, flash: 0, slow: 0, spawn: 1.2,
-      elite: false, angle: 0, tx: 0, ty: 0, phase: 0, z: 0, flying: kind === 'necro', anim: 0,
+      elite: false, angle: 0, tx: 0, ty: 0, phase: 0, z: 0, flying: kind === 'necro', anim: 0, pose: 9, kx: 0, ky: 0, squash: 1,
     })
     this.banner = { title: def.name, text: `第 ${this.level} 层首领`, life: 2.2, color: '#ff5d5d' }
     this.onSound('boss')
@@ -235,9 +255,12 @@ export class Game {
     this.updateParticles(dt)
     if (this.banner && (this.banner.life -= dt) <= 0) this.banner = null
     this.shake = Math.max(0, this.shake - dt * 18)
+    this.kickX *= 0.82; this.kickY *= 0.82
+    for (const c of this.corpses) c.t += dt
+    if (this.corpses.length > 30) this.corpses.splice(0, this.corpses.length - 30)
     this.hurtFlash = Math.max(0, this.hurtFlash - dt * 2.5)
     this.lowEnergyHint = Math.max(0, this.lowEnergyHint - dt)
-    if (this.state === 'dead') return
+    if (this.state === 'dead') { this.deadTime += dt; return }
     if (this.hitStop > 0) { this.hitStop -= dt; return }
     if (this.state === 'transition') {
       this.transition += dt
@@ -343,6 +366,12 @@ export class Game {
     p.energy -= w.cost
     p.cooldown = w.cooldown / p.stats.rate
     p.recoil = 1
+    this.kickX -= Math.cos(p.aim) * w.shake * 1.1; this.kickY -= Math.sin(p.aim) * w.shake * 1.1
+    if (w.id === 'shotgun' || w.id === 'rocket') { p.vx -= Math.cos(p.aim) * 90; p.vy -= Math.sin(p.aim) * 90 }
+    if (['pistol', 'smg', 'shotgun'].includes(w.id)) {
+      const side = p.aim + (Math.cos(p.aim) >= 0 ? -Math.PI / 2 : Math.PI / 2)
+      this.particles.push({ x: p.x + Math.cos(p.aim) * 8, y: p.y, vx: Math.cos(side) * 70 + (Math.random() - 0.5) * 30, vy: -90 - Math.random() * 40, life: 0.55, max: 0.55, color: '#e0b04a', size: 2.2, kind: 'shell', angle: Math.random() * 6 })
+    }
     this.shake = Math.max(this.shake, w.shake)
     if (w.melee) {
       const crit = Math.random() < p.stats.crit
@@ -361,7 +390,7 @@ export class Game {
         vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
         r: w.size * p.stats.size, damage: w.damage * p.stats.damage * (crit ? 2 : 1), enemy: false, life: w.life,
         pierce: (w.pierce ?? 0) + p.stats.pierce, bounce: (w.bounce ?? 0) + p.stats.bounce, explode: w.explode ?? 0,
-        color: crit ? '#fff1a8' : w.color, slow: !!w.slow, crit, hit: new Set(), trail: w.id === 'laser' ? 26 : w.id === 'rocket' ? 14 : 8,
+        color: crit ? '#fff1a8' : w.color, slow: !!w.slow, crit, hit: new Set(), trail: w.id === 'laser' ? 26 : w.id === 'rocket' ? 14 : 8, sprite: PLAYER_FX[w.id] ?? 0,
       })
     }
     this.particles.push({ x: p.x + Math.cos(p.aim) * 20, y: p.y + Math.sin(p.aim) * 20, vx: 0, vy: 0, life: 0.06, max: 0.06, color: w.color, size: 9, kind: 'flash', angle: p.aim })
@@ -392,7 +421,15 @@ export class Game {
 
   private updateEnemy(e: Enemy, dt: number) {
     if (e.hp <= 0) return
+    this.acting = e
     e.flash = Math.max(0, e.flash - dt * 12)
+    e.pose += dt
+    e.squash += (1 - e.squash) * Math.min(1, dt * 14)
+    if (e.kx || e.ky) {
+      this.moveActor(e, e.kx * dt, e.ky * dt, e.flying)
+      e.kx *= 0.82; e.ky *= 0.82
+      if (Math.abs(e.kx) + Math.abs(e.ky) < 4) e.kx = e.ky = 0
+    }
     e.anim += dt
     if (e.spawn > 0) { e.spawn -= dt; return }
     e.slow = Math.max(0, e.slow - dt)
@@ -539,6 +576,7 @@ export class Game {
           const n = rage ? 18 : 14
           for (let i = 0; i < n; i++) this.enemyShot(e.x, e.y, (i / n) * Math.PI * 2 + e.phase * 0.2, 135 * fast, 6, '#7bed9f')
           this.shake = 6
+          e.pose = 0
           this.ring(e.x, e.y, '#7bed9f', 70)
           this.dustRing(e.x, e.y + e.r * 0.6)
           e.state = 'idle'; e.timer = rage ? 0.5 : 0.8
@@ -645,7 +683,8 @@ export class Game {
   }
 
   private enemyShot(x: number, y: number, angle: number, speed: number, r: number, color: string, big = false) {
-    this.bullets.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, r, damage: big ? 2 : 1, enemy: true, life: 5, pierce: 0, bounce: 0, explode: 0, color, slow: false, crit: false, hit: new Set(), trail: 0, big })
+    if (this.acting) this.acting.pose = 0
+    this.bullets.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, r, damage: big ? 2 : 1, enemy: true, life: 5, pierce: 0, bounce: 0, explode: 0, color, slow: false, crit: false, hit: new Set(), trail: 0, big, sprite: ENEMY_FX[color] })
     this.onSound('enemyShoot')
   }
 
@@ -710,14 +749,22 @@ export class Game {
     if (e.spawn > 0 || e.z > 8 || e.hp <= 0) return
     e.hp -= amount
     e.flash = 1
-    if (!e.boss && e.state !== 'charge') {
-      const k = knockback * (e.kind === 'totem' ? 0 : 1)
-      this.moveActor(e, nx * k * 0.06, ny * k * 0.06, e.flying)
+    e.squash = crit ? 0.62 : 0.78
+    if (!e.boss && e.state !== 'charge' && e.kind !== 'totem') {
+      // 击退有上限，避免高射速武器把怪物压在墙角无法靠近
+      e.kx += nx * knockback * 1.3; e.ky += ny * knockback * 1.3
+      const kv = Math.hypot(e.kx, e.ky)
+      if (kv > 170) { e.kx *= 170 / kv; e.ky *= 170 / kv }
     }
+    const heavy = amount >= 5 || crit
+    if (heavy) this.hitStop = Math.max(this.hitStop, crit ? 0.045 : 0.03)
+    this.kickX += nx * (heavy ? 1.6 : 0.6); this.kickY += ny * (heavy ? 1.6 : 0.6)
+    this.shake = Math.max(this.shake, heavy ? 2.4 : 0.9)
+    this.particles.push({ x: e.x - nx * e.r * 0.6, y: e.y - ny * e.r * 0.6, vx: 0, vy: 0, life: 0.12, max: 0.12, color: '#fff', size: heavy ? 22 : 14, kind: 'impact', angle: Math.random() * 6 })
     // 连续命中的伤害数字合并显示，避免刷屏
     const recent = this.particles.find(p => p.owner === e.id && p.life > p.max - 0.3)
     if (recent && !crit) { recent.sum! += amount; recent.text = String(Math.round(recent.sum!)); recent.life = recent.max; recent.x = e.x; recent.y = e.y - e.r - 4 }
-    else this.particles.push({ x: e.x + (Math.random() - 0.5) * 10, y: e.y - e.r - 4, vx: 0, vy: -40, life: 0.6, max: 0.6, color: crit ? '#ffe066' : '#ffffff', size: 10, kind: 'text', text: String(Math.round(amount)), owner: crit ? undefined : e.id, sum: amount })
+    else this.particles.push({ x: e.x + (Math.random() - 0.5) * 10, y: e.y - e.r - 4, vx: 0, vy: -40, life: 0.6, max: 0.6, color: crit ? '#ffe066' : '#ffffff', size: crit ? 15 : 10, kind: 'text', text: String(Math.round(amount)), owner: crit ? undefined : e.id, sum: amount })
     for (let i = 0; i < 3; i++) this.spark(e.x - nx * e.r * 0.5, e.y - ny * e.r * 0.5, Math.atan2(-ny, -nx) + (Math.random() - 0.5) * 1.6, ENEMIES[e.kind as EnemyKind]?.color ?? BOSSES[e.kind as BossKind].color)
     this.onSound('hit')
     if (e.hp <= 0) this.killEnemy(e)
@@ -727,7 +774,9 @@ export class Game {
     e.hp = 0
     this.enemies = this.enemies.filter(x => x !== e)
     const color = e.boss ? BOSSES[e.kind as BossKind].color : ENEMIES[e.kind as EnemyKind].color
-    this.burst(e.x, e.y, color, e.boss ? 60 : 16)
+    this.burst(e.x, e.y, color, e.boss ? 60 : 22)
+    this.corpses.push({ kind: e.kind, x: e.x, y: e.y, t: 0, flip: this.player.x < e.x, scale: e.boss ? 1 : e.r / ENEMIES[e.kind as EnemyKind].radius })
+    this.shake = Math.max(this.shake, e.boss ? 10 : 3.5)
     this.kills++
     this.onSound('kill')
     if (e.kind === 'pumpkin') this.explode(e.x, e.y, 54, 10, true)
@@ -745,7 +794,7 @@ export class Game {
       this.banner = { title: '首领已击败', text: '拾取宝物，然后走进阶梯', life: 2.4, color: '#ffd166' }
       return
     }
-    this.hitStop = Math.max(this.hitStop, 0.03)
+    this.hitStop = Math.max(this.hitStop, e.elite ? 0.09 : 0.06)
     this.score += ENEMIES[e.kind as EnemyKind].score * this.level * (e.elite ? 2 : 1)
     const orbs = 1 + Math.floor(Math.random() * 3)
     for (let i = 0; i < orbs; i++) this.drop(this.room, { kind: 'energy', x: e.x, y: e.y, vx: (Math.random() - 0.5) * 160, vy: (Math.random() - 0.5) * 160 })
@@ -758,6 +807,9 @@ export class Game {
   private explode(x: number, y: number, radius: number, damage: number, hurtsPlayer: boolean) {
     this.shake = Math.max(this.shake, 5)
     this.ring(x, y, '#ffb347', radius)
+    this.particles.push({ x, y, vx: 0, vy: 0, life: 0.55, max: 0.55, color: '#ffb347', size: radius * 2.3, kind: 'explosion' })
+    this.hitStop = Math.max(this.hitStop, 0.06)
+    this.kickX += (Math.random() - 0.5) * 6; this.kickY += (Math.random() - 0.5) * 6
     for (let i = 0; i < 22; i++) this.spark(x, y, Math.random() * Math.PI * 2, i % 2 ? '#ffd166' : '#ff6b3d', 260)
     this.onSound('explode')
     for (const e of [...this.enemies]) {
@@ -1033,6 +1085,7 @@ export class Game {
       p.x += p.vx * dt; p.y += p.vy * dt
       if (p.kind === 'spark' || p.kind === 'dust') { p.vx *= 0.9; p.vy *= 0.9 }
       if (p.kind === 'text') p.vy *= 0.92
+      if (p.kind === 'shell') { if (p.life > p.max - 0.28) p.vy += 700 * dt; else { p.vx *= 0.7; p.vy = 0 } p.angle! += dt * 20 * (p.life > p.max - 0.28 ? 1 : 0) }
     }
     this.particles = this.particles.filter(p => p.life > 0)
     if (this.particles.length > 600) this.particles.splice(0, this.particles.length - 600)
