@@ -32,6 +32,7 @@
 - [HTTP Caddy 示例](Caddyfile.http.example)：公开主页与文章，管理请求通过 SSH 隧道访问。
 - [HTTPS Caddy 示例](Caddyfile.example)：正式站点与公网管理。
 - [备份与恢复](../docs/maintenance.md)：快照格式、图片引用与恢复要求。
+- [图床](../docs/image-host.md)：`image.copylee.cn` 的 Caddy 站点、ESA 缓存规则与旧图片迁移。
 - [SFTPGo 部署](sftpgo/README.md)：配套文件管理、WebDAV 与 SFTP 服务。
 
 ## 邮箱发送接口的回源保护

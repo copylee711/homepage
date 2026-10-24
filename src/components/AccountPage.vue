@@ -5,6 +5,9 @@ import type { AccountEntry, AccountUser } from '../account'
 import { fetchJson } from '../content'
 import { vReveal } from '../composables/useReveal'
 import PageHeading from './PageHeading.vue'
+import ImageHosting from './ImageHosting.vue'
+import AccountSecurity from './AccountSecurity.vue'
+import { passkeyAvailable, usePasskey } from '../passkeys'
 import { games, loadMine } from '../games/api'
 import type { GameBest, GameId } from '../games/api'
 import { cancelEmailCaptcha, prepareEmailCaptcha, refreshEmailCaptcha, sendEmailCode, verifyEmailCaptcha } from '../email-captcha'
@@ -12,9 +15,15 @@ import type { EmailCaptchaConfig } from '../email-captcha'
 
 type Mode = 'login' | 'register' | 'reset'
 const mode = ref<Mode>('login')
-const tab = ref<'favorites' | 'history' | 'settings'>('favorites')
+const tab = ref<'favorites' | 'history' | 'images' | 'settings'>('favorites')
+const imagesEnabled = ref(false)
+const tabList = computed(() => [['favorites', '收藏'], ['history', '浏览记录'], ...(imagesEnabled.value ? [['images', '图床']] : []), ['settings', '账户设置']])
 const busy = ref(false), error = ref(''), message = ref('')
 const email = ref(''), password = ref(''), code = ref(''), name = ref(''), agree = ref(false)
+// 开启两步验证的账户：密码通过后服务器提示需要验证码，再显示第二步。
+const OTP_REQUIRED = '请输入两步验证码或恢复码'
+const otp = ref(''), otpStep = ref(false)
+const canPasskey = passkeyAvailable()
 const cooldown = ref(0)
 interface AccountConfig { registrationOpen: boolean; allowedDomains: string[]; captcha: EmailCaptchaConfig }
 const config = ref<AccountConfig>()
@@ -35,7 +44,7 @@ async function run(work: () => Promise<void>) {
   try { await work() } catch (err) { error.value = err instanceof Error ? err.message : '操作失败' }
   finally { busy.value = false }
 }
-function switchMode(value: Mode) { mode.value = value; error.value = ''; message.value = ''; code.value = ''; password.value = '' }
+function switchMode(value: Mode) { mode.value = value; error.value = ''; message.value = ''; code.value = ''; password.value = ''; otp.value = ''; otpStep.value = false }
 
 function startCooldown(seconds: number) {
   cooldown.value = seconds
@@ -59,25 +68,43 @@ const sendCode = () => run(async () => {
   }
 })
 async function afterSignIn(result: { user: AccountUser; csrf: string }) {
-  signedIn(result); password.value = ''; code.value = ''
+  signedIn(result); password.value = ''; code.value = ''; otp.value = ''; otpStep.value = false
   if (next) { location.href = next; return }
   await loadLists()
 }
+// 第二步验证码只在服务器要求时附带；收到提示后显示输入框，不算作失败。
+async function withOtp<T>(work: (factor: string) => Promise<T>): Promise<T | undefined> {
+  try { return await work(otpStep.value ? otp.value : '') }
+  catch (err) {
+    if (err instanceof Error && err.message === OTP_REQUIRED && !otpStep.value) { otpStep.value = true; message.value = '该账户已开启两步验证，请输入验证器中的 6 位验证码或恢复码。'; return undefined }
+    throw err
+  }
+}
 const submit = () => run(async () => {
-  if (mode.value === 'login') await afterSignIn(await accountApi('/login', 'POST', { email: email.value, password: password.value }))
-  else if (mode.value === 'register') {
+  if (mode.value === 'login') {
+    const result = await withOtp(factor => accountApi<{ user: AccountUser; csrf: string }>('/login', 'POST', { email: email.value, password: password.value, otp: factor }))
+    if (result) await afterSignIn(result)
+  } else if (mode.value === 'register') {
     if (!agree.value) throw new Error('请先阅读并同意账户说明')
     await afterSignIn(await accountApi('/register', 'POST', { email: email.value, code: code.value, name: name.value, password: password.value }))
     message.value = '注册成功，欢迎你！'
   } else {
-    await afterSignIn(await accountApi('/reset', 'POST', { email: email.value, code: code.value, password: password.value }))
+    const result = await withOtp(factor => accountApi<{ user: AccountUser; csrf: string }>('/reset', 'POST', { email: email.value, code: code.value, password: password.value, otp: factor }))
+    if (!result) return
+    await afterSignIn(result)
     message.value = '密码已重置，已为你登录。'
   }
+})
+const passkeyLogin = () => run(async () => {
+  const options = await accountApi<{ options: Record<string, any>; challenge_id: string }>('/passkey/options', 'POST')
+  const credential = await usePasskey(options.options)
+  await afterSignIn(await accountApi('/passkey/verify', 'POST', { challenge_id: options.challenge_id, credential }))
 })
 
 async function loadLists() {
   const [fav, hist] = await Promise.all([accountApi<{ items: AccountEntry[] }>('/favorites'), accountApi<{ items: AccountEntry[] }>('/history')])
   favorites.value = fav.items; history.value = hist.items
+  imagesEnabled.value = await accountApi<{ limits: { enabled: boolean } }>('/images').then(data => data.limits.enabled, () => false)
   gameBests.value = await loadMine().catch(() => ({}))
 }
 const removeFavorite = (item: AccountEntry) => run(async () => {
@@ -113,7 +140,7 @@ const deleteAccount = () => run(async () => {
   account.value = null; deletePassword.value = ''
   message.value = '账户已删除。'
 })
-const logout = () => run(async () => { await signOut(); favorites.value = []; history.value = [] })
+const logout = () => run(async () => { await signOut(); favorites.value = []; history.value = []; imagesEnabled.value = false; tab.value = 'favorites' })
 
 const perks = [
   { title: '收藏', text: '在任意笔记或文章页点一下星标，稍后在这里集中查看。', icon: 'm12 3.5 2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.9l-5.2 2.8 1-5.9-4.3-4.1 5.9-.8z' },
@@ -177,8 +204,10 @@ onBeforeUnmount(() => { clearInterval(timer); clearTimeout(warmup); captchaLifet
             </div>
             <label v-if="mode === 'register'">昵称<span class="optional">可选</span><input v-model="name" maxlength="40" autocomplete="nickname"></label>
             <label>{{ mode === 'reset' ? '新密码' : '密码' }}<input v-model="password" type="password" :autocomplete="mode === 'login' ? 'current-password' : 'new-password'" :minlength="mode === 'login' ? 1 : 8" maxlength="128" required></label>
+            <label v-if="otpStep && mode !== 'register'">两步验证码或恢复码<input v-model="otp" autocomplete="one-time-code" inputmode="numeric" maxlength="80" required placeholder="6 位验证码或恢复码"></label>
             <label v-if="mode === 'register'" class="agree"><input v-model="agree" type="checkbox">我已了解：本站只保存邮箱、昵称、头像、收藏与浏览记录，用于账户功能；可随时在账户设置中删除。</label>
             <button class="primary" type="submit">{{ busy ? '请稍候…' : mode === 'login' ? '登录' : mode === 'register' ? '注册并登录' : '重置密码' }}</button>
+            <button v-if="mode === 'login' && canPasskey" class="ghost wide" type="button" @click="passkeyLogin">使用 Passkey 登录</button>
           </fieldset>
         </form>
       </div>
@@ -207,9 +236,10 @@ onBeforeUnmount(() => { clearInterval(timer); clearTimeout(warmup); captchaLifet
         </aside>
         <div v-reveal="120" class="panel">
           <div class="tabs" role="tablist">
-            <button v-for="[value, label] in [['favorites', '收藏'], ['history', '浏览记录'], ['settings', '账户设置']]" :key="value" role="tab" :aria-selected="tab === value" :class="{ active: tab === value }" type="button" @click="tab = value as typeof tab">{{ label }}</button>
+            <button v-for="[value, label] in tabList" :key="value" role="tab" :aria-selected="tab === value" :class="{ active: tab === value }" type="button" @click="tab = value as typeof tab">{{ label }}</button>
           </div>
-          <template v-if="tab !== 'settings'">
+          <ImageHosting v-if="tab === 'images'" @enabled="value => { imagesEnabled = value; if (!value) tab = 'favorites' }" />
+          <template v-else-if="tab !== 'settings'">
             <div v-if="tab === 'history' && history.length" class="panel-actions"><button class="ghost" type="button" @click="clearHistory">清空记录</button></div>
             <ul class="entries">
               <li v-for="item in (tab === 'favorites' ? favorites : history)" :key="item.kind + item.slug" :class="{ gone: !item.available }">
@@ -231,6 +261,7 @@ onBeforeUnmount(() => { clearInterval(timer); clearTimeout(warmup); captchaLifet
                 <label>新密码<input v-model="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label>
                 <button class="primary" type="submit">修改密码</button></fieldset>
             </form>
+            <AccountSecurity />
             <form class="danger-zone" @submit.prevent="deleteAccount"><h3>删除账户</h3><p>账户、头像、收藏与浏览记录将被永久删除。</p>
               <fieldset :disabled="busy"><label>输入密码确认<input v-model="deletePassword" type="password" autocomplete="current-password" required></label>
                 <button class="danger" type="submit">永久删除账户</button></fieldset>
@@ -303,7 +334,7 @@ button:disabled { opacity:.5; cursor:default; }
 .game-bests a:hover { color:var(--accent); }
 .game-bests span { color:var(--muted); font-family:var(--font-mono); font-size:12px; }
 .panel { min-width:0; }
-.tabs { max-width:420px; }
+.tabs { max-width:520px; }
 .panel-actions { display:flex; justify-content:flex-end; margin-top:16px; }
 .entries { list-style:none; margin:16px 0 0; padding:0; border-top:1px solid var(--line); }
 .entries li { display:grid; grid-template-columns:72px 1fr auto auto; align-items:center; gap:16px; padding:16px 4px; border-bottom:1px solid var(--line); }

@@ -1,6 +1,6 @@
 # 开发指南
 
-[项目首页](../README.md) · [开发指南](development.md) · [内容与接口](content.md) · [登录与安全](security.md) · [备份与恢复](maintenance.md) · [部署指南](../deploy/README.md)
+[项目首页](../README.md) · [开发指南](development.md) · [内容与接口](content.md) · [登录与安全](security.md) · [备份与恢复](maintenance.md) · [图床](image-host.md) · [部署指南](../deploy/README.md)
 
 ## 环境要求
 

@@ -38,6 +38,24 @@ http://copylee.cn, http://www.copylee.cn {
         reverse_proxy 127.0.0.1:8000
     }
 }
+http://image.copylee.cn {
+    # 图床：静态图片直接由 Caddy 提供，仅上传接口转发到后端；前置 ESA 时上传路径需设为不缓存。
+    @upload path /api/upload
+    handle @upload {
+        reverse_proxy 127.0.0.1:8000
+    }
+    @image path_regexp ^/\d{4}/\d{2}/[A-Za-z0-9]{12}\.(jpg|png|webp|gif)$
+    handle @image {
+        root * /var/lib/copylee/images
+        header Cache-Control "public, max-age=31536000, immutable"
+        header X-Content-Type-Options nosniff
+        header Access-Control-Allow-Origin *
+        file_server
+    }
+    handle {
+        redir http://copylee.cn 302
+    }
+}
 http://cloud.copylee.cn {
     reverse_proxy 127.0.0.1:8080
 }

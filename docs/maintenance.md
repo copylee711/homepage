@@ -1,6 +1,6 @@
 # 备份与恢复
 
-[项目首页](../README.md) · [开发指南](development.md) · [内容与接口](content.md) · [登录与安全](security.md) · [备份与恢复](maintenance.md) · [部署指南](../deploy/README.md)
+[项目首页](../README.md) · [开发指南](development.md) · [内容与接口](content.md) · [登录与安全](security.md) · [备份与恢复](maintenance.md) · [图床](image-host.md) · [部署指南](../deploy/README.md)
 
 ## 数据范围
 
@@ -15,7 +15,7 @@ uv run python -m app.cli backup
 uv run python -m app.cli restore .data/backups/<快照目录> --target .restored-data
 ```
 
-备份通过 SQLite 在线备份 API 获取数据库快照，检查完整性，复制该快照的草稿、公开正文与配置引用的本地图片，并记录 SHA-256。保留最近 14 份完整备份。未被保存内容引用的临时上传图片不进入备份；文件没有自动删除接口。备份仍在同一台机器上，不能防止整盘丢失，可自行复制备份目录到异机存储。
+备份通过 SQLite 在线备份 API 获取数据库快照，检查完整性，复制该快照的草稿、公开正文与配置引用的本地图片，以及图床中的全部图片，并记录 SHA-256。保留最近 14 份完整备份。未被保存内容引用的临时上传图片不进入备份；文件没有自动删除接口。备份仍在同一台机器上，不能防止整盘丢失，可自行复制备份目录到异机存储。
 
 恢复只接受不存在的新目录，先验证校验和及数据库完整性，再原子生成目录；撤销所有旧会话。正式恢复需要停服务，将恢复目录切换为数据目录，并确认数据库迁移版本与所选代码匹配。
 

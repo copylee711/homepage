@@ -23,6 +23,7 @@ from .settings import Settings
 ROOT = Path(__file__).resolve().parents[1]
 MEDIA_PATTERN = re.compile(r"/media/([a-f0-9]{48}\.(?:jpg|png|webp|gif))")
 AVATAR_PATTERN = re.compile(r"/media/avatars/([a-f0-9]{32}\.webp)")
+IMAGE_FILE = r"images/\d{4}/\d{2}/[A-Za-z0-9]{12}\.(?:jpg|png|webp|gif)"
 
 
 def migrate(settings: Settings):
@@ -78,9 +79,17 @@ def backup(settings: Settings, output: Path | None = None) -> Path:
                     match for (avatar,) in snapshot.execute('SELECT avatar FROM "user"')
                     for match in AVATAR_PATTERN.findall(avatar or "")
                 }
+            hosted = []
+            if "image" in tables:
+                hosted = [path for (path,) in snapshot.execute("SELECT path FROM image")]
             needs_key = "totp_secret" in columns and snapshot.execute(
                 "SELECT 1 FROM administrator WHERE totp_secret IS NOT NULL OR pending_secret IS NOT NULL"
             ).fetchone()
+            user_columns = {row[1] for row in snapshot.execute('PRAGMA table_info("user")')}
+            if "totp_secret" in user_columns and snapshot.execute(
+                'SELECT 1 FROM "user" WHERE totp_secret IS NOT NULL OR pending_secret IS NOT NULL'
+            ).fetchone():
+                needs_key = True
         key = settings.data_dir / "2fa.key"
         if needs_key and not key.is_file():
             raise ValueError("两步验证密钥缺失，不能创建可恢复备份")
@@ -103,6 +112,15 @@ def backup(settings: Settings, output: Path | None = None) -> Path:
                 shutil.copyfile(source, stage / "media" / "avatars" / name)
                 references.add(f"avatars/{name}")
         files = ["content.db"] + [f"media/{name}" for name in sorted(references)]
+        for path in hosted:
+            source = settings.images_dir / path
+            # 图床文件缺失不阻止备份；路径仍按白名单复核。
+            valid = re.fullmatch(IMAGE_FILE, f"images/{path}")
+            if not valid or not source.is_file() or source.is_symlink():
+                continue
+            (stage / "images" / path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, stage / "images" / path)
+            files.append(f"images/{path}")
         if (stage / "2fa.key").is_file():
             files.append("2fa.key")
         manifest = {"format": 1, "files": {name: file_hash(stage / name) for name in files}}
@@ -131,7 +149,8 @@ def restore(source: Path, target: Path):
         raise ValueError("备份格式无效")
     for name, expected in manifest["files"].items():
         if name not in {"content.db", "2fa.key"} and not re.fullmatch(
-            r"media/[a-f0-9]{48}\.(jpg|png|webp|gif)|media/avatars/[a-f0-9]{32}\.webp", name
+            r"media/[a-f0-9]{48}\.(jpg|png|webp|gif)|media/avatars/[a-f0-9]{32}\.webp|"
+            + IMAGE_FILE, name
         ):
             raise ValueError("备份包含非法路径")
         if (source / name).is_symlink() or file_hash(source / name) != expected:
@@ -140,7 +159,9 @@ def restore(source: Path, target: Path):
     stage = Path(tempfile.mkdtemp(prefix=".restore-", dir=target.parent))
     try:
         (stage / "media" / "avatars").mkdir(parents=True)
+        (stage / "images").mkdir()
         for name in manifest["files"]:
+            (stage / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source / name, stage / name)
             if name in {"content.db", "2fa.key"}:
                 (stage / name).chmod(0o600)
@@ -153,6 +174,9 @@ def restore(source: Path, target: Path):
             if "user_session" in tables:
                 connection.execute("DELETE FROM user_session")
                 connection.execute("DELETE FROM email_code")
+            if "user_challenge" in tables:
+                connection.execute("DELETE FROM user_challenge")
+                connection.execute('UPDATE "user" SET pending_secret=NULL, pending_expires=0')
             if "auth_challenge" in tables:
                 connection.execute("DELETE FROM auth_challenge")
                 connection.execute("UPDATE administrator SET pending_secret=NULL, pending_expires=0")
@@ -179,6 +203,8 @@ def main():
     load = sub.add_parser("restore")
     load.add_argument("source", type=Path)
     load.add_argument("--target", type=Path, required=True)
+    move = sub.add_parser("images-migrate", help="把文章与手写笔记中的 /media 图片迁移到图床")
+    move.add_argument("--apply", action="store_true", help="实际执行；默认只统计")
     args = parser.parse_args()
     settings = Settings()
     if args.action == "migrate":
@@ -219,6 +245,20 @@ def main():
             engine.dispose()
     elif args.action == "backup":
         print(backup(settings, args.output))
+    elif args.action == "images-migrate":
+        from .images import migrate_media
+
+        engine = make_engine(settings)
+        with Session(engine) as session:
+            result = migrate_media(session, settings, apply=args.apply)
+        engine.dispose()
+        verb = "已迁移" if args.apply else "将迁移"
+        print(f"{verb}图片 {result['images']} 张（新导入 {result['imported']}），"
+              f"涉及文章 {result['articles']} 篇、笔记 {result['notes']} 篇")
+        for name in result["missing"]:
+            print(f"引用的图片不存在，已跳过：/media/{name}")
+        if not args.apply and result["images"]:
+            print("确认无误后先执行 backup，再加 --apply 实际迁移")
     elif args.action == "reset-security":
         reset_security(settings)
         print("登录因素与旧会话已清除，管理员密码保留")

@@ -2,6 +2,9 @@ import { ref } from 'vue'
 import { fetchJson } from './content'
 
 export interface AccountUser { id: string; email: string; name: string; avatar: string; created_at: string }
+export interface ImageLimits { enabled: boolean; quota: number | null; max_file: number; used: number }
+export interface ImageToken { id: string; name: string; created_at: string; last_used: string | null }
+export interface HostedImage { id: string; url: string; size: number; width: number; height: number; created_at: string; owner?: string }
 export interface AccountEntry { kind: 'note' | 'post'; slug: string; title: string; available: boolean; url: string; at: string }
 
 export const account = ref<AccountUser | null>(null)

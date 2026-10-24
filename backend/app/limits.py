@@ -1,5 +1,8 @@
 from starlette.responses import JSONResponse
 
+# 图片上传接口自行按配额限制读取大小，不经过 2 MiB 的 JSON 限制。
+UPLOAD_PATHS = {"/api/admin/media", "/api/upload", "/api/account/images"}
+
 
 class JsonBodyLimit:
     """在 JSON 解析前限制内存，亦适用于无 Content-Length 的分块请求。"""
@@ -11,7 +14,7 @@ class JsonBodyLimit:
         limited = (
             scope["type"] == "http"
             and scope["path"].startswith("/api/")
-            and scope["path"] != "/api/admin/media"
+            and scope["path"] not in UPLOAD_PATHS
             and scope["method"] not in {"GET", "HEAD", "OPTIONS"}
         )
         if not limited:

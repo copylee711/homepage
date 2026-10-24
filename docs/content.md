@@ -1,6 +1,6 @@
 # 内容与接口
 
-[项目首页](../README.md) · [开发指南](development.md) · [内容与接口](content.md) · [登录与安全](security.md) · [备份与恢复](maintenance.md) · [部署指南](../deploy/README.md)
+[项目首页](../README.md) · [开发指南](development.md) · [内容与接口](content.md) · [登录与安全](security.md) · [备份与恢复](maintenance.md) · [图床](image-host.md) · [部署指南](../deploy/README.md)
 
 ## 内容更新
 
@@ -28,7 +28,7 @@ GitHub 仓库由后端每 15 分钟同步，后台支持手动刷新。前端构
 - 文章编辑与发布使用不同快照。保存草稿不会增加公开文章版本；发布/撤下增加版本。固定链接首次发布后锁定。
 - 设置保存和文章修改/发布/撤下必须携带 `revision`，冲突返回 409，前端保留输入，用户重新加载后再决定。
 - 写请求携带允许的 `Origin` 与 `X-CSRF-Token`；登录只校验来源，登录后 `/api/auth/me` 返回会话 CSRF。
-- 图片上传使用原始文件请求体，POST `/api/admin/media`，返回 `{url}`。大小上限 10 MiB，格式按内容识别，不信任扩展名。
+- 图片上传使用原始文件请求体，POST `/api/admin/media`，图片存入[图床](image-host.md)，返回图床地址 `{url}`。大小上限 20 MiB，格式按内容识别，不信任扩展名。
 - 仓库完整分页成功才替换缓存。同步失败保留缓存；切换 GitHub 账号时清空旧账号列表，等待新账号同步。多个分组前缀匹配时归入首个匹配分组。
 
 ## 路由
@@ -39,7 +39,8 @@ GitHub 仓库由后端每 15 分钟同步，后台支持手动刷新。前端构
 | `/admin` | 管理后台 |
 | `/posts`、`/posts/{slug}` | 文章列表与正文 |
 | `/api/*` | 公开内容、认证与管理 API |
-| `/media/*` | 上传图片 |
+| `/media/*` | 旧上传图片、GitHub 笔记图片与头像 |
+| `/images/*` | 图床图片（仅开发环境；生产由 `image.copylee.cn` 提供） |
 | `/sitemap.xml`、`/robots.txt` | 搜索引擎入口 |
 
 文章 HTML 包含正文、标题、描述、canonical、Open Graph 与结构化数据。草稿不进入公开接口或 sitemap；不存在及已撤下的文章返回 HTTP 404。Markdown 禁用原始 HTML，渲染结果统一清理；后台预览与公开正文共用渲染逻辑。上传图片为公开资源，草稿权限不延伸到图片 URL。

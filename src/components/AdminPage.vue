@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { fetchJson } from '../content'
+import type { HostedImage, ImageLimits, ImageToken } from '../account'
 import type { SiteContent } from '../types'
 import { useTheme } from '../composables/useTheme'
 import { passkeyAvailable, usePasskey } from '../passkeys'
@@ -29,7 +30,7 @@ function askOtp(target: 'login' | 'unlock') {
 // 请求结束、表单解除禁用后再聚焦验证码输入框。
 watch([otpFor, busy], ([target, working]) => { if (target && !working) nextTick(() => otpInput.value?.focus()) }, { flush: 'post' })
 function submitOtp() { return otpFor.value === 'login' ? login() : unlockWithPassword() }
-const tab = ref<'profile' | 'portals' | 'repos' | 'posts' | 'notes' | 'accounts' | 'security'>('profile')
+const tab = ref<'profile' | 'portals' | 'repos' | 'posts' | 'notes' | 'images' | 'accounts' | 'security'>('profile')
 // 侧栏导航：图标为 24×24 描边路径
 const navItems: { id: typeof tab.value; name: string; icon: string }[] = [
   { id: 'profile', name: '主页设置', icon: 'M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1Z' },
@@ -37,6 +38,7 @@ const navItems: { id: typeof tab.value; name: string; icon: string }[] = [
   { id: 'repos', name: '仓库展示', icon: 'M6 4h10l3 3v13H6Zm4 6h6m-6 4h6m-6 4h3' },
   { id: 'posts', name: '文章管理', icon: 'M5 19h4L19 9l-4-4L5 15Zm8-12 4 4' },
   { id: 'notes', name: '笔记管理', icon: 'M6 4h12v16H6Zm3 4h6m-6 4h6m-6 4h4' },
+  { id: 'images', name: '图床', icon: 'M4 5h16v14H4Zm0 11 5-5 4 4 2-2 5 5M15 9.5a1.5 1.5 0 1 0 0-.01' },
   { id: 'accounts', name: '用户与邮件', icon: 'M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm-6 9a6 6 0 0 1 12 0m1-9 5-3m-5 6 5 3' },
   { id: 'security', name: '登录安全', icon: 'M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6Zm-3 9 2 2 4-4' },
 ]
@@ -85,6 +87,13 @@ async function factorOperation(operation:string) { await action(async () => {
   if(operation==='setup') enrollment.value={secret:result.secret!,qr:result.qr!}
   else { enrollment.value=undefined; securityOtp.value=''; recoveryCodes.value=result.recovery_codes ?? [] }
   await loadSecurity(); message.value=operation==='setup' ? '请扫描二维码，然后输入验证码确认绑定。' : '安全设置已更新，其他会话已撤销。'
+}) }
+const pwCurrent = ref(''), pwNew = ref(''), pwConfirm = ref('')
+async function changeAdminPassword() { await action(async () => {
+  if (pwNew.value !== pwConfirm.value) throw new Error('两次输入的新密码不一致')
+  await api('/api/admin/security/password', 'POST', {current: pwCurrent.value, password: pwNew.value})
+  pwCurrent.value = ''; pwNew.value = ''; pwConfirm.value = ''
+  message.value = '密码已修改，其他会话已退出。'
 }) }
 async function keyLogin() { await action(async () => {
   const options = await api<{options:Record<string,any>;challenge_id:string}>('/api/auth/passkey/options','POST')
@@ -166,11 +175,49 @@ async function previewNote() { await action(async () => {
   notePreview.value = (await api<{html: string}>('/api/admin/preview', 'POST', {markdown: noteEdit.value!.markdown})).html
 }) }
 type AccountsConfig = {registrationOpen:boolean; allowedDomains:string[]; dailyLimit:number; smtp:{host:string; port:number; security:'ssl'|'starttls'; username:string; fromName:string; fromAddress:string}; hasSmtpPassword:boolean}
-type SiteUser = {id:string; email:string; name:string; avatar:string; created_at:string; disabled:boolean; last_login:string|null}
+type SiteUser = {id:string; email:string; name:string; avatar:string; created_at:string; disabled:boolean; last_login:string|null; images:ImageLimits; totp:boolean; passkeys:number}
+type QuotaDraft = {enabled:boolean; quota_mb:number; max_file_mb:number}
 const accountsConfig = ref<AccountsConfig>(), domainsText = ref(''), smtpSecret = ref(''), testTo = ref(''), siteUsers = ref<SiteUser[]>([])
+const quotaDrafts = ref<Record<string, QuotaDraft>>({})
+const MiB = 1024 * 1024
+const mib = (bytes: number) => bytes >= MiB ? `${(bytes / MiB).toFixed(1)} MiB` : `${Math.max(1, Math.round(bytes / 1024))} KiB`
+function quotaDraft(limits: ImageLimits): QuotaDraft { return {enabled: limits.enabled, quota_mb: Math.round((limits.quota ?? 200 * MiB) / MiB), max_file_mb: Math.round(limits.max_file / MiB)} }
+async function saveQuota(user: SiteUser) { await action(async () => {
+  user.images = await api<ImageLimits>(`/api/admin/accounts/users/${user.id}/images`, 'PUT', quotaDrafts.value[user.id])
+  quotaDrafts.value[user.id] = quotaDraft(user.images)
+  message.value = user.images.enabled ? `已为 ${user.email} 开启图床。` : `已关闭 ${user.email} 的图床并撤销其令牌，图片保留。`
+}) }
+type ImagesState = {items: HostedImage[]; total: number; page: number; page_size: number; usage: {owner:string; label:string; count:number; size:number}[]; tokens: ImageToken[]; upload_url: string}
+const imagesState = ref<ImagesState>(), imageOwner = ref(''), adminTokenName = ref('PicList'), adminFreshToken = ref('')
+const imagePages = computed(() => Math.max(1, Math.ceil((imagesState.value?.total ?? 0) / (imagesState.value?.page_size ?? 40))))
+async function loadImages(page = imagesState.value?.page ?? 1) {
+  imagesState.value = await api<ImagesState>(`/api/admin/images?page=${page}&owner=${encodeURIComponent(imageOwner.value)}`)
+}
+watch(tab, next => { if (next === 'images') void loadImages(1).catch(err => { error.value = err instanceof Error ? err.message : '图床加载失败' }) })
+watch(imageOwner, () => { void action(() => loadImages(1)) })
+async function removeImage(item: HostedImage) { await action(async () => {
+  if (!confirm('删除后这张图片的链接将失效，引用它的文章会显示破图。确定删除吗？')) return
+  await api(`/api/admin/images/${item.id}/remove`, 'POST'); await loadImages(); message.value = '图片已删除。'
+}) }
+async function createAdminToken() { await action(async () => {
+  adminFreshToken.value = (await api<{token:string}>('/api/admin/images/tokens', 'POST', {name: adminTokenName.value})).token
+  await loadImages(); message.value = '令牌已创建，请立即复制，它只会显示这一次。'
+}) }
+async function revokeAdminToken(token: ImageToken) { await action(async () => {
+  if (!confirm(`撤销「${token.name}」后，使用它的客户端将无法继续上传。确定吗？`)) return
+  await api(`/api/admin/images/tokens/${token.id}/remove`, 'POST'); await loadImages(); message.value = '令牌已撤销。'
+}) }
+async function copyText(text: string) {
+  try { await navigator.clipboard.writeText(text); message.value = '已复制到剪贴板。' } catch { error.value = '复制失败，请手动复制' }
+}
+async function uploadToHost(event: Event) {
+  await upload(event, md => { void copyText(md.trim()) })
+  await loadImages(1).catch(() => {})
+}
 async function loadAccounts() {
   const data = await api<{config: AccountsConfig; users: SiteUser[]}>('/api/admin/accounts')
   accountsConfig.value = data.config; domainsText.value = data.config.allowedDomains.join('\n'); siteUsers.value = data.users
+  quotaDrafts.value = Object.fromEntries(data.users.map(user => [user.id, quotaDraft(user.images)]))
 }
 async function saveAccounts(clearSecret = false) { await action(async () => {
   const {hasSmtpPassword: _, ...config} = accountsConfig.value!
@@ -186,6 +233,11 @@ async function testMail() { await action(async () => {
 async function setUserState(user: SiteUser, disabled: boolean) { await action(async () => {
   await api(`/api/admin/accounts/users/${user.id}/state`, 'POST', {disabled}); user.disabled = disabled
   message.value = disabled ? `已停用 ${user.email}，其登录已失效。` : `已恢复 ${user.email}。`
+}) }
+async function resetUserSecurity(user: SiteUser) { await action(async () => {
+  if (!confirm(`清除 ${user.email} 的两步验证与全部 Passkey，并退出其所有登录？仅在确认是本人丢失设备时操作。`)) return
+  await api(`/api/admin/accounts/users/${user.id}/reset-security`, 'POST')
+  user.totp = false; user.passkeys = 0; message.value = `已重置 ${user.email} 的登录安全设置。`
 }) }
 async function removeUser(user: SiteUser) { await action(async () => {
   if (!confirm(`永久删除 ${user.email} 及其收藏、浏览记录？`)) return
@@ -323,12 +375,12 @@ async function upload(event: Event, insert = (markdown: string) => { draft.value
   const input = event.target as HTMLInputElement, file = input.files?.[0]
   if(!file) return
   await action(async () => {
-    if(file.size > 10 * 1024 * 1024) throw new Error('图片不能超过 10 MiB')
+    if(file.size > 20 * 1024 * 1024) throw new Error('图片不能超过 20 MiB')
     const result = await fetchJson<{url: string}>('/api/admin/media', {method:'POST', body:file,
       headers:{'Content-Type':file.type || 'application/octet-stream','X-CSRF-Token':csrf.value},
       credentials:'same-origin', signal:AbortSignal.timeout(60000)})
     insert(`\n\n![图片说明](${result.url})\n`)
-    message.value = `图片已插入正文：${result.url}`
+    message.value = `图片已上传到图床：${result.url}`
   })
   input.value = ''
 }
@@ -412,10 +464,18 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
             <button v-else-if="!security?.totp_enabled" @click="factorOperation('setup')">开始绑定验证器</button>
             <div v-else class="buttons"><button @click="factorOperation('recovery')">重新生成恢复码</button><button class="danger" @click="factorOperation('disable')">关闭两步验证</button><span class="field-hint">剩余恢复码：{{security.recovery_remaining}}</span></div>
           </section>
+          <section class="edit-card security-card"><h2>修改密码</h2><p class="subtle">新密码至少 12 个字符。修改后其他设备上的后台会话会退出，Passkey 与两步验证保持不变。</p>
+            <form class="form-grid" @submit.prevent="changeAdminPassword">
+              <label>当前密码<input v-model="pwCurrent" type="password" autocomplete="current-password" required maxlength="200"></label>
+              <label>新密码<input v-model="pwNew" type="password" autocomplete="new-password" required minlength="12" maxlength="200"></label>
+              <label>确认新密码<input v-model="pwConfirm" type="password" autocomplete="new-password" required minlength="12" maxlength="200"></label>
+              <div class="buttons"><button class="primary" type="submit">修改密码</button></div>
+            </form>
+          </section>
           <section v-if="recoveryCodes.length" class="edit-card"><h2>保存恢复码</h2><p class="subtle">这些恢复码仅显示一次。请保存到安全位置；重新生成后旧恢复码失效。</p><pre class="recovery-codes">{{recoveryCodes.join('\n')}}</pre><button @click="recoveryCodes=[]">我已保存恢复码</button></section>
           <p class="field-hint">忘记密码或设备丢失时，可在服务器上重置，步骤见登录页底部。安全设置修改会撤销其他会话。</p>
         </template>
-        <template v-if="tab !== 'posts' && tab !== 'notes' && tab !== 'accounts' && tab !== 'security' && settings">
+        <template v-if="tab !== 'posts' && tab !== 'notes' && tab !== 'images' && tab !== 'accounts' && tab !== 'security' && settings">
           <div class="section-head"><div><p class="eyebrow">Site content</p><h1>{{ tab==='profile' ? '主页设置' : tab==='portals' ? '入口卡片' : '仓库展示' }}</h1></div>
             <div class="buttons"><button @click="reloadSettings">重新加载</button><button class="primary" @click="saveSettings">{{busy ? '处理中…' : '保存设置'}}</button></div></div>
           <template v-if="tab==='profile'">
@@ -494,10 +554,36 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
             <ul class="note-list user-list">
               <li v-for="user in siteUsers" :key="user.id" :class="{ muted: user.disabled }">
                 <div class="user-info"><span class="user-face"><img v-if="user.avatar" :src="user.avatar" alt=""><template v-else>{{ user.name.slice(0,1).toUpperCase() }}</template></span>
-                  <div class="note-info"><strong>{{ user.name }}</strong><span>{{ user.email }} · 注册于 {{ user.created_at.slice(0,10) }}{{ user.last_login ? ` · 最近登录 ${user.last_login.slice(0,10)}` : '' }}</span></div></div>
-                <div class="buttons"><label class="switch"><input type="checkbox" :checked="!user.disabled" @change="setUserState(user, !user.disabled)"><span>{{ user.disabled ? '已停用' : '正常' }}</span></label><button class="danger" @click="removeUser(user)">删除</button></div>
+                  <div class="note-info"><strong>{{ user.name }}<span v-if="user.totp" class="security-status">2FA</span><span v-if="user.passkeys" class="security-status">Passkey × {{ user.passkeys }}</span></strong><span>{{ user.email }} · 注册于 {{ user.created_at.slice(0,10) }}{{ user.last_login ? ` · 最近登录 ${user.last_login.slice(0,10)}` : '' }}</span></div></div>
+                <div class="buttons"><label class="switch"><input type="checkbox" :checked="!user.disabled" @change="setUserState(user, !user.disabled)"><span>{{ user.disabled ? '已停用' : '正常' }}</span></label><button v-if="user.totp || user.passkeys" @click="resetUserSecurity(user)">重置安全</button><button class="danger" @click="removeUser(user)">删除</button></div>
+                <form v-if="quotaDrafts[user.id]" class="quota-row" @submit.prevent="saveQuota(user)">
+                  <label class="switch"><input v-model="quotaDrafts[user.id]!.enabled" type="checkbox"><span>图床{{ quotaDrafts[user.id]!.enabled ? '开启' : '关闭' }}</span></label>
+                  <template v-if="quotaDrafts[user.id]!.enabled"><label>配额 MiB<input v-model.number="quotaDrafts[user.id]!.quota_mb" type="number" min="1" max="100000"></label><label>单张 MiB<input v-model.number="quotaDrafts[user.id]!.max_file_mb" type="number" min="1" max="20"></label></template>
+                  <span class="field-hint">已用 {{ mib(user.images.used) }}</span>
+                  <button type="submit">保存</button>
+                </form>
               </li>
             </ul>
+          </section>
+        </template>
+        <template v-if="tab==='images'">
+          <div class="section-head"><div><p class="eyebrow">Image hosting</p><h1>图床</h1></div><div class="buttons"><button @click="action(() => loadImages())">刷新</button><label class="upload-button primary">上传图片<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" @change="uploadToHost"></label></div></div>
+          <p class="subtle">管理员上传不受配额限制；文章与笔记编辑器的“上传图片”也存入图床。访客的图床在“用户与邮件”中逐个开启。</p>
+          <section v-if="imagesState" class="edit-card"><h2>用量</h2>
+            <ul class="note-list"><li v-for="row in imagesState.usage" :key="row.owner"><div class="note-info"><strong>{{ row.label }}</strong><span>{{ row.count }} 张 · {{ mib(row.size) }}</span></div><button @click="imageOwner = row.owner">只看此用户</button></li></ul>
+            <p v-if="!imagesState.usage.length" class="subtle">还没有图片。</p>
+          </section>
+          <section v-if="imagesState" class="edit-card"><h2>管理员上传令牌</h2><p class="subtle">用于 PicList / Typora。上传地址 <code>{{ imagesState.upload_url }}</code>，文件字段 <code>file</code>，请求头 <code>Authorization: Bearer 令牌</code>，返回 URL 路径 <code>url</code>。</p>
+            <div class="test-mail"><input v-model="adminTokenName" maxlength="40" aria-label="令牌名称" placeholder="令牌名称"><button @click="createAdminToken">创建令牌</button></div>
+            <div v-if="adminFreshToken" class="key-row"><code class="fresh-token">{{ adminFreshToken }}</code><div class="buttons"><button @click="copyText(adminFreshToken)">复制</button><button @click="adminFreshToken=''">我已保存</button></div></div>
+            <div v-for="token in imagesState.tokens" :key="token.id" class="key-row"><div><strong>{{ token.name }}</strong><p class="field-hint">创建于 {{ token.created_at.slice(0,10) }} · {{ token.last_used ? `最近使用 ${token.last_used.slice(0,10)}` : '尚未使用' }}</p></div><button class="danger" @click="revokeAdminToken(token)">撤销</button></div>
+          </section>
+          <section v-if="imagesState" class="edit-card"><h2>全部图片<span class="security-status">{{ imagesState.total }} 张</span></h2>
+            <div class="buttons"><AnimatedSelect v-model="imageOwner" label="上传者" :options="[{value:'',label:'全部'}, ...imagesState.usage.map(row => ({value:row.owner,label:row.label}))]" /></div>
+            <ul class="image-grid"><li v-for="item in imagesState.items" :key="item.id"><a :href="item.url" target="_blank" rel="noopener"><img :src="item.url" :alt="`图片 ${item.id}`" loading="lazy"></a>
+              <p class="field-hint">{{ item.width }}×{{ item.height }} · {{ mib(item.size) }} · {{ item.owner === 'admin' ? '管理员' : siteUsers.find(u => u.id === item.owner)?.email ?? item.owner }}</p>
+              <div class="buttons"><button @click="copyText(`![](${item.url})`)">Markdown</button><button @click="copyText(item.url)">URL</button><button class="danger" @click="removeImage(item)">删除</button></div></li></ul>
+            <div v-if="imagePages > 1" class="buttons pager"><button :disabled="imagesState.page <= 1" @click="action(() => loadImages(imagesState!.page - 1))">上一页</button><span class="field-hint">{{ imagesState.page }} / {{ imagePages }}</span><button :disabled="imagesState.page >= imagePages" @click="action(() => loadImages(imagesState!.page + 1))">下一页</button></div>
           </section>
         </template>
         <template v-if="tab==='notes'">
@@ -704,6 +790,16 @@ input:read-only { color:var(--muted); }
 .user-info { display:flex; align-items:center; gap:12px; min-width:0; }
 .user-face { flex:none; display:grid; place-items:center; width:36px; height:36px; border-radius:50%; overflow:hidden; background:linear-gradient(135deg,var(--accent),#7ea2ff); color:#fff; font-weight:700; }
 .user-face img { width:100%; height:100%; object-fit:cover; }
+.user-list li { flex-wrap:wrap; }
+.quota-row { flex-basis:100%; display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; padding-left:48px; }
+.quota-row label:not(.switch) { display:flex; flex-direction:row; align-items:center; gap:6px; margin:0; font-size:12px; }
+.quota-row input[type=number] { width:88px; padding:6px 8px; }
+.image-grid { list-style:none; margin:16px 0 0; padding:0; display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:14px; }
+.image-grid li { padding:8px; border:1px solid var(--field-line); border-radius:12px; }
+.image-grid img { display:block; width:100%; aspect-ratio:4/3; object-fit:contain; border-radius:8px; background:var(--bg-tint); }
+.image-grid .buttons { gap:4px; } .image-grid button { padding:5px 8px; font-size:12px; }
+.fresh-token { overflow-wrap:anywhere; font-size:13px; }
+.pager { justify-content:center; margin-top:16px; }
 .hidden-repos { max-width:500px; }.group-title { margin-top:36px; }
 .group-title.first { margin-top:0; }
 .label-line { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }

@@ -21,6 +21,7 @@ dependencies = [
   "cryptography>=45,<48",
   "beautifulsoup4>=4.13,<5",
   "mdit-py-plugins>=0.4,<1",
+  "python-multipart>=0.0.20,<1",
 ]
 
 [dependency-groups]

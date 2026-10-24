@@ -4,25 +4,28 @@ import logging
 import re
 import secrets
 import smtplib
-import warnings
 from contextlib import asynccontextmanager, suppress
-from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exception_handlers import http_exception_handler
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from PIL import Image, UnidentifiedImageError
-from sqlalchemy import delete
+from sqlalchemy import delete, func
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, select
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import accounts, audit, games
+from . import accounts, audit, games, images, user_security
 from .accounts import USER_COOKIE, current_user, profile
 from .auth import COOKIE, authenticate, check_origin, current_session
 from .content import (
@@ -51,10 +54,13 @@ from .models import (
     Favorite,
     GameScore,
     History,
+    HostedImage,
     Note,
     Passkey,
     ScutReading,
     User,
+    UserChallenge,
+    UserPasskey,
     UserSession,
 )
 from .notes import (
@@ -72,9 +78,11 @@ from .rendering import render_markdown
 from .schemas import (
     AccountDelete,
     AccountsConfig,
+    AdminPasswordChange,
     ArticleDraft,
     ArticleWrite,
     CodeRequest,
+    ImageQuotaWrite,
     Login,
     NotesConfig,
     NoteVisibility,
@@ -93,12 +101,14 @@ from .schemas import (
     SiteWrite,
     Target,
     TestMail,
+    TokenCreate,
     UserLogin,
     UserState,
 )
 from .scut import public_scut
 from .scut import sync_loop as scut_sync_loop
 from .security import (
+    change_password,
     factor_action,
     passkey_options,
     passkey_verify,
@@ -109,10 +119,8 @@ from .settings import Settings
 
 HERE = Path(__file__).parent
 logger = logging.getLogger(__name__)
-MAX_IMAGE_BYTES = 10 * 1024 * 1024
 PRIVACY_EFFECTIVE = "2026 年 10 月 24 日"
-PLAIN_404_PREFIXES = ("/api/", "/media/", "/content-assets/", "/assets/")
-Image.MAX_IMAGE_PIXELS = 20_000_000
+PLAIN_404_PREFIXES = ("/api/", "/media/", "/images/", "/content-assets/", "/assets/")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -290,6 +298,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                session: Session = Depends(authorized)):
         return passkey_verify(request, session, body, step_up=True)
 
+    @app.post("/api/admin/security/password")
+    def admin_password(body: AdminPasswordChange, request: Request,
+                       session: Session = Depends(authorized)):
+        with audit.outcome("admin.change_password", request):
+            return change_password(request, session, body)
+
     @app.post("/api/admin/security/2fa/{operation}")
     def factor_change(operation: str, body: SecurityProof, request: Request,
                       session: Session = Depends(authorized)):
@@ -394,6 +408,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             accounts.change_password(session, user, row, body)
         return {"ok": True}
 
+    @app.get("/api/account/security")
+    def account_security(request: Request, session: Session = Depends(database)):
+        user, _ = current_user(request, session)
+        return user_security.state(session, user)
+
+    @app.post("/api/account/security/2fa/{operation}")
+    def account_factor(operation: str, body: SecurityProof, request: Request,
+                       session: Session = Depends(database)):
+        user, _ = current_user(request, session)
+        with audit.outcome(f"account.2fa_{operation}", request, user=user.id):
+            return user_security.factor_action(request, session, body, operation)
+
+    @app.post("/api/account/security/passkeys/options")
+    def account_key_options(body: PasskeySetup, request: Request, response: Response,
+                            session: Session = Depends(database)):
+        return user_security.register_options(request, response, session, body)
+
+    @app.post("/api/account/security/passkeys/verify")
+    def account_key_register(body: PasskeyResponse, request: Request,
+                             session: Session = Depends(database)):
+        user, _ = current_user(request, session)
+        with audit.outcome("account.passkey_add", request, user=user.id):
+            return user_security.register_verify(request, session, body)
+
+    @app.post("/api/account/security/passkeys/{key_id}/remove")
+    def account_key_remove(key_id: str, body: SecurityProof, request: Request,
+                           session: Session = Depends(database)):
+        user, _ = current_user(request, session)
+        with audit.outcome("account.passkey_remove", request, user=user.id):
+            return user_security.remove_passkey(request, session, key_id, body)
+
+    @app.post("/api/account/passkey/options")
+    def account_passkey_options(request: Request, response: Response,
+                                session: Session = Depends(database)):
+        return user_security.login_options(request, response, session)
+
+    @app.post("/api/account/passkey/verify")
+    def account_passkey_login(body: PasskeyResponse, request: Request, response: Response,
+                              session: Session = Depends(database)):
+        with audit.outcome("account.login_passkey", request):
+            return user_security.login_verify(request, response, session, body)
+
     @app.post("/api/account/avatar")
     async def account_avatar(request: Request, session: Session = Depends(database)):
         user, _ = current_user(request, session, write=True)
@@ -416,6 +472,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         user, _ = current_user(request, session, write=True)
         with audit.outcome("account.delete", request, user=user.id, email=user.email):
             accounts.delete_account(session, user, body.password, settings.media_dir)
+            images.remove_owner(session, settings, user.id)
+            session.commit()
         response.delete_cookie(USER_COOKIE, path="/api")
         return {"ok": True}
 
@@ -505,7 +563,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def admin_accounts(session: Session = Depends(authorized)):
         users = session.exec(select(User).order_by(User.created_at.desc())).all()
         return {"config": accounts.admin_config(session), "users": [
-            {**profile(u), "disabled": u.disabled, "last_login": u.last_login} for u in users
+            {**profile(u), "disabled": u.disabled, "last_login": u.last_login,
+             "images": images.limits(session, u.id), "totp": bool(u.totp_secret),
+             "passkeys": len(user_security.state(session, u)["passkeys"])} for u in users
         ]}
 
     @app.put("/api/admin/accounts/config")
@@ -544,17 +604,138 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session.commit()
         return {"ok": True}
 
+    @app.post("/api/admin/accounts/users/{user_id}/reset-security")
+    def admin_user_reset_security(user_id: str, request: Request,
+                                  session: Session = Depends(authorized)):
+        user = session.get(User, user_id)
+        if user is None:
+            raise HTTPException(404, "用户不存在")
+        user_security.reset(session, user)
+        audit.record("admin.user_reset_security", request, ok=True, user=user.id)
+        return {"ok": True}
+
     @app.post("/api/admin/accounts/users/{user_id}/remove")
     def admin_user_remove(user_id: str, session: Session = Depends(authorized)):
         user = session.get(User, user_id)
         if user is None:
             raise HTTPException(404, "用户不存在")
-        for table in (Favorite, History, UserSession, ScutReading, GameScore):
+        for table in (Favorite, History, UserSession, ScutReading, GameScore, UserPasskey,
+                      UserChallenge):
             session.exec(delete(table).where(table.user_id == user.id))
         accounts.remove_avatar(user, settings.media_dir)
+        images.remove_owner(session, settings, user.id)
         session.delete(user)
         session.commit()
         return {"ok": True}
+
+    # —— 图床 ——
+
+    @app.post("/api/upload")
+    async def image_upload(request: Request, session: Session = Depends(database)):
+        """PicList 等客户端上传：Bearer 令牌鉴权，multipart 的 file 字段或原始文件流。"""
+        owner = images.token_owner(request, session)
+        value = images.require_enabled(session, owner)
+        payload = await images.read_upload(request, value["max_file"])
+        row, _ = await asyncio.to_thread(images.store, session, settings, owner, payload)
+        return images.view(settings, row)
+
+    @app.get("/api/account/images")
+    def account_images(request: Request, page: int = 1, session: Session = Depends(database)):
+        user, _ = current_user(request, session)
+        value = images.limits(session, user.id)
+        if not value["enabled"]:
+            return {"limits": value}
+        return {"limits": value, "tokens": images.tokens(session, user.id),
+                "upload_url": settings.upload_url, **images.listing(session, settings, user.id, page)}
+
+    @app.post("/api/account/images")
+    async def account_image_upload(request: Request, session: Session = Depends(database)):
+        user, _ = current_user(request, session, write=True)
+        value = images.require_enabled(session, user.id)
+        payload = await images.read_upload(request, value["max_file"])
+        row, created = await asyncio.to_thread(images.store, session, settings, user.id, payload)
+        return {**images.view(settings, row), "created": created}
+
+    @app.post("/api/account/images/{image_id}/remove")
+    def account_image_remove(image_id: str, request: Request,
+                             session: Session = Depends(database)):
+        user, _ = current_user(request, session, write=True)
+        images.remove(session, settings, images.get_image(session, image_id, user.id))
+        return {"ok": True}
+
+    @app.post("/api/account/images/tokens")
+    def account_token_create(body: TokenCreate, request: Request,
+                             session: Session = Depends(database)):
+        user, _ = current_user(request, session, write=True)
+        images.require_enabled(session, user.id)
+        with audit.outcome("image.token_create", request, user=user.id):
+            return images.create_token(session, user.id, body.name)
+
+    @app.post("/api/account/images/tokens/{token_id}/remove")
+    def account_token_remove(token_id: str, request: Request,
+                             session: Session = Depends(database)):
+        user, _ = current_user(request, session, write=True)
+        images.revoke_token(session, user.id, token_id)
+        audit.record("image.token_revoke", request, ok=True, user=user.id, token=token_id)
+        return {"ok": True}
+
+    @app.get("/api/account/images/export")
+    def account_image_export(request: Request, session: Session = Depends(database)):
+        user, _ = current_user(request, session)
+        images.require_enabled(session, user.id)
+        key = f"image-export:{user.id}"
+        accounts.throttle(session, key, 1, "导出过于频繁，请 15 分钟后再试")
+        accounts.record_failure(session, key)
+        rows = session.exec(
+            select(HostedImage).where(HostedImage.owner == user.id)
+            .order_by(HostedImage.created_at)
+        ).all()
+        name = f"images-{timestamp()[:10]}.zip"
+        return StreamingResponse(images.export_stream(settings, rows), media_type="application/zip",
+                                 headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.get("/api/admin/images")
+    def admin_images(owner: str = "", page: int = 1, session: Session = Depends(authorized)):
+        rows = session.exec(
+            select(HostedImage.owner, func.count(), func.sum(HostedImage.size))
+            .group_by(HostedImage.owner)
+        ).all()
+        users = {u.id: u for u in session.exec(select(User)).all()}
+        usage = [{"owner": key, "count": count, "size": size,
+                  "label": "管理员" if key == images.ADMIN else
+                  users[key].email if key in users else key} for key, count, size in rows]
+        return {**images.listing(session, settings, owner or None, page), "usage": usage,
+                "tokens": images.tokens(session, images.ADMIN), "upload_url": settings.upload_url}
+
+    @app.post("/api/admin/images/{image_id}/remove")
+    def admin_image_remove(image_id: str, request: Request,
+                           session: Session = Depends(authorized)):
+        row = images.get_image(session, image_id)
+        audit.record("admin.image_remove", request, ok=True, image=row.id, owner=row.owner)
+        images.remove(session, settings, row)
+        return {"ok": True}
+
+    @app.post("/api/admin/images/tokens")
+    def admin_token_create(body: TokenCreate, request: Request,
+                           session: Session = Depends(authorized)):
+        with audit.outcome("admin.image_token_create", request):
+            return images.create_token(session, images.ADMIN, body.name)
+
+    @app.post("/api/admin/images/tokens/{token_id}/remove")
+    def admin_token_remove(token_id: str, request: Request,
+                           session: Session = Depends(authorized)):
+        images.revoke_token(session, images.ADMIN, token_id)
+        audit.record("admin.image_token_revoke", request, ok=True, token=token_id)
+        return {"ok": True}
+
+    @app.put("/api/admin/accounts/users/{user_id}/images")
+    def admin_user_images(user_id: str, body: ImageQuotaWrite, request: Request,
+                          session: Session = Depends(authorized)):
+        if session.get(User, user_id) is None:
+            raise HTTPException(404, "用户不存在")
+        images.set_quota(session, user_id, body.enabled, body.quota_mb, body.max_file_mb)
+        audit.record("admin.image_quota", request, ok=True, user=user_id, **body.model_dump())
+        return images.limits(session, user_id)
 
     @app.get("/api/admin/site")
     def admin_site(session: Session = Depends(authorized)):
@@ -721,38 +902,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/admin/media", status_code=201)
     async def upload(request: Request, session: Session = Depends(authorized)):
-        # 原始文件流代替 multipart；读取上限在解码图片之前执行。
-        chunks, size = [], 0
-        async for chunk in request.stream():
-            size += len(chunk)
-            if size > MAX_IMAGE_BYTES:
-                raise HTTPException(413, "图片不能超过 10 MiB")
-            chunks.append(chunk)
-        payload = b"".join(chunks)
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("error", Image.DecompressionBombWarning)
-                with Image.open(BytesIO(payload)) as image:
-                    extension = {"JPEG": "jpg", "PNG": "png", "WEBP": "webp", "GIF": "gif"}.get(
-                        image.format
-                    )
-                    if not extension:
-                        raise HTTPException(415, "仅支持 JPEG、PNG、WebP、GIF")
-                    image.verify()
-        except (
-            UnidentifiedImageError,
-            OSError,
-            ValueError,
-            Image.DecompressionBombError,
-            Image.DecompressionBombWarning,
-        ):
-            raise HTTPException(415, "图片损坏或像素尺寸过大") from None
-        name = f"{secrets.token_hex(24)}.{extension}"
-        temporary = settings.media_dir / f".{name}.tmp"
-        temporary.write_bytes(payload)
-        temporary.replace(settings.media_dir / name)
-        (settings.media_dir / name).chmod(0o644)
-        return {"url": f"/media/{name}"}
+        # 编辑器上传的图片存入图床，返回公开地址。
+        payload = await images.read_upload(request, images.MAX_IMAGE_BYTES)
+        row, _ = await asyncio.to_thread(images.store, session, settings, images.ADMIN, payload)
+        return {"url": images.url(settings, row.path)}
 
     def page_context(session, path, title, description):
         site = public_site(session)
@@ -886,6 +1039,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # 开发/SSH 隧道时直连后端也能查看完整站点；生产静态资源由 Caddy 服务。
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
+    app.mount("/images", StaticFiles(directory=settings.images_dir), name="images")
     app.mount("/content-assets", StaticFiles(directory=HERE / "static"), name="content-assets")
     @app.get("/favicon.svg", include_in_schema=False)
     @app.get("/beian-police.png", include_in_schema=False)

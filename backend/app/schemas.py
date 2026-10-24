@@ -151,6 +151,11 @@ class SecurityProof(StrictModel):
     otp: str = Field(default="", max_length=80)
 
 
+class AdminPasswordChange(StrictModel):
+    current: str = Field(min_length=1, max_length=200)
+    password: str = Field(min_length=12, max_length=200)
+
+
 class PasskeySetup(SecurityProof):
     name: str = Field(min_length=1, max_length=80)
 
@@ -217,12 +222,14 @@ class Register(StrictModel):
 class UserLogin(StrictModel):
     email: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=1, max_length=128)
+    otp: str = Field(default="", max_length=80)
 
 
 class PasswordReset(StrictModel):
     email: str = Field(min_length=3, max_length=254)
     code: str = Field(min_length=6, max_length=6, pattern=r"^[0-9]{6}$")
     password: str = Field(min_length=8, max_length=128)
+    otp: str = Field(default="", max_length=80)
 
 
 class PasswordChange(StrictModel):
@@ -275,6 +282,16 @@ class TestMail(StrictModel):
 
 class UserState(StrictModel):
     disabled: bool
+
+
+class ImageQuotaWrite(StrictModel):
+    enabled: bool
+    quota_mb: int = Field(ge=1, le=100_000)
+    max_file_mb: int = Field(ge=1, le=20)
+
+
+class TokenCreate(StrictModel):
+    name: str = Field(default="", max_length=40)
 
 
 class ReadingState(StrictModel):

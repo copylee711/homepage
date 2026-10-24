@@ -132,6 +132,12 @@ class User(SQLModel, table=True):
     disabled: bool = False
     created_at: str
     last_login: str | None = None
+    # 可选的两步验证；字段含义与 Administrator 相同，密钥用 data_dir/2fa.key 加密。
+    totp_secret: str | None = None
+    pending_secret: str | None = None
+    pending_expires: float = 0
+    last_totp_step: int = -1
+    recovery_hashes: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
 
 
 class UserSession(SQLModel, table=True):
@@ -139,6 +145,30 @@ class UserSession(SQLModel, table=True):
     token_hash: str = Field(primary_key=True)
     user_id: str = Field(index=True)
     csrf: str
+    expires_at: float
+
+
+class UserPasskey(SQLModel, table=True):
+    __tablename__ = "user_passkey"
+    id: str = Field(primary_key=True)
+    user_id: str = Field(index=True)
+    public_key: str
+    sign_count: int = 0
+    name: str
+    created_at: float
+    last_used: float | None = None
+
+
+class UserChallenge(SQLModel, table=True):
+    """访客 Passkey 的一次性挑战；与管理员的 AuthChallenge 分开，互不影响限流。"""
+
+    __tablename__ = "user_challenge"
+    id: str = Field(primary_key=True)
+    challenge: str
+    kind: str
+    user_id: str = ""
+    session_hash: str = ""
+    ip_hash: str = Field(default="", index=True)
     expires_at: float
 
 
@@ -192,3 +222,40 @@ class GameScore(SQLModel, table=True):
     plays: int = 0
     best_at: str
     updated_at: str
+
+
+# —— 图床 ——
+
+
+class ImageQuota(SQLModel, table=True):
+    """访客的图床开关与配额；管理员不受配额限制，没有对应行。"""
+
+    __tablename__ = "image_quota"
+    user_id: str = Field(primary_key=True)
+    enabled: bool = False
+    quota_bytes: int = 200 * 1024 * 1024
+    max_file_bytes: int = 5 * 1024 * 1024
+
+
+class ImageToken(SQLModel, table=True):
+    """PicList 等客户端使用的上传令牌；只保存哈希，明文仅在创建时显示一次。"""
+
+    __tablename__ = "image_token"
+    id: str = Field(primary_key=True)
+    token_hash: str = Field(unique=True, index=True)
+    owner: str = Field(index=True)
+    name: str
+    created_at: str
+    last_used: str | None = None
+
+
+class HostedImage(SQLModel, table=True):
+    __tablename__ = "image"
+    id: str = Field(primary_key=True)
+    owner: str = Field(index=True)
+    path: str = Field(unique=True)
+    size: int
+    width: int
+    height: int
+    sha256: str = Field(index=True)
+    created_at: str = Field(index=True)

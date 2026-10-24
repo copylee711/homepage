@@ -132,6 +132,24 @@ def unlock(request, session, proof):
     return elevate(request, session, current_session(request, session))
 
 
+def change_password(request, session, body):
+    """修改管理员密码：需要已验证身份，并再次输入当前密码；完成后其他会话退出。"""
+    admin = locked_admin(request, session)
+    if not elevated(request, session):
+        raise HTTPException(428, "身份验证已过期，请重新验证")
+    try:
+        valid = hasher.verify(admin.password_hash, body.current)
+    except VerificationError:
+        valid = False
+    if not valid:
+        fail_login(session, "当前密码不正确", 403)
+    admin.password_hash = hasher.hash(body.password)
+    session.add(admin)
+    revoke_others(request, session)
+    session.commit()
+    return {"ok": True}
+
+
 def revoke_others(request, session):
     current = digest(request.cookies.get(COOKIE, ""))
     session.exec(delete(LoginSession).where(LoginSession.token_hash != current))

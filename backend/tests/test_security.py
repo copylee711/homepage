@@ -270,3 +270,21 @@ def test_unlock_asks_for_code_after_correct_password(server, monkeypatch):
     unlocked = post(client, headers, "/api/admin/security/unlock", password=PASSWORD,
                     otp=pyotp.TOTP(secret).at(now[0]))
     assert unlocked.status_code == 200, unlocked.text
+
+
+def test_admin_password_change_requires_step_up(server):
+    client, _, _ = server
+    headers = login(client)
+    path = "/api/admin/security/password"
+    new = "another-strong-password"
+    assert post(client, headers, path, current=PASSWORD, password=new).status_code == 428
+    assert post(client, headers, "/api/admin/security/unlock", password=PASSWORD).status_code == 200
+    assert post(client, headers, path, current="wrong-password", password=new).status_code == 403
+    assert post(client, headers, path, current=PASSWORD, password="short").status_code == 422
+    assert post(client, headers, path, current=PASSWORD, password=new).status_code == 200
+    # 当前会话保留，其他会话退出；旧密码不能再登录。
+    assert client.get("/api/admin/security").status_code == 200
+    assert post(client, {"Origin": ORIGIN}, "/api/auth/login", username="admin",
+                password=PASSWORD).status_code == 401
+    assert post(client, {"Origin": ORIGIN}, "/api/auth/login", username="admin",
+                password=new).status_code == 200

@@ -8,6 +8,8 @@ def make_engine(settings: Settings):
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.media_dir.mkdir(parents=True, exist_ok=True)
     settings.media_dir.chmod(0o755)
+    settings.images_dir.mkdir(exist_ok=True)
+    settings.images_dir.chmod(0o755)
     engine = create_engine(
         f"sqlite:///{settings.db_path.resolve().as_posix()}",
         connect_args={"check_same_thread": False, "timeout": 5},

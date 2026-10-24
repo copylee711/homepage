@@ -37,6 +37,8 @@ from .models import (
     Note,
     ScutReading,
     User,
+    UserChallenge,
+    UserPasskey,
     UserSession,
 )
 
@@ -315,17 +317,40 @@ def login(request, response, session, body) -> dict:
         raise HTTPException(401, "邮箱或密码错误")
     if user.disabled:
         raise HTTPException(403, "账户已被停用")
+    second_factor(request, session, user, body.otp, keys)
     session.exec(delete(LoginAttempt).where(LoginAttempt.key == keys[0]))
     return issue(request, response, session, user)
+
+
+def second_factor(request, session, user: User, otp: str, keys: tuple[str, ...]):
+    """开启两步验证的账户还需验证码或恢复码；密码正确但未填写时提示前端弹出第二步。"""
+    from .security import OTP_REQUIRED, verify_factor
+
+    if not user.totp_secret:
+        return
+    if not otp.strip():
+        raise HTTPException(403, OTP_REQUIRED)
+    if not verify_factor(request.app.state.settings, user, otp):
+        record_failure(session, *keys)
+        raise HTTPException(401, "两步验证码或恢复码错误")
+    session.add(user)
 
 
 def reset_password(request, response, session, body) -> dict:
     check_origin(request)
     email = body.email.strip().lower()
-    consume_code(session, email, "reset", body.code)
+    key = f"reset-2fa:{digest(email)}"
+    throttle(session, key, 5, "两步验证失败次数过多，请 15 分钟后再试")
     user = session.exec(select(User).where(User.email == email)).first()
+    # 邮箱验证码不能绕过两步验证；先提示输入，避免白白消耗验证码。
+    if user and user.totp_secret and not body.otp.strip() and not user.disabled:
+        from .security import OTP_REQUIRED
+
+        raise HTTPException(403, OTP_REQUIRED)
+    consume_code(session, email, "reset", body.code)
     if user is None or user.disabled:
         raise HTTPException(400, "验证码错误或已过期，请重新获取")
+    second_factor(request, session, user, body.otp, (key,))
     user.password_hash = hash_password(body.password)
     session.exec(delete(UserSession).where(UserSession.user_id == user.id))
     session.exec(delete(LoginAttempt).where(LoginAttempt.key == f"user:{digest(email)}"))
@@ -347,7 +372,8 @@ def change_password(session, user: User, current: UserSession, body):
 def delete_account(session, user: User, password: str, media_dir):
     if not verify_password(user.password_hash, password):
         raise HTTPException(403, "密码不正确")
-    for table in (Favorite, History, UserSession, ScutReading, GameScore):
+    for table in (Favorite, History, UserSession, ScutReading, GameScore, UserPasskey,
+                  UserChallenge):
         session.exec(delete(table).where(table.user_id == user.id))
     session.exec(delete(EmailCode).where(EmailCode.email == user.email))
     remove_avatar(user, media_dir)

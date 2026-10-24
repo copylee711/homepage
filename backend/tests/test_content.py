@@ -272,13 +272,13 @@ def test_upload_stream_validation_and_media_404(server):
     assert response.status_code == 201
     url = response.json()["url"]
     assert client.get(url).content == png()
-    assert (settings.media_dir / url.split("/")[-1]).is_file()
+    assert (settings.images_dir / url.split("/images/", 1)[1]).is_file()
     assert (
         client.post("/api/admin/media", content=b"<svg></svg>", headers=headers).status_code == 415
     )
     assert (
         client.post(
-            "/api/admin/media", content=b"x" * (10 * 1024 * 1024 + 1), headers=headers
+            "/api/admin/media", content=b"x" * (20 * 1024 * 1024 + 1), headers=headers
         ).status_code
         == 413
     )

@@ -23,13 +23,17 @@ class Settings(BaseSettings):
     email_captcha_enabled: bool = False
     email_captcha_prefix: str = "esa-rwe96uub0q"
     email_captcha_scene_id: str = "trwiyf09"
+    # 图床公开地址，例如 https://image.copylee.cn；留空时使用 site_url/images（由后端直接提供）。
+    image_url: str = ""
 
-    @field_validator("site_url")
+    @field_validator("site_url", "image_url")
     @classmethod
     def valid_url(cls, value: str) -> str:
+        if not value:
+            return value
         parts = urlsplit(value)
         if parts.scheme not in {"http", "https"} or not parts.netloc:
-            raise ValueError("site_url must be an absolute http(s) URL")
+            raise ValueError("must be an absolute http(s) URL")
         return value.rstrip("/")
 
     @property
@@ -43,6 +47,18 @@ class Settings(BaseSettings):
     @property
     def media_dir(self) -> Path:
         return self.data_dir / "media"
+
+    @property
+    def images_dir(self) -> Path:
+        return self.data_dir / "images"
+
+    @property
+    def image_base(self) -> str:
+        return self.image_url or f"{self.site_url}/images"
+
+    @property
+    def upload_url(self) -> str:
+        return f"{self.image_url or self.site_url}/api/upload"
 
     @property
     def origins(self) -> set[str]:
