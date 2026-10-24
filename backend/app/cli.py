@@ -1,6 +1,5 @@
 import argparse
 import asyncio
-import getpass
 import hashlib
 import json
 import re
@@ -15,7 +14,7 @@ from alembic import command
 from alembic.config import Config
 from sqlmodel import Session
 
-from .auth import set_admin
+from .auth import revoke_admin, set_admin
 from .content import initialize
 from .database import make_engine
 from .settings import Settings
@@ -194,10 +193,11 @@ def main():
     sub.add_parser("seed")
     scut = sub.add_parser("sync-scut", help="同步 SCUT 公开列表；历史扫描可重复执行续传")
     scut.add_argument("--pages-per-column", type=int, default=5)
-    admin = sub.add_parser("set-admin")
-    admin.add_argument("--username", default="admin")
-    reset = sub.add_parser("reset-security", help="清除 TOTP、恢复码、Passkey 和所有会话")
-    reset.add_argument("--confirm", action="store_true", required=True)
+    admin = sub.add_parser("set-admin", help="把已注册的站点用户设为管理员")
+    admin.add_argument("--email", required=True)
+    admin.add_argument("--revoke", action="store_true", help="取消管理员身份")
+    reset = sub.add_parser("reset-security", help="清除该用户的 TOTP、恢复码、Passkey 和所有会话")
+    reset.add_argument("--email", required=True)
     save = sub.add_parser("backup")
     save.add_argument("--output", type=Path)
     load = sub.add_parser("restore")
@@ -220,14 +220,26 @@ def main():
     elif args.action == "seed":
         print("初始内容已导入" if seed(settings) else "内容已存在，未覆盖")
     elif args.action == "set-admin":
-        password = getpass.getpass("管理员密码（至少 12 字符）：")
-        if password != getpass.getpass("再次输入密码："):
-            parser.error("两次密码不一致")
         engine = make_engine(settings)
-        with Session(engine) as session:
-            set_admin(session, args.username, password)
-        engine.dispose()
-        print("账号已设置，旧会话已撤销")
+        try:
+            with Session(engine) as session:
+                if args.revoke:
+                    revoke_admin(session, args.email)
+                    print("已取消管理员身份")
+                else:
+                    user = set_admin(session, args.email)
+                    # 管理员默认开通网盘与图床，且不受配额限制。
+                    from .drive.vfs import ensure_root
+                    from .storage import save
+
+                    save(session, user.id, drive_enabled=True, images_enabled=True)
+                    ensure_root(session, settings, user.id)
+                    session.commit()
+                    print("已设为管理员；后台请用该账户的邮箱与密码登录")
+        except ValueError as error:
+            parser.error(str(error))
+        finally:
+            engine.dispose()
     elif args.action == "sync-scut":
         from .scut import sync_scut
 
@@ -302,27 +314,27 @@ def main():
                 print(f"{user_id} {row['path']}：{row['size']} 字节 / {row['files']} 个文件")
         engine.dispose()
     elif args.action == "reset-security":
-        reset_security(settings)
-        print("登录因素与旧会话已清除，管理员密码保留")
+        reset_security(settings, args.email)
+        print("两步验证、Passkey 与该用户的全部会话已清除，密码保留")
     else:
         restore(args.source, args.target)
         print(f"已恢复到 {args.target}，旧会话已清除")
 
 
-def reset_security(settings):
+def reset_security(settings, email: str):
     from sqlalchemy import delete
+    from sqlmodel import select
 
-    from .models import Administrator, AuthChallenge, LoginAttempt, LoginSession, Passkey
+    from .models import LoginSession, User
+    from .user_security import reset
+
     engine = make_engine(settings)
     with Session(engine) as session:
-        admin = session.get(Administrator, 1)
-        if admin:
-            admin.totp_secret = admin.pending_secret = None
-            admin.pending_expires, admin.last_totp_step, admin.recovery_hashes = 0, -1, []
-            session.add(admin)
-        for model in (AuthChallenge, Passkey, LoginSession, LoginAttempt):
-            session.exec(delete(model))
-        session.commit()
+        user = session.exec(select(User).where(User.email == email.strip().lower())).first()
+        if user is None:
+            raise SystemExit("该邮箱尚未注册")
+        session.exec(delete(LoginSession).where(LoginSession.user_id == user.id))
+        reset(session, user)
     engine.dispose()
 
 

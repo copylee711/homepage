@@ -10,15 +10,25 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from sqlmodel import Session
 
+from app.accounts import hash_password
 from app.auth import set_admin
 from app.cli import backup, migrate, restore, seed
 from app.github import fetch_repos, sync_repos
 from app.main import create_app
-from app.models import Content
+from app.models import Content, User
 from app.settings import Settings
 
 PASSWORD = "local-test-password-only"
 ORIGIN = "http://localhost:8000"
+ADMIN_EMAIL = "owner@copylee.test"
+
+
+def make_admin(session, email=ADMIN_EMAIL, password=PASSWORD):
+    """管理员就是带 is_admin 标记的站点用户。"""
+    session.add(User(id="admin-user", email=email, password_hash=hash_password(password),
+                     name="站长", created_at="2026-01-01T00:00:00+00:00"))
+    session.commit()
+    return set_admin(session, email)
 
 
 @pytest.fixture
@@ -31,7 +41,7 @@ def server(tmp_path):
     seed(settings)
     app = create_app(settings)
     with Session(app.state.engine) as session:
-        set_admin(session, "admin", PASSWORD)
+        make_admin(session)
     with TestClient(app, base_url=ORIGIN) as client:
         yield client, app, settings
 
@@ -39,7 +49,7 @@ def server(tmp_path):
 def login(client):
     response = client.post(
         "/api/auth/login",
-        json={"username": "admin", "password": PASSWORD},
+        json={"email": ADMIN_EMAIL, "password": PASSWORD},
         headers={"Origin": ORIGIN},
     )
     assert response.status_code == 200, response.text
@@ -179,7 +189,7 @@ def test_security_origin_csrf_expiry_reset_logout(server):
     client, app, _ = server
     assert client.get("/api/admin/site").status_code == 401
     assert (
-        client.post("/api/auth/login", json={"username": "admin", "password": PASSWORD}).status_code
+        client.post("/api/auth/login", json={"email": ADMIN_EMAIL, "password": PASSWORD}).status_code
         == 403
     )
     headers = login(client)
@@ -197,7 +207,7 @@ def test_security_origin_csrf_expiry_reset_logout(server):
     assert client.get("/api/auth/me").status_code == 401
     headers = login(client)
     with Session(app.state.engine) as session:
-        set_admin(session, "admin", PASSWORD)
+        set_admin(session, ADMIN_EMAIL)
     assert client.get("/api/auth/me").status_code == 401
     login(client)
     with closing(sqlite3.connect(app.state.settings.db_path)) as connection:
@@ -212,7 +222,7 @@ def test_login_rate_limit_and_public_http_gate(server):
         assert (
             client.post(
                 "/api/auth/login",
-                json={"username": "admin", "password": "wrong"},
+                json={"email": ADMIN_EMAIL, "password": "wrong"},
                 headers={"Origin": ORIGIN},
             ).status_code
             == 401
@@ -220,7 +230,7 @@ def test_login_rate_limit_and_public_http_gate(server):
     assert (
         client.post(
             "/api/auth/login",
-            json={"username": "admin", "password": PASSWORD},
+            json={"email": ADMIN_EMAIL, "password": PASSWORD},
             headers={"Origin": ORIGIN},
         ).status_code
         == 429
@@ -410,7 +420,7 @@ def test_https_admin_and_secure_cookie(server):
     with TestClient(app, base_url="https://copylee.cn") as client:
         response = client.post(
             "/api/auth/login",
-            json={"username": "admin", "password": PASSWORD},
+            json={"email": ADMIN_EMAIL, "password": PASSWORD},
             headers={"Origin": "https://copylee.cn"},
         )
         assert response.status_code == 200
@@ -431,7 +441,7 @@ def test_json_size_limit_and_unicode_login(server):
     assert response.status_code == 413
     response = client.post(
         "/api/auth/login",
-        json={"username": "管理员", "password": PASSWORD},
+        json={"email": "管理员", "password": PASSWORD},
         headers={"Origin": ORIGIN},
     )
     assert response.status_code == 401

@@ -25,9 +25,16 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, select
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import accounts, audit, games, images, user_security
+from . import accounts, audit, feedback, games, images, storage, user_security
 from .accounts import current_user, profile
-from .auth import COOKIE, authenticate, check_origin, current_session
+from .auth import (
+    COOKIE,
+    admin_access,
+    authenticate,
+    check_origin,
+    current_session,
+    issue_session,
+)
 from .content import (
     adjacent_posts,
     bump,
@@ -53,14 +60,13 @@ from .feed import atom_feed
 from .github import sync_loop, sync_repos
 from .limits import JsonBodyLimit
 from .models import (
-    Administrator,
     Article,
     Favorite,
+    Feedback,
     GameScore,
     History,
     HostedImage,
     Note,
-    Passkey,
     ScutReading,
     User,
     UserChallenge,
@@ -82,10 +88,11 @@ from .rendering import render_markdown
 from .schemas import (
     AccountDelete,
     AccountsConfig,
-    AdminPasswordChange,
     ArticleDraft,
     ArticleWrite,
     CodeRequest,
+    FeedbackUpdate,
+    FeedbackWrite,
     ImageQuotaWrite,
     Login,
     NotesConfig,
@@ -111,14 +118,6 @@ from .schemas import (
 )
 from .scut import public_scut
 from .scut import sync_loop as scut_sync_loop
-from .security import (
-    change_password,
-    factor_action,
-    passkey_options,
-    passkey_verify,
-    remove_passkey,
-    unlock,
-)
 from .settings import Settings
 
 HERE = Path(__file__).parent
@@ -172,6 +171,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def authorized(request: Request, session: Session = Depends(database)):
         current_session(request, session, request.method not in {"GET", "HEAD", "OPTIONS"})
         return session
+
+    def admin_user(request: Request, session: Session) -> str:
+        """当前后台会话对应的管理员用户 id；管理员的图片与令牌都记在该用户名下。"""
+        return current_session(request, session).user_id
 
     @app.middleware("http")
     async def headers(request, call_next):
@@ -250,7 +253,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def login(
         body: Login, request: Request, response: Response, session: Session = Depends(database)
     ):
-        with audit.outcome("admin.login", request, username=body.username[:80]):
+        with audit.outcome("admin.login", request, email=body.email.strip().lower()[:254]):
             token, row = authenticate(request, session, body)
         response.set_cookie(
             COOKIE,
@@ -265,70 +268,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/auth/me")
     def me(request: Request, session: Session = Depends(database)):
-        return {"csrf": current_session(request, session).csrf}
+        row = current_session(request, session)
+        return {"csrf": row.csrf, "user": profile(session.get(User, row.user_id))}
 
     @app.post("/api/auth/passkey/options")
     def key_login_options(request: Request, response: Response, session: Session = Depends(database)):
-        return passkey_options(request, response, session)
+        admin_access(request)
+        check_origin(request)
+        return user_security.login_options(request, response, session)
 
     @app.post("/api/auth/passkey/verify")
     def key_login(body: PasskeyResponse, request: Request, response: Response,
                   session: Session = Depends(database)):
+        admin_access(request)
+        check_origin(request)
         with audit.outcome("admin.login_passkey", request):
-            token, row = passkey_verify(request, session, body)
+            user = user_security.passkey_user(request, response, session, body)
+            if not user.is_admin:
+                session.commit()
+                raise HTTPException(403, "该账户不是管理员")
+            token, row = issue_session(request, session, user.id)
         response.set_cookie(COOKIE, token, max_age=settings.session_hours * 3600,
                             httponly=True, secure=settings.secure_cookie, samesite="lax", path="/api")
-        response.delete_cookie("copylee_challenge", path="/api")
         return {"csrf": row.csrf}
-
-    @app.get("/api/admin/security")
-    def security_state(request: Request, session: Session = Depends(authorized)):
-        admin = session.get(Administrator, 1)
-        return {"elevated_until": current_session(request, session).elevated_until,
-                "totp_enabled": bool(admin.totp_secret),
-                "recovery_remaining": len(admin.recovery_hashes),
-                "passkeys": [{"id": key.id, "name": key.name, "created_at": key.created_at,
-                              "last_used": key.last_used} for key in session.exec(select(Passkey)).all()]}
-
-    @app.post("/api/admin/security/unlock")
-    def security_unlock(body: SecurityProof, request: Request,
-                        session: Session = Depends(authorized)):
-        return unlock(request, session, body)
-
-    @app.post("/api/admin/security/unlock/passkey/options")
-    def security_unlock_options(request: Request, response: Response,
-                                session: Session = Depends(authorized)):
-        return passkey_options(request, response, session, step_up=True)
-
-    @app.post("/api/admin/security/unlock/passkey/verify")
-    def security_unlock_verify(body: PasskeyResponse, request: Request,
-                               session: Session = Depends(authorized)):
-        return passkey_verify(request, session, body, step_up=True)
-
-    @app.post("/api/admin/security/password")
-    def admin_password(body: AdminPasswordChange, request: Request,
-                       session: Session = Depends(authorized)):
-        with audit.outcome("admin.change_password", request):
-            return change_password(request, session, body)
-
-    @app.post("/api/admin/security/2fa/{operation}")
-    def factor_change(operation: str, body: SecurityProof, request: Request,
-                      session: Session = Depends(authorized)):
-        return factor_action(request, session, body, operation)
-
-    @app.post("/api/admin/security/passkeys/options")
-    def key_setup(body: PasskeySetup, request: Request, response: Response,
-                  session: Session = Depends(authorized)):
-        return passkey_options(request, response, session, body)
-
-    @app.post("/api/admin/security/passkeys/verify")
-    def key_register(body: PasskeyResponse, request: Request, session: Session = Depends(authorized)):
-        return passkey_verify(request, session, body, register=True)
-
-    @app.post("/api/admin/security/passkeys/{key_id}/remove")
-    def key_remove(key_id: str, body: SecurityProof, request: Request,
-                   session: Session = Depends(authorized)):
-        return remove_passkey(request, session, key_id, body)
 
     @app.post("/api/auth/logout")
     def logout(request: Request, response: Response, session: Session = Depends(database)):
@@ -397,7 +359,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/account/me")
     def account_me(request: Request, session: Session = Depends(database)):
         user, row = current_user(request, session)
-        return {"user": profile(user), "csrf": row.csrf}
+        plan = storage.plan(session, user.id)
+        # 前端据此显示或隐藏网盘、图床与后台入口；新用户默认都没有。
+        features = {"drive": plan.drive_enabled, "images": plan.images_enabled or user.is_admin,
+                    "admin": user.is_admin}
+        return {"user": profile(user), "csrf": row.csrf, "features": features}
+
+    # —— 意见反馈 ——
+
+    @app.get("/api/account/feedback")
+    def account_feedback(request: Request, session: Session = Depends(database)):
+        user, _ = current_user(request, session)
+        return {"items": feedback.mine(session, user.id)}
+
+    @app.post("/api/account/feedback")
+    def account_feedback_submit(body: FeedbackWrite, request: Request,
+                                session: Session = Depends(database)):
+        user, _ = current_user(request, session, write=True)
+        with audit.outcome("account.feedback", request, user=user.id):
+            return feedback.submit(request, session, user, body)
 
     @app.put("/api/account/profile")
     def account_profile(body: ProfileWrite, request: Request, session: Session = Depends(database)):
@@ -565,13 +545,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         user, _ = current_user(request, session, write=True)
         return games.submit(session, user, game, body)
 
+    # —— 后台：收件箱 ——
+
+    @app.get("/api/admin/inbox")
+    def admin_inbox(status: str = "", page: int = 1, session: Session = Depends(authorized)):
+        if status not in {"", "new", "read", "done"}:
+            raise HTTPException(422, "状态不正确")
+        return feedback.inbox(session, status, page)
+
+    @app.put("/api/admin/inbox/{feedback_id}")
+    def admin_inbox_update(feedback_id: str, body: FeedbackUpdate, request: Request,
+                           session: Session = Depends(authorized)):
+        result = feedback.update(session, feedback_id, body)
+        audit.record("admin.feedback_update", request, ok=True, feedback=feedback_id,
+                     status=body.status, replied=body.reply is not None)
+        return result
+
+    @app.post("/api/admin/inbox/{feedback_id}/remove")
+    def admin_inbox_remove(feedback_id: str, request: Request,
+                           session: Session = Depends(authorized)):
+        feedback.remove(session, feedback_id)
+        audit.record("admin.feedback_remove", request, ok=True, feedback=feedback_id)
+        return {"ok": True}
+
     # —— 后台：注册与邮件配置、用户管理 ——
 
     @app.get("/api/admin/accounts")
     def admin_accounts(session: Session = Depends(authorized)):
         users = session.exec(select(User).order_by(User.created_at.desc())).all()
         return {"config": accounts.admin_config(session), "users": [
-            {**profile(u), "disabled": u.disabled, "last_login": u.last_login,
+            {**profile(u), "disabled": u.disabled, "last_login": u.last_login, "admin": u.is_admin,
              "images": images.limits(session, u.id), "totp": bool(u.totp_secret),
              "passkeys": len(user_security.state(session, u)["passkeys"])} for u in users
         ]}
@@ -605,6 +608,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         user = session.get(User, user_id)
         if user is None:
             raise HTTPException(404, "用户不存在")
+        if user.is_admin and body.disabled:
+            raise HTTPException(409, "不能停用管理员账户，请先用命令行取消管理员身份")
         user.disabled = body.disabled
         if body.disabled:
             session.exec(delete(UserSession).where(UserSession.user_id == user.id))
@@ -627,8 +632,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         user = session.get(User, user_id)
         if user is None:
             raise HTTPException(404, "用户不存在")
+        if user.is_admin:
+            raise HTTPException(409, "不能删除管理员账户")
         for table in (Favorite, History, UserSession, ScutReading, GameScore, UserPasskey,
-                      UserChallenge):
+                      UserChallenge, Feedback):
             session.exec(delete(table).where(table.user_id == user.id))
         accounts.remove_avatar(user, settings.media_dir)
         images.remove_owner(session, settings, user.id)
@@ -704,17 +711,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                  headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     @app.get("/api/admin/images")
-    def admin_images(owner: str = "", page: int = 1, session: Session = Depends(authorized)):
+    def admin_images(request: Request, owner: str = "", page: int = 1,
+                     session: Session = Depends(authorized)):
         rows = session.exec(
             select(HostedImage.owner, func.count(), func.sum(HostedImage.size))
             .group_by(HostedImage.owner)
         ).all()
         users = {u.id: u for u in session.exec(select(User)).all()}
         usage = [{"owner": key, "count": count, "size": size,
-                  "label": "管理员" if key == images.ADMIN else
+                  "label": "旧管理员" if key == images.ADMIN else
                   users[key].email if key in users else key} for key, count, size in rows]
         return {**images.listing(session, settings, owner or None, page), "usage": usage,
-                "tokens": images.tokens(session, images.ADMIN), "upload_url": settings.upload_url}
+                "tokens": images.tokens(session, admin_user(request, session)), "upload_url": settings.upload_url}
 
     @app.post("/api/admin/images/{image_id}/remove")
     def admin_image_remove(image_id: str, request: Request,
@@ -728,12 +736,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def admin_token_create(body: TokenCreate, request: Request,
                            session: Session = Depends(authorized)):
         with audit.outcome("admin.image_token_create", request):
-            return images.create_token(session, images.ADMIN, body.name)
+            return images.create_token(session, admin_user(request, session), body.name)
 
     @app.post("/api/admin/images/tokens/{token_id}/remove")
     def admin_token_remove(token_id: str, request: Request,
                            session: Session = Depends(authorized)):
-        images.revoke_token(session, images.ADMIN, token_id)
+        images.revoke_token(session, admin_user(request, session), token_id)
         audit.record("admin.image_token_revoke", request, ok=True, token=token_id)
         return {"ok": True}
 
@@ -913,7 +921,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def upload(request: Request, session: Session = Depends(authorized)):
         # 编辑器上传的图片存入图床，返回公开地址。
         payload = await images.read_upload(request, images.MAX_IMAGE_BYTES)
-        row, _ = await asyncio.to_thread(images.store, session, settings, images.ADMIN, payload)
+        owner = admin_user(request, session)
+        row, _ = await asyncio.to_thread(images.store, session, settings, owner, payload)
         return {"url": images.url(settings, row.path)}
 
     def page_context(session, path, title, description):

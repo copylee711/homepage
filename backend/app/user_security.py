@@ -268,6 +268,12 @@ def login_options(request, response, session) -> dict:
 
 
 def login_verify(request, response, session, body) -> dict:
+    user = passkey_user(request, response, session, body)
+    return issue(request, response, session, user)
+
+
+def passkey_user(request, response, session, body) -> User:
+    """校验 Passkey 断言并返回对应用户；前台登录与后台登录共用。"""
     origin, rp_id = passkey_context(request)
     session.connection().exec_driver_sql("BEGIN IMMEDIATE")
     key_ip = f"ip:{digest(client_ip(request))}"
@@ -293,4 +299,4 @@ def login_verify(request, response, session, body) -> dict:
     key.sign_count, key.last_used = result.new_sign_count, time.time()
     session.add(key)
     response.delete_cookie(CHALLENGE_COOKIE, path="/api")
-    return issue(request, response, session, user)
+    return user

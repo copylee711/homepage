@@ -2,7 +2,7 @@ import time
 
 import pyotp
 from cryptography.hazmat.primitives.asymmetric import ec
-from sqlmodel import Session
+from sqlmodel import Session, select
 from test_accounts import EMAIL, PASSWORD, code_for, signup, site  # noqa: F401
 from test_content import ORIGIN, login
 from test_security import credential, post
@@ -41,7 +41,7 @@ def test_optional_totp_login_and_recovery(site, monkeypatch, tmp_path):  # noqa:
     secret, codes = bind(client, headers, now, monkeypatch)
     assert client.get("/api/account/security").json()["recovery_remaining"] == 10
     with Session(app.state.engine) as session:
-        user = session.exec(User.__table__.select()).first()
+        user = session.exec(select(User).where(User.email == EMAIL)).one()
         assert decrypt(settings, user.totp_secret) == secret
     # 备份必须带上加密密钥；恢复时清除挑战与待绑定密钥。
     archive = backup(settings)

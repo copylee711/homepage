@@ -140,7 +140,7 @@ class Revision(StrictModel):
 
 
 class Login(StrictModel):
-    username: str = Field(min_length=1, max_length=80)
+    email: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=1, max_length=200)
     otp: str = Field(default="", max_length=80)
 
@@ -387,3 +387,14 @@ class MountCreate(StrictModel):
 class MountUpdate(StrictModel):
     quota_mb: int = Field(ge=0, le=10_000_000)
     read_only: bool
+
+
+class FeedbackWrite(StrictModel):
+    category: Literal["suggestion", "bug", "other"] = "suggestion"
+    content: str = Field(min_length=5, max_length=2000)
+    page: str = Field(default="", max_length=300)
+
+
+class FeedbackUpdate(StrictModel):
+    status: Literal["new", "read", "done"]
+    reply: str | None = Field(default=None, max_length=2000)

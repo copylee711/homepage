@@ -91,6 +91,7 @@ class LoginSession(SQLModel, table=True):
     expires_at: float
     # 进入登录安全页面时验证一次身份，有效期内修改安全设置无需重复输入密码。
     elevated_until: float = 0
+    user_id: str = ""
 
 
 class LoginAttempt(SQLModel, table=True):
@@ -130,6 +131,8 @@ class User(SQLModel, table=True):
     name: str
     avatar: str = ""
     disabled: bool = False
+    # 管理员就是带此标记的站点用户；用 python -m app.cli set-admin --email 设置。
+    is_admin: bool = False
     created_at: str
     last_login: str | None = None
     # 可选的两步验证；字段含义与 Administrator 相同，密钥用 data_dir/2fa.key 加密。
@@ -338,3 +341,22 @@ class DriveUpload(SQLModel, table=True):
     received: int = 0
     created_at: float
     expires_at: float
+
+
+# —— 反馈 ——
+
+
+class Feedback(SQLModel, table=True):
+    """登录用户提交的建议；管理员在后台收件箱查看与回复。"""
+
+    __tablename__ = "feedback"
+    id: str = Field(primary_key=True)
+    user_id: str = Field(index=True)
+    category: str = "suggestion"
+    content: str
+    page: str = ""
+    status: str = Field(default="new", index=True)  # new | read | done
+    reply: str = ""
+    ip_hash: str = Field(default="", index=True)
+    created_at: float = Field(index=True)
+    replied_at: float | None = None

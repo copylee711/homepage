@@ -26,7 +26,7 @@ from .auth import digest
 from .content import bump, timestamp
 from .models import Article, HostedImage, ImageToken, Note, StoragePlan, User
 from .notes import bump_notes
-from .storage import ADMIN, images_used, plan, shared_used
+from .storage import ADMIN, admin_owner, images_used, plan, shared_used, unlimited
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 TOKEN_LIMIT = 10
@@ -73,7 +73,7 @@ def view(settings, row: HostedImage) -> dict:
 
 def limits(session: Session, owner: str) -> dict:
     """used 为网盘与图床共用的总用量，images_used 为其中图床部分。"""
-    if owner == ADMIN:
+    if unlimited(session, owner):
         used = images_used(session, owner)
         return {"enabled": True, "quota": None, "max_file": MAX_IMAGE_BYTES, "used": used,
                 "images_used": used}
@@ -357,7 +357,8 @@ def migrate_media(session: Session, settings, apply: bool = False) -> dict:
             continue
         source = settings.media_dir / name
         modified = datetime.fromtimestamp(source.stat().st_mtime, timezone.utc)
-        row, created = store(session, settings, ADMIN, source.read_bytes(), modified)
+        row, created = store(session, settings, admin_owner(session), source.read_bytes(),
+                             modified)
         imported += created
         mapping[name] = url(settings, row.path)
 

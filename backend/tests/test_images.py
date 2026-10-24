@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from sqlmodel import Session
 from test_accounts import PASSWORD, signup, site  # noqa: F401
-from test_content import ORIGIN, create_post, login
+from test_content import ADMIN_EMAIL, ORIGIN, create_post, login
 
 from app.cli import backup, restore
 from app.images import migrate_media
@@ -167,11 +167,11 @@ def test_admin_uploads_and_tokens_unlimited(site):  # noqa: F811
     token = client.post("/api/admin/images/tokens", json={"name": "PicList"}, headers=admin).json()
     assert upload(client, token["token"], picture(900, noise=True)).status_code == 200
     data = client.get("/api/admin/images", headers=admin).json()
-    assert data["total"] == 2 and data["usage"][0]["label"] == "管理员"
-    assert data["items"][0]["owner"] == "admin"
+    assert data["total"] == 2 and data["usage"][0]["label"] == ADMIN_EMAIL
+    assert data["items"][0]["owner"] == "admin-user"
     assert client.post(f"/api/admin/images/{data['items'][0]['id']}/remove",
                        headers=admin).status_code == 200
-    assert client.get("/api/admin/images?owner=admin", headers=admin).json()["total"] == 1
+    assert client.get("/api/admin/images?owner=admin-user", headers=admin).json()["total"] == 1
 
 
 def test_migrate_media_and_backup(site, tmp_path):  # noqa: F811

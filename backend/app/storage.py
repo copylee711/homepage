@@ -1,13 +1,13 @@
 """存储方案：网盘与图床共用一个总配额。
 
 总用量 = 图床图片 + 未单独设置配额的网盘挂载点。单独设置了配额的挂载点（例如 OSS
-归档目录）只受自己的配额限制。管理员（owner 为 "admin"）没有存储方案，不受限制。
+归档目录）只受自己的配额限制。管理员用户（以及旧数据里 owner 为 "admin" 的图片）不受配额限制。
 """
 
 from sqlalchemy import func
 from sqlmodel import Session, select
 
-from .models import DriveMount, HostedImage, StoragePlan
+from .models import DriveMount, HostedImage, StoragePlan, User
 
 ADMIN = "admin"
 MIB = 1024 * 1024
@@ -36,9 +36,17 @@ def shared_used(session: Session, user_id: str) -> int:
     return images_used(session, user_id) + drive_used(session, user_id)
 
 
+def unlimited(session: Session, user_id: str) -> bool:
+    """管理员不受配额限制。"""
+    if user_id == ADMIN:
+        return True
+    user = session.get(User, user_id)
+    return bool(user and user.is_admin)
+
+
 def remaining(session: Session, user_id: str) -> int | None:
     """总配额剩余字节数；管理员返回 None 表示不限。"""
-    if user_id == ADMIN:
+    if unlimited(session, user_id):
         return None
     return plan(session, user_id).quota_bytes - shared_used(session, user_id)
 
@@ -48,7 +56,8 @@ def summary(session: Session, user_id: str) -> dict:
     images = images_used(session, user_id)
     drive = drive_used(session, user_id)
     return {"drive_enabled": row.drive_enabled, "images_enabled": row.images_enabled,
-            "quota": row.quota_bytes, "max_image": row.max_image_bytes,
+            "quota": None if unlimited(session, user_id) else row.quota_bytes,
+            "max_image": row.max_image_bytes,
             "used": images + drive, "images_used": images, "drive_used": drive}
 
 
@@ -67,3 +76,9 @@ def save(session: Session, user_id: str, *, drive_enabled: bool | None = None,
         row.max_image_bytes = max_image_mb * MIB
     session.add(row)
     return row
+
+
+def admin_owner(session: Session) -> str:
+    """图片归属的管理员：第一个管理员用户；尚未设置时沿用旧的 "admin"。"""
+    user = session.exec(select(User).where(User.is_admin).order_by(User.created_at)).first()
+    return user.id if user else ADMIN

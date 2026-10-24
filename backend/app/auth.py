@@ -1,20 +1,20 @@
+"""后台登录：管理员就是带 is_admin 标记的站点用户。
+
+后台使用独立的会话 Cookie 与较短的有效期；即使已在前台登录，进入后台仍需再次验证
+密码（及两步验证）或 Passkey。公网访问受 admin_access 限制。
+"""
 import hashlib
 import secrets
 import time
 
-from argon2 import PasswordHasher
-from argon2.exceptions import VerificationError
 from fastapi import HTTPException, Request
-from sqlalchemy import delete
-from sqlmodel import Session
+from sqlalchemy import delete, update
+from sqlmodel import Session, select
 
-from .models import Administrator, AuthChallenge, LoginAttempt, LoginSession
+from .models import AuthChallenge, HostedImage, ImageToken, LoginAttempt, LoginSession, User
 from .schemas import Login
 
-hasher = PasswordHasher()
 COOKIE = "copylee_session"
-# 未配置账号时也执行一次哈希验证，避免用户名探测时的明显耗时差异。
-DUMMY_HASH = hasher.hash(secrets.token_urlsafe(32))
 
 
 def digest(value: str) -> str:
@@ -44,7 +44,9 @@ def current_session(request: Request, session: Session, write: bool = False) -> 
     admin_access(request)
     token = request.cookies.get(COOKIE, "")
     row = session.get(LoginSession, digest(token)) if token else None
-    if row is None or row.expires_at <= time.time():
+    user = session.get(User, row.user_id) if row and row.user_id else None
+    if row is None or row.expires_at <= time.time() or user is None or not user.is_admin \
+            or user.disabled:
         raise HTTPException(401, "请重新登录")
     if write:
         check_origin(request)
@@ -56,47 +58,37 @@ def current_session(request: Request, session: Session, write: bool = False) -> 
 
 
 def authenticate(request: Request, session: Session, body: Login) -> tuple[str, LoginSession]:
+    from .accounts import DUMMY_HASH, verify_password
+    from .security import OTP_REQUIRED, verify_factor
+
     admin_access(request)
     check_origin(request)
-    # 串行执行 Argon2 校验，避免低内存服务器同时分配多份哈希工作区。
-    # 同时保证密码重置与登录之间不会出现旧密码创建新会话的竞争。
+    # 串行执行，保证密码重置与登录之间不会出现旧密码创建新会话的竞争。
     session.connection().exec_driver_sql("BEGIN IMMEDIATE")
-    now = time.time()
-    # 单管理员全局限制同时阻止攻击者用大量用户名/IP 扩大数据库。
-    attempt = session.get(LoginAttempt, "admin")
-    if attempt and now - attempt.window_start < 900 and attempt.failures >= 5:
-        raise HTTPException(429, "登录失败过多，请 15 分钟后重试", headers={"Retry-After": "900"})
-    admin = session.get(Administrator, 1)
-    try:
-        valid = hasher.verify(admin.password_hash if admin else DUMMY_HASH, body.password)
-    except VerificationError:
-        valid = False
-    if (
-        not admin
-        or not valid
-        or not secrets.compare_digest(admin.username.encode(), body.username.encode())
-    ):
+    # 后台登录全局限流，攻击者无法用大量邮箱/IP 扩大尝试次数。
+    rate_check(session)
+    user = session.exec(select(User).where(User.email == body.email.strip().lower())).first()
+    valid = verify_password(user.password_hash if user else DUMMY_HASH, body.password)
+    if not user or not valid or not user.is_admin or user.disabled:
         fail_login(session, "账号或密码错误")
-    from .security import verify_factor
-    if admin.totp_secret:
+    if user.totp_secret:
         if not body.otp:
-            raise HTTPException(403, "请输入两步验证码或恢复码")
-        if not verify_factor(request.app.state.settings, admin, body.otp):
+            raise HTTPException(403, OTP_REQUIRED)
+        if not verify_factor(request.app.state.settings, user, body.otp):
             fail_login(session, "验证码无效、已使用或已过期")
-        session.add(admin)
-    if attempt:
-        session.delete(attempt)
-    session.exec(delete(LoginSession).where(LoginSession.expires_at <= now))
-    return issue_session(request, session)
+        session.add(user)
+    session.exec(delete(LoginAttempt).where(LoginAttempt.key == "admin"))
+    return issue_session(request, session, user.id)
 
 
-def issue_session(request: Request, session: Session) -> tuple[str, LoginSession]:
+def issue_session(request: Request, session: Session, user_id: str) -> tuple[str, LoginSession]:
     session.exec(delete(LoginSession).where(LoginSession.expires_at <= time.time()))
     token = secrets.token_urlsafe(48)
     row = LoginSession(
         token_hash=digest(token),
         csrf=secrets.token_urlsafe(32),
         expires_at=time.time() + request.app.state.settings.session_hours * 3600,
+        user_id=user_id,
     )
     session.add(row)
     session.commit()
@@ -117,17 +109,31 @@ def fail_login(session: Session, message: str, status: int = 401):
     attempt.failures += 1
     session.add(attempt)
     session.commit()
-    # 已登录后的二次验证失败用 403，避免前端误判为会话过期而退出。
     raise HTTPException(status, message)
 
 
-def set_admin(session: Session, username: str, password: str):
-    if not username.strip() or len(username) > 80 or not 12 <= len(password) <= 200:
-        raise ValueError("账号不能为空；密码需要 12–200 个字符")
-    admin = session.get(Administrator, 1) or Administrator(username=username, password_hash="")
-    admin.username, admin.password_hash = username, hasher.hash(password)
-    session.add(admin)
+def set_admin(session: Session, email: str) -> User:
+    """把站点用户设为管理员；原管理员名下的图床图片与令牌转给该用户。"""
+    user = session.exec(select(User).where(User.email == email.strip().lower())).first()
+    if user is None:
+        raise ValueError("该邮箱尚未注册，请先在网站注册")
+    user.is_admin, user.disabled = True, False
+    session.add(user)
+    session.exec(update(HostedImage).where(HostedImage.owner == "admin").values(owner=user.id))
+    session.exec(update(ImageToken).where(ImageToken.owner == "admin").values(owner=user.id))
     session.exec(delete(LoginSession))
-    session.exec(delete(LoginAttempt))
+    session.exec(delete(LoginAttempt).where(LoginAttempt.key == "admin"))
     session.exec(delete(AuthChallenge))
     session.commit()
+    return user
+
+
+def revoke_admin(session: Session, email: str) -> User:
+    user = session.exec(select(User).where(User.email == email.strip().lower())).first()
+    if user is None or not user.is_admin:
+        raise ValueError("该邮箱不是管理员")
+    user.is_admin = False
+    session.add(user)
+    session.exec(delete(LoginSession).where(LoginSession.user_id == user.id))
+    session.commit()
+    return user
