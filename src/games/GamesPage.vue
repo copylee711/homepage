@@ -98,11 +98,11 @@ onMounted(() => {
 .cards .card:last-child:nth-child(odd) .art { height:240px; }
 .card { display:flex; flex-direction:column; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); overflow:hidden; transition:transform .4s var(--ease),box-shadow .4s,border-color .3s; }
 .card:hover { transform:translateY(-4px); border-color:var(--line-strong); box-shadow:0 30px 60px -40px rgba(17,24,39,.45); }
-.art { display:grid; place-items:center; height:200px; }
+.art { position:relative; display:grid; place-items:center; flex:none; height:200px; overflow:hidden; }
 .art.watermelon { background:linear-gradient(180deg,#fff6e3,#ffe2b8); }
 .art.sheep { background:linear-gradient(180deg,#d9f2c4,#b8e39b); }
 .art.dungeon { background:radial-gradient(ellipse at 50% 70%,#24283a,#0b0c12); }
-.art .cover { width:100%; height:100%; object-fit:cover; object-position:30% 40%; transition:transform .6s var(--ease); }
+.art .cover { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; object-position:30% 22%; transition:transform .6s var(--ease); }
 .card:hover .art .cover { transform:scale(1.04); }
 :root[data-theme='dark'] .art.watermelon { background:linear-gradient(180deg,#1d2233,#2a2620); }
 :root[data-theme='dark'] .art.sheep { background:linear-gradient(180deg,#1f3322,#18281b); }
