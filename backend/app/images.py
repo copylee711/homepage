@@ -24,10 +24,10 @@ from starlette.datastructures import UploadFile
 from .accounts import client_ip, record_failure, throttle
 from .auth import digest
 from .content import bump, timestamp
-from .models import Article, HostedImage, ImageQuota, ImageToken, Note, User
+from .models import Article, HostedImage, ImageToken, Note, StoragePlan, User
 from .notes import bump_notes
+from .storage import ADMIN, images_used, plan, shared_used
 
-ADMIN = "admin"
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 TOKEN_LIMIT = 10
 PAGE_SIZE = 40
@@ -71,19 +71,16 @@ def view(settings, row: HostedImage) -> dict:
 # —— 配额 ——
 
 
-def used(session: Session, owner: str) -> int:
-    return session.exec(
-        select(func.coalesce(func.sum(HostedImage.size), 0)).where(HostedImage.owner == owner)
-    ).one()
-
-
 def limits(session: Session, owner: str) -> dict:
+    """used 为网盘与图床共用的总用量，images_used 为其中图床部分。"""
     if owner == ADMIN:
-        return {"enabled": True, "quota": None, "max_file": MAX_IMAGE_BYTES,
-                "used": used(session, owner)}
-    row = session.get(ImageQuota, owner) or ImageQuota(user_id=owner)
-    return {"enabled": row.enabled, "quota": row.quota_bytes,
-            "max_file": min(row.max_file_bytes, MAX_IMAGE_BYTES), "used": used(session, owner)}
+        used = images_used(session, owner)
+        return {"enabled": True, "quota": None, "max_file": MAX_IMAGE_BYTES, "used": used,
+                "images_used": used}
+    row = plan(session, owner)
+    return {"enabled": row.images_enabled, "quota": row.quota_bytes,
+            "max_file": min(row.max_image_bytes, MAX_IMAGE_BYTES),
+            "used": shared_used(session, owner), "images_used": images_used(session, owner)}
 
 
 def require_enabled(session: Session, owner: str) -> dict:
@@ -94,10 +91,10 @@ def require_enabled(session: Session, owner: str) -> dict:
 
 
 def set_quota(session: Session, user_id: str, enabled: bool, quota_mb: int, max_file_mb: int):
-    row = session.get(ImageQuota, user_id) or ImageQuota(user_id=user_id)
-    row.enabled = enabled
+    row = plan(session, user_id)
+    row.images_enabled = enabled
     row.quota_bytes = quota_mb * 1024 * 1024
-    row.max_file_bytes = max_file_mb * 1024 * 1024
+    row.max_image_bytes = max_file_mb * 1024 * 1024
     session.add(row)
     if not enabled:
         # 关闭图床同时撤销令牌，已上传的图片保留，重新开启后仍可管理。
@@ -168,7 +165,7 @@ def store(session: Session, settings, owner: str, payload: bytes,
     if len(payload) > value["max_file"]:
         raise HTTPException(413, f"单张图片不能超过 {mib(value['max_file'])}")
     if value["quota"] is not None and value["used"] + len(payload) > value["quota"]:
-        raise HTTPException(413, f"图床空间不足（已用 {mib(value['used'])} / {mib(value['quota'])}）")
+        raise HTTPException(413, f"存储空间不足（已用 {mib(value['used'])} / {mib(value['quota'])}）")
     created = created or datetime.now(timezone.utc)
     image_id = "".join(secrets.choice(ALPHABET) for _ in range(12))
     path = f"{created:%Y}/{created:%m}/{image_id}.{extension}"
@@ -205,12 +202,12 @@ def remove(session: Session, settings, row: HostedImage):
 
 
 def remove_owner(session: Session, settings, owner: str):
-    """删除账户时清理该用户的全部图片、令牌与配额；由调用方提交。"""
+    """删除账户时清理该用户的全部图片与令牌；由调用方提交。"""
     for row in session.exec(select(HostedImage).where(HostedImage.owner == owner)).all():
         (settings.images_dir / row.path).unlink(missing_ok=True)
         session.delete(row)
     session.exec(delete(ImageToken).where(ImageToken.owner == owner))
-    session.exec(delete(ImageQuota).where(ImageQuota.user_id == owner))
+    session.exec(delete(StoragePlan).where(StoragePlan.user_id == owner))
 
 
 def listing(session: Session, settings, owner: str | None, page: int) -> dict:

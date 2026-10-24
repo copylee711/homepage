@@ -26,7 +26,7 @@ from sqlmodel import Session, select
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import accounts, audit, games, images, user_security
-from .accounts import USER_COOKIE, current_user, profile
+from .accounts import current_user, profile
 from .auth import COOKIE, authenticate, check_origin, current_session
 from .content import (
     adjacent_posts,
@@ -45,6 +45,10 @@ from .content import (
     versions,
 )
 from .database import make_engine
+from .drive import accounts as drive_accounts
+from .drive.errors import DriveError
+from .drive.routes import drive_error
+from .drive.routes import router as drive_router
 from .feed import atom_feed
 from .github import sync_loop, sync_repos
 from .limits import JsonBodyLimit
@@ -151,6 +155,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.add_middleware(JsonBodyLimit)
+    app.add_exception_handler(DriveError, drive_error)
     app.state.engine = engine
     app.state.sync_lock = asyncio.Lock()
     app.state.scut_lock = asyncio.Lock()
@@ -203,6 +208,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return templates.TemplateResponse(
             request=request, name="404.html", context=context, status_code=404
         )
+
+    app.include_router(drive_router)
 
     @app.get("/api/health")
     def health(session: Session = Depends(database)):
@@ -384,7 +391,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session.delete(row)
         session.commit()
         audit.record("account.logout", request, ok=True, user=user.id, email=user.email)
-        response.delete_cookie(USER_COOKIE, path="/api")
+        accounts.clear_cookie(response, settings)
         return {"ok": True}
 
     @app.get("/api/account/me")
@@ -473,8 +480,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         with audit.outcome("account.delete", request, user=user.id, email=user.email):
             accounts.delete_account(session, user, body.password, settings.media_dir)
             images.remove_owner(session, settings, user.id)
+            drive_accounts.remove_user(session, settings, user.id)
             session.commit()
-        response.delete_cookie(USER_COOKIE, path="/api")
+        accounts.clear_cookie(response, settings)
         return {"ok": True}
 
     @app.get("/api/account/favorites")
@@ -624,6 +632,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             session.exec(delete(table).where(table.user_id == user.id))
         accounts.remove_avatar(user, settings.media_dir)
         images.remove_owner(session, settings, user.id)
+        drive_accounts.remove_user(session, settings, user.id)
         session.delete(user)
         session.commit()
         return {"ok": True}
@@ -1058,6 +1067,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/account", response_class=HTMLResponse)
     @app.get("/admin", response_class=HTMLResponse)
     @app.get("/admin/{path:path}", response_class=HTMLResponse)
+    @app.get("/drive", response_class=HTMLResponse)
+    @app.get("/drive/{path:path}", response_class=HTMLResponse)
+    @app.get("/s/{path:path}", response_class=HTMLResponse)
     def frontend(path: str = ""):
         index = settings.static_dir / "index.html"
         if not index.exists():

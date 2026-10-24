@@ -25,8 +25,25 @@ class Settings(BaseSettings):
     email_captcha_scene_id: str = "trwiyf09"
     # 图床公开地址，例如 https://image.copylee.cn；留空时使用 site_url/images（由后端直接提供）。
     image_url: str = ""
+    # 网盘网页地址（例如 https://cloud.copylee.cn），用于分享链接与客户端配置说明。
+    drive_url: str = ""
+    # 网页上展示给用户的 WebDAV 地址与 SFTP 主机，仅用于说明。
+    dav_url: str = ""
+    sftp_host: str = ""
+    sftp_port: int = 2022
+    # 协议进程监听地址；SFTP 直接对外，WebDAV 由 Caddy 反代。
+    sftp_listen: str = "0.0.0.0:2022"
+    dav_listen: str = "127.0.0.1:10080"
+    # 站点登录 Cookie 的 Domain；设为 copylee.cn 时主站与 cloud 子域名共用登录。
+    cookie_domain: str = ""
+    # OSS 挂载（RAM 子账号，仅授权网盘 bucket）；未配置时 OSS 挂载点不可用。
+    oss_access_key_id: str = ""
+    oss_access_key_secret: str = ""
+    oss_bucket: str = ""
+    oss_region: str = "cn-guangzhou"
+    oss_endpoint: str = ""
 
-    @field_validator("site_url", "image_url")
+    @field_validator("site_url", "image_url", "drive_url", "dav_url")
     @classmethod
     def valid_url(cls, value: str) -> str:
         if not value:
@@ -51,6 +68,18 @@ class Settings(BaseSettings):
     @property
     def images_dir(self) -> Path:
         return self.data_dir / "images"
+
+    @property
+    def drive_dir(self) -> Path:
+        return self.data_dir / "drive"
+
+    @property
+    def host_keys_dir(self) -> Path:
+        return self.data_dir / "ssh"
+
+    @property
+    def drive_base(self) -> str:
+        return self.drive_url or self.site_url
 
     @property
     def image_base(self) -> str:

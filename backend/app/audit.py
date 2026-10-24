@@ -17,27 +17,32 @@ logger.setLevel(logging.INFO)
 logger.propagate = False
 
 
-def setup(directory: Path) -> None:
+def setup(directory: Path, filename: str = "audit.log") -> None:
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
         handler.close()
     directory.mkdir(parents=True, exist_ok=True)
     handler = TimedRotatingFileHandler(
-        directory / "audit.log", when="midnight", backupCount=RETENTION_DAYS, encoding="utf-8", utc=True
+        directory / filename, when="midnight", backupCount=RETENTION_DAYS, encoding="utf-8", utc=True
     )
     handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(handler)
 
 
-def record(event: str, request: Request, **fields) -> None:
+def log(event: str, ip: str, ua: str = "", **fields) -> None:
     entry = {
         "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "event": event,
-        "ip": request.client.host if request.client else "",
-        "ua": request.headers.get("user-agent", "")[:300],
+        "ip": ip,
+        "ua": ua[:300],
         **fields,
     }
     logger.info(json.dumps(entry, ensure_ascii=False))
+
+
+def record(event: str, request: Request, **fields) -> None:
+    log(event, request.client.host if request.client else "",
+        request.headers.get("user-agent", ""), **fields)
 
 
 @contextmanager

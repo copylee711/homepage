@@ -265,9 +265,20 @@ def issue(request: Request, response: Response, session: Session, user: User) ->
     session.add(row)
     session.add(user)
     session.commit()
+    settings = request.app.state.settings
+    # 设置了 cookie_domain 时主站与网盘子域名共用登录；先清掉旧的仅限当前主机的 Cookie。
+    if settings.cookie_domain:
+        response.delete_cookie(USER_COOKIE, path="/api")
     response.set_cookie(USER_COOKIE, token, max_age=SESSION_DAYS * 86400, httponly=True,
-                        secure=request.app.state.settings.secure_cookie, samesite="lax", path="/api")
+                        secure=settings.secure_cookie, samesite="lax", path="/api",
+                        domain=settings.cookie_domain or None)
     return {"user": profile(user), "csrf": row.csrf}
+
+
+def clear_cookie(response: Response, settings):
+    response.delete_cookie(USER_COOKIE, path="/api")
+    if settings.cookie_domain:
+        response.delete_cookie(USER_COOKIE, path="/api", domain=settings.cookie_domain)
 
 
 def current_user(request: Request, session: Session, write: bool = False) -> tuple[User, UserSession]:

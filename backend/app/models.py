@@ -227,14 +227,18 @@ class GameScore(SQLModel, table=True):
 # —— 图床 ——
 
 
-class ImageQuota(SQLModel, table=True):
-    """访客的图床开关与配额；管理员不受配额限制，没有对应行。"""
+class StoragePlan(SQLModel, table=True):
+    """访客的存储方案：网盘与图床开关，以及两者共用的总配额。
 
-    __tablename__ = "image_quota"
+    管理员不受配额限制，没有对应行。挂载点可以单独设置配额，不计入总配额。
+    """
+
+    __tablename__ = "storage_plan"
     user_id: str = Field(primary_key=True)
-    enabled: bool = False
+    drive_enabled: bool = False
+    images_enabled: bool = False
     quota_bytes: int = 200 * 1024 * 1024
-    max_file_bytes: int = 5 * 1024 * 1024
+    max_image_bytes: int = 5 * 1024 * 1024
 
 
 class ImageToken(SQLModel, table=True):
@@ -259,3 +263,78 @@ class HostedImage(SQLModel, table=True):
     height: int
     sha256: str = Field(index=True)
     created_at: str = Field(index=True)
+
+
+# —— 网盘 ——
+
+
+class DriveAccount(SQLModel, table=True):
+    """SFTP/WebDAV 登录名；也可以直接用站点邮箱登录。
+
+    legacy_hash 保存从旧系统导入的 bcrypt 密码，旧客户端无需重新配置。
+    """
+
+    __tablename__ = "drive_account"
+    user_id: str = Field(primary_key=True)
+    login: str
+    login_key: str = Field(unique=True, index=True)
+    legacy_hash: str = ""
+    created_at: float
+
+
+class DriveMount(SQLModel, table=True):
+    """用户网盘中的一个挂载点；quota_bytes 为 0 时计入存储方案的总配额。"""
+
+    __tablename__ = "drive_mount"
+    id: str = Field(primary_key=True)
+    user_id: str = Field(index=True)
+    path: str
+    kind: str  # local | oss
+    location: str  # local：drive_dir 下的相对目录；oss：对象前缀
+    quota_bytes: int = 0
+    read_only: bool = False
+    used_bytes: int = 0
+    used_files: int = 0
+    created_at: float
+
+
+class DriveCredential(SQLModel, table=True):
+    """协议登录凭据：SSH 公钥，或只在创建时显示一次的应用密码（只存哈希）。"""
+
+    __tablename__ = "drive_credential"
+    id: str = Field(primary_key=True)
+    user_id: str = Field(index=True)
+    kind: str  # ssh_key | app_password
+    name: str
+    secret: str  # 公钥（OpenSSH 格式）或应用密码的 SHA-256
+    fingerprint: str = Field(default="", index=True)
+    created_at: float
+    last_used: float | None = None
+
+
+class DriveShare(SQLModel, table=True):
+    __tablename__ = "drive_share"
+    id: str = Field(primary_key=True)
+    user_id: str = Field(index=True)
+    name: str
+    paths: list[str] = Field(sa_column=Column(JSON, nullable=False))
+    mode: str = "read"  # read | upload
+    password_hash: str = ""
+    expires_at: float = 0
+    max_uses: int = 0
+    used: int = 0
+    created_at: float
+    last_used: float | None = None
+
+
+class DriveUpload(SQLModel, table=True):
+    """网页端可续传上传的会话；数据先写入 drive_dir/.uploads/<id>。"""
+
+    __tablename__ = "drive_upload"
+    id: str = Field(primary_key=True)
+    user_id: str = Field(index=True)
+    path: str
+    size: int
+    received: int = 0
+    created_at: float
+    expires_at: float

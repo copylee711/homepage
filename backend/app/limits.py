@@ -1,7 +1,10 @@
+import re
+
 from starlette.responses import JSONResponse
 
-# 图片上传接口自行按配额限制读取大小，不经过 2 MiB 的 JSON 限制。
+# 图片与网盘上传接口自行按配额限制读取大小，不经过 2 MiB 的 JSON 限制。
 UPLOAD_PATHS = {"/api/admin/media", "/api/upload", "/api/account/images"}
+UPLOAD_PATTERN = re.compile(r"^/api/(?:drive/uploads/[A-Za-z0-9]+|s/[A-Za-z0-9]+/upload)$")
 
 
 class JsonBodyLimit:
@@ -15,6 +18,7 @@ class JsonBodyLimit:
             scope["type"] == "http"
             and scope["path"].startswith("/api/")
             and scope["path"] not in UPLOAD_PATHS
+            and not UPLOAD_PATTERN.match(scope["path"])
             and scope["method"] not in {"GET", "HEAD", "OPTIONS"}
         )
         if not limited:

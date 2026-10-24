@@ -315,3 +315,75 @@ class ScoreWrite(StrictModel):
     score: int = Field(ge=0)
     duration: int = Field(ge=0, le=86400)
     floor: int = Field(default=0, ge=0, le=1000)
+
+
+# —— 网盘 ——
+
+
+class DrivePath(StrictModel):
+    path: str = Field(min_length=1, max_length=4096)
+
+
+class DrivePaths(StrictModel):
+    paths: list[str] = Field(min_length=1, max_length=500)
+
+
+class DriveTransfer(StrictModel):
+    paths: list[str] = Field(min_length=1, max_length=500)
+    target: str = Field(min_length=1, max_length=4096)
+    overwrite: bool = False
+
+
+class DriveRename(StrictModel):
+    path: str = Field(min_length=1, max_length=4096)
+    name: str = Field(min_length=1, max_length=255)
+
+
+class UploadCreate(StrictModel):
+    path: str = Field(min_length=1, max_length=4096)
+    size: int = Field(ge=0, le=50 * 1024**3)
+
+
+class DriveLogin(StrictModel):
+    login: str = Field(min_length=2, max_length=32)
+
+
+class KeyCreate(StrictModel):
+    name: str = Field(default="", max_length=80)
+    key: str = Field(min_length=20, max_length=16_384)
+
+
+class AppPasswordCreate(StrictModel):
+    name: str = Field(default="", max_length=80)
+
+
+class ShareCreate(StrictModel):
+    paths: list[str] = Field(min_length=1, max_length=100)
+    mode: Literal["read", "upload"] = "read"
+    name: str = Field(default="", max_length=120)
+    password: str = Field(default="", max_length=128)
+    expires_at: float = Field(default=0, ge=0)
+    max_uses: int = Field(default=0, ge=0, le=1_000_000)
+
+
+class ShareUnlock(StrictModel):
+    password: str = Field(max_length=128)
+
+
+class StoragePlanWrite(StrictModel):
+    drive_enabled: bool
+    images_enabled: bool
+    quota_mb: int = Field(ge=1, le=10_000_000)
+    max_image_mb: int = Field(ge=1, le=20)
+
+
+class MountCreate(StrictModel):
+    path: str = Field(min_length=2, max_length=255)
+    location: str = Field(min_length=1, max_length=1024)
+    quota_mb: int = Field(default=0, ge=0, le=10_000_000)
+    read_only: bool = False
+
+
+class MountUpdate(StrictModel):
+    quota_mb: int = Field(ge=0, le=10_000_000)
+    read_only: bool
