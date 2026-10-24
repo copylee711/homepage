@@ -20,6 +20,7 @@ const phase = ref<'menu' | 'play' | 'paused' | 'over'>('menu')
 const immersive = ref(false)
 /** 沉浸模式下屏幕仍是竖的（微信等无法锁定横屏的浏览器）：把画面整体旋转 90° */
 const rotated = ref(false)
+const stageSize = ref<Record<string, string>>({})
 /** 画面过矮或过窄时精简开始界面 */
 const compact = ref(false)
 const narrow = ref(false)
@@ -40,17 +41,14 @@ let observer: ResizeObserver | undefined
 const canFullscreen = computed(() => typeof document !== 'undefined' && !!document.documentElement.requestFullscreen)
 
 function resize() {
-  const el = canvas.value
-  if (!el) return
-  const root = document.documentElement
-  const turn = immersive.value && Math.min(window.innerHeight, root.clientHeight) > Math.min(window.innerWidth, root.clientWidth)
-  if (turn !== rotated.value) {
-    rotated.value = controls.rotated = turn
-    nextTick(resize)
-    return
-  }
-  // clientWidth/Height 是旋转前的布局尺寸，正好是横屏画面的宽高
-  const width = el.clientWidth, height = el.clientHeight
+  const el = canvas.value, box = shell.value
+  if (!el || !box) return
+  // 按外框实际尺寸判断：真全屏时浏览器会强制外框铺满且禁止 transform，所以只旋转内层 stage
+  const sw = box.clientWidth, sh = box.clientHeight
+  const turn = immersive.value && sh > sw
+  rotated.value = controls.rotated = turn
+  const width = turn ? sh : sw, height = turn ? sw : sh
+  stageSize.value = turn ? { width: `${width}px`, height: `${height}px` } : {}
   const dpr = Math.min(window.devicePixelRatio || 1, 2)
   el.width = Math.round(width * dpr)
   el.height = Math.round(height * dpr)
@@ -111,7 +109,10 @@ function exitImmersive() {
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
   requestAnimationFrame(resize)
 }
-function onFullscreenChange() { if (!document.fullscreenElement && immersive.value && !coarse) exitImmersive() }
+function onFullscreenChange() {
+  requestAnimationFrame(resize)
+  if (!document.fullscreenElement && immersive.value && !coarse) exitImmersive()
+}
 
 function loop(now: number) {
   const dt = Math.min(0.05, (now - last) / 1000 || 0)
@@ -176,6 +177,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="shell" class="shell" :class="{ immersive, rotated, compact, narrow, 'in-menu': phase === 'menu' }">
+    <div class="stage" :style="stageSize">
     <canvas ref="canvas" class="screen" aria-label="深渊骑士游戏画面" />
     <div class="corner">
       <button v-if="phase === 'play'" type="button" aria-label="暂停" @click="pause">❚❚</button>
@@ -227,14 +229,15 @@ onBeforeUnmount(() => {
       <p class="big">{{ summary.score }}<small>分</small></p>
       <p>到达第 {{ summary.level }} 层 · 击败 {{ summary.kills }} 个敌人 · {{ formatDuration(summary.time) }}</p>
     </GameOver>
-
+    </div>
   </div>
 </template>
 
 <style scoped>
 .shell { position:relative; width:100%; aspect-ratio:16/9; max-height:calc(100dvh - var(--header-h) - 120px); min-height:300px; border-radius:20px; overflow:hidden; background:#07080d; box-shadow:0 0 0 1px var(--line),0 30px 60px -40px rgba(17,24,39,.6); user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
 .shell.immersive { position:fixed; inset:0; z-index:1000; width:100vw; height:100dvh; max-height:none; aspect-ratio:auto; border-radius:0; }
-.shell.immersive.rotated { inset:0 auto auto 0; width:100vh; width:100dvh; height:100vw; transform-origin:0 0; transform:rotate(90deg) translateY(-100%); }
+.stage { position:absolute; inset:0; }
+.rotated .stage { inset:auto; top:0; left:0; transform-origin:0 0; transform:rotate(90deg) translateY(-100%); }
 .shell:fullscreen { width:100vw; height:100vh; max-height:none; border-radius:0; }
 .screen { display:block; width:100%; height:100%; touch-action:none; cursor:crosshair; }
 .corner { position:absolute; z-index:6; top:calc(env(safe-area-inset-top) + 62px); left:calc(env(safe-area-inset-left) + 12px); display:flex; gap:6px; }
