@@ -115,7 +115,9 @@ cloud.copylee.cn {
         path /api/account/code /api/account/code/ /api/account/feedback
         method POST
     }
-    respond @esa_only "请在 copylee.cn 上完成此操作" 403
+    handle @esa_only {
+        respond "请在 copylee.cn 上完成此操作" 403
+    }
     handle /api/* {
         reverse_proxy 127.0.0.1:8000
     }
