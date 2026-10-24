@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { account } from '../account'
 
-defineProps<{ title: string; result?: { improved: boolean; synced: boolean; error?: string }; again?: string }>()
-defineEmits<{ again: [] }>()
+defineProps<{ title: string; result?: { improved: boolean; synced: boolean; error?: string }; again?: string; back?: string }>()
+defineEmits<{ again: []; back: [] }>()
 const login = `/account?next=${encodeURIComponent(location.pathname)}`
 </script>
 
@@ -17,6 +17,7 @@ const login = `/account?next=${encodeURIComponent(location.pathname)}`
       <p v-else-if="result.synced" class="status">成绩已同步到账户</p>
       <p v-else-if="!account" class="status"><a :href="login">登录</a>后成绩会同步并参与排行榜</p>
       <button type="button" class="again" @click="$emit('again')">{{ again ?? '再来一局' }}</button>
+      <button v-if="back" type="button" class="back" @click="$emit('back')">{{ back }}</button>
     </div>
   </div>
 </template>
@@ -30,6 +31,7 @@ const login = `/account?next=${encodeURIComponent(location.pathname)}`
 .status { margin-top:12px; color:var(--muted); font-size:13px; }
 .status a { color:var(--accent); }
 .status.error { color:#d15c5c; }
+.back { width:100%; margin-top:10px; padding:11px; border:1px solid var(--line-strong); border-radius:10px; background:none; color:var(--text); font:500 14px var(--font); cursor:pointer; }
 .again { width:100%; margin-top:20px; padding:12px; border:0; border-radius:10px; background:var(--btn-bg); color:var(--btn-fg); font:500 15px var(--font); cursor:pointer; }
 @keyframes fade { from { opacity:0; } }
 @keyframes rise { from { opacity:0; transform:translateY(16px) scale(.96); } }

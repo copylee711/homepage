@@ -104,6 +104,12 @@ async function enterImmersive() {
   } catch { /* iOS、微信等不支持时退回页面内全屏并旋转画面 */ }
   requestAnimationFrame(resize)
 }
+/** 结束界面返回：退出全屏并回到开始界面 */
+function backToMenu() {
+  game = undefined
+  phase.value = 'menu'
+  exitImmersive()
+}
 function exitImmersive() {
   immersive.value = false
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
@@ -225,7 +231,7 @@ onBeforeUnmount(() => {
       <button type="button" class="link" @click="toggleMute">{{ muted ? '打开音效' : '关闭音效' }}</button>
     </div>
 
-    <GameOver v-else-if="phase === 'over'" title="你倒下了" :result="result" again="再来一局" @again="start">
+    <GameOver v-else-if="phase === 'over'" title="你倒下了" :result="result" again="再来一局" back="返回" @again="start" @back="backToMenu">
       <p class="big">{{ summary.score }}<small>分</small></p>
       <p>到达第 {{ summary.level }} 层 · 击败 {{ summary.kills }} 个敌人 · {{ formatDuration(summary.time) }}</p>
     </GameOver>
