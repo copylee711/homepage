@@ -67,7 +67,7 @@ def test_only_flagged_users_can_enter_admin(server):
     assert me.status_code == 401
     headers = account_login(client)
     assert client.get("/api/account/me").json()["features"] == {
-        "drive": False, "images": False, "admin": False}
+        "drive": True, "images": True, "admin": False}
     with Session(app.state.engine) as session:
         set_admin(session, ADMIN_EMAIL)
     assert client.get("/api/account/me").json()["features"]["admin"] is True
@@ -133,7 +133,7 @@ def test_admin_images_belong_to_admin_account(server):
     assert listing["items"][0]["owner"] == "admin-user"
     account_login(client)
     mine = client.get("/api/account/images").json()
-    assert mine["limits"]["enabled"] is True and mine["limits"]["quota"] is None
+    assert mine["limits"]["enabled"] is True and mine["limits"]["quota"] == 20 * 1024 ** 3
     assert mine["total"] == 1
 
 

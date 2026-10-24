@@ -16,6 +16,8 @@ const section = ref<Section>((() => {
 })())
 const overview = ref<DriveOverview>()
 const error = ref('')
+// 反馈接口受主站 ESA 验证码保护，网盘子域名上跳回主站提交。
+const feedbackUrl = location.hostname.startsWith('cloud.') ? `${location.origin.replace('//cloud.', '//')}/account?tab=feedback` : '/account?tab=feedback'
 const loginUrl = `/account?next=${encodeURIComponent(location.pathname + location.search)}`
 const storage = computed(() => overview.value?.storage)
 const percent = computed(() => storage.value?.quota ? Math.min(100, storage.value.used / storage.value.quota * 100) : 0)
@@ -58,7 +60,7 @@ onMounted(async () => {
       <div class="state-card">
         <h1>网盘尚未开通</h1>
         <p>网盘目前只向受邀用户开放。如需开通，可以在账户页的“反馈”中告诉站长。</p>
-        <a class="d-btn" href="/account?tab=feedback">去反馈</a>
+        <a class="d-btn" :href="feedbackUrl">去反馈</a>
       </div>
     </main>
     <div v-else class="layout">

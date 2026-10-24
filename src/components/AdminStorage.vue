@@ -74,7 +74,7 @@ onMounted(() => work(load))
   <section class="admin-panel storage">
     <div class="section-head"><div><p class="eyebrow">Storage</p><h1>网盘与图床</h1></div>
       <div class="buttons"><button :class="{ selected: filter === 'enabled' }" @click="filter = 'enabled'">已开通</button><button :class="{ selected: filter === 'all' }" @click="filter = 'all'">全部用户</button><button @click="work(load)">刷新</button></div></div>
-    <p class="subtle">新注册用户默认没有网盘与图床，在这里逐个开通。网盘与图床共用总配额；单独设置配额的挂载点不计入总配额。管理员不受配额限制。</p>
+    <p class="subtle">新注册用户默认没有网盘与图床，在这里逐个开通。网盘与图床共用总配额；单独设置配额的挂载点不计入总配额。管理员也按自己的方案计算，避免占满服务器磁盘。</p>
     <p v-if="state" class="field-hint connection">SFTP：<code>{{ state.connection.sftp_host }}:{{ state.connection.sftp_port }}</code> · WebDAV：<code>{{ state.connection.dav_url }}</code> · OSS {{ state.oss_configured ? '已配置' : '未配置（OSS 挂载点暂不可用）' }}</p>
     <p v-if="state && !shown.length" class="subtle">还没有开通存储的用户，切换到“全部用户”为他们开通。</p>
     <article v-for="user in shown" :key="user.id" class="edit-card user" :class="{ muted: user.disabled }">

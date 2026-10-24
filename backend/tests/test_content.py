@@ -28,7 +28,12 @@ def make_admin(session, email=ADMIN_EMAIL, password=PASSWORD):
     session.add(User(id="admin-user", email=email, password_hash=hash_password(password),
                      name="站长", created_at="2026-01-01T00:00:00+00:00"))
     session.commit()
-    return set_admin(session, email)
+    user = set_admin(session, email)
+    from app.storage import save
+
+    save(session, user.id, drive_enabled=True, images_enabled=True, quota_mb=20 * 1024)
+    session.commit()
+    return user
 
 
 @pytest.fixture

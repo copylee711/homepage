@@ -209,6 +209,7 @@ def main():
     drive.add_argument("--source-db", type=Path, required=True)
     drive.add_argument("--map", action="append", required=True, metavar="旧用户名=站点邮箱")
     drive.add_argument("--copy-files", action="store_true", help="同时复制旧主目录中的文件")
+    drive.add_argument("--create-missing", action="store_true", help="邮箱未注册时新建站点用户")
     drive.add_argument("--apply", action="store_true", help="实际执行；默认只列出计划")
     scan = sub.add_parser("drive-rescan", help="重新统计网盘用量")
     scan.add_argument("--email", help="只统计这个用户；默认全部")
@@ -228,11 +229,14 @@ def main():
                     print("已取消管理员身份")
                 else:
                     user = set_admin(session, args.email)
-                    # 管理员默认开通网盘与图床，且不受配额限制。
+                    # 管理员默认开通网盘与图床；首次设置时给 20 GiB，之后可在后台调整。
                     from .drive.vfs import ensure_root
+                    from .models import StoragePlan
                     from .storage import save
 
-                    save(session, user.id, drive_enabled=True, images_enabled=True)
+                    fresh = session.get(StoragePlan, user.id) is None
+                    save(session, user.id, drive_enabled=True, images_enabled=True,
+                         quota_mb=20 * 1024 if fresh else None)
                     ensure_root(session, settings, user.id)
                     session.commit()
                     print("已设为管理员；后台请用该账户的邮箱与密码登录")
@@ -290,7 +294,7 @@ def main():
         engine = make_engine(settings)
         try:
             for line in run(settings, engine, args.source_db, mapping, args.apply,
-                            args.copy_files):
+                            args.copy_files, args.create_missing):
                 print(line)
         finally:
             engine.dispose()

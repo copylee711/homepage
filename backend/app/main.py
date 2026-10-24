@@ -361,7 +361,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         user, row = current_user(request, session)
         plan = storage.plan(session, user.id)
         # 前端据此显示或隐藏网盘、图床与后台入口；新用户默认都没有。
-        features = {"drive": plan.drive_enabled, "images": plan.images_enabled or user.is_admin,
+        features = {"drive": plan.drive_enabled, "images": plan.images_enabled,
                     "admin": user.is_admin}
         return {"user": profile(user), "csrf": row.csrf, "features": features}
 

@@ -7,9 +7,11 @@ OSS 挂载沿用原来的对象前缀，对象本身不需要搬动。可以重�
 
 import json
 import math
+import secrets
 import shutil
 import sqlite3
 import time
+import uuid
 from contextlib import closing
 from pathlib import Path
 
@@ -81,9 +83,25 @@ def plan(source: dict, mapping: dict[str, str]) -> list[dict]:
     return result
 
 
-def import_user(session: Session, settings, item: dict, copy_files: bool) -> list[str]:
+def create_user(session: Session, email: str, name: str) -> User:
+    """为旧账户新建站点用户；密码随机且不告知，可用邮箱验证码重置后登录网页。"""
+    from ..accounts import hash_password
+    from ..content import timestamp
+
+    user = User(id=uuid.uuid4().hex, email=email, name=name,
+                password_hash=hash_password(secrets.token_urlsafe(24)), created_at=timestamp())
+    session.add(user)
+    session.commit()
+    return user
+
+
+def import_user(session: Session, settings, item: dict, copy_files: bool,
+                create_missing: bool = False) -> list[str]:
     log = list(item["notes"])
     target = session.exec(select(User).where(User.email == item["email"])).first()
+    if target is None and create_missing:
+        target = create_user(session, item["email"], item["login"])
+        log.append(f"新建站点用户 {item['email']}")
     if target is None:
         raise ValueError(f"站点上没有注册邮箱 {item['email']}，请先注册再导入")
     old = item["user"]
@@ -144,7 +162,7 @@ def import_user(session: Session, settings, item: dict, copy_files: bool) -> lis
 
 
 def run(settings, engine, source_db: Path, mapping: dict[str, str], apply: bool,
-        copy_files: bool) -> list[str]:
+        copy_files: bool, create_missing: bool = False) -> list[str]:
     items = plan(read_source(source_db), mapping)
     if not apply:
         lines = []
@@ -156,7 +174,7 @@ def run(settings, engine, source_db: Path, mapping: dict[str, str], apply: bool,
     lines = []
     with Session(engine) as session:
         for item in items:
-            lines.extend(import_user(session, settings, item, copy_files))
+            lines.extend(import_user(session, settings, item, copy_files, create_missing))
             user = session.exec(select(User).where(User.email == item["email"])).one()
             started = time.time()
             for row in rescan(engine, settings, user.id):

@@ -1,0 +1,29 @@
+[Unit]
+Description=Copy Lee cloud drive (SFTP and WebDAV)
+After=network-online.target copylee-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=copylee
+Group=copylee
+WorkingDirectory=/opt/copylee-backend/current
+EnvironmentFile=/etc/copylee/backend.env
+# 监听地址取 COPYLEE_SFTP_LISTEN（默认 0.0.0.0:2022）与 COPYLEE_DAV_LISTEN（默认 127.0.0.1:10080）。
+ExecStart=/opt/copylee-backend/current/.venv/bin/python -m app.drive.serve
+Restart=on-failure
+RestartSec=5
+UMask=0027
+# 文件操作日志 /var/log/copylee/drive.log（按天滚动，保留 190 天）
+LogsDirectory=copylee
+LogsDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/copylee
+MemoryMax=400M
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

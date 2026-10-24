@@ -83,6 +83,11 @@ def test_import_accounts_files_mounts_and_shares(site, tmp_path):  # noqa: F811
         assert len(accounts.credentials(session, user.id)) == 1
 
     assert sorted(names(client)) == ["archive", "setup.exe", "zotero"]
+    created = run(settings, app.state.engine, source, {"HK": "hk@users.copylee.cn"}, True, False,
+                  create_missing=True)
+    assert "新建站点用户 hk@users.copylee.cn" in created
+    with Session(app.state.engine) as session:
+        assert accounts.check_password(session, "hk", "old-password") is not None
     info = client.get("/api/s/PQLPhuwVsz5rgZdpYAUXoZ").json()
     assert info["unlocked"] and info["name"] == "setup.exe"
     got = client.get("/api/s/PQLPhuwVsz5rgZdpYAUXoZ/download", params={"path": "/setup.exe"})

@@ -31,8 +31,12 @@ copylee.cn {
     handle @backend {
         route {
             # 必须先校验回源身份，再代理；文件安装见 deploy/README.md。
-            @email_code path /api/account/code /api/account/code/
-            route @email_code {
+            # 发送邮箱验证码与提交反馈：只放行经 ESA AI 验证码后回源的请求。
+            @esa_guarded {
+                path /api/account/code /api/account/code/ /api/account/feedback
+                method POST
+            }
+            route @esa_guarded {
                 import /etc/caddy/email-code-origin.caddy
             }
             reverse_proxy 127.0.0.1:8000 {
@@ -101,8 +105,35 @@ image.copylee.cn {
 }
 cloud.copylee.cn {
     import access_log cloud
-    # 根路径由 SFTPGo 跳转到登录页，登录页底部显示备案号（deploy/sftpgo/branding）
-    reverse_proxy 127.0.0.1:8080
+    encode zstd gzip
+    # 网盘：前端与主站共用同一份构建，接口转发到后端；不经过 ESA，大文件上传不受 CDN 限制。
+    # 旧 SFTPGo 的分享链接沿用原 id，跳到新的分享页。
+    @legacy_share path_regexp legacy ^/web/client/pubshares/([A-Za-z0-9]+)
+    redir @legacy_share /s/{re.legacy.1} 302
+    # 发验证码与提交反馈只能经 ESA（带 AI 验证码）在主站完成。
+    @esa_only {
+        path /api/account/code /api/account/code/ /api/account/feedback
+        method POST
+    }
+    respond @esa_only "请在 copylee.cn 上完成此操作" 403
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8000
+    }
+    handle /media/avatars/* {
+        root * /var/lib/copylee
+        file_server
+    }
+    handle /assets/* {
+        root * /var/www/copylee
+        header Cache-Control "public, max-age=31536000, immutable"
+        file_server
+    }
+    handle {
+        root * /var/www/copylee
+        header Cache-Control no-cache
+        try_files {path} /index.html
+        file_server
+    }
 }
 dav.copylee.cn {
     import access_log dav
