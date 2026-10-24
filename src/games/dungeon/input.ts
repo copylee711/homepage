@@ -89,8 +89,12 @@ export class Controls {
 
   private keyup = (e: KeyboardEvent) => { this.keys.delete(e.key.toLowerCase()) }
 
+  /** 画面被旋转 90° 显示时为 true，触点坐标需要换算回画面坐标 */
+  rotated = false
+
   private local(e: PointerEvent) {
-    const rect = this.el!.getBoundingClientRect()
+    const el = this.el!, rect = el.getBoundingClientRect()
+    if (this.rotated) return { x: e.clientY - rect.top, y: rect.right - e.clientX, w: el.clientWidth, h: el.clientHeight }
     return { x: e.clientX - rect.left, y: e.clientY - rect.top, w: rect.width, h: rect.height }
   }
 

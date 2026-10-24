@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { formatDuration, localBest, submitScore } from '../api'
 import { dungeonSound, muted, toggleMute } from '../sound'
 import GameOver from '../GameOver.vue'
@@ -18,7 +18,8 @@ const shell = ref<HTMLDivElement>()
 const canvas = ref<HTMLCanvasElement>()
 const phase = ref<'menu' | 'play' | 'paused' | 'over'>('menu')
 const immersive = ref(false)
-const portrait = ref(false)
+/** 沉浸模式下屏幕仍是竖的（微信等无法锁定横屏的浏览器）：把画面整体旋转 90° */
+const rotated = ref(false)
 /** 画面过矮或过窄时精简开始界面 */
 const compact = ref(false)
 const narrow = ref(false)
@@ -41,14 +42,20 @@ const canFullscreen = computed(() => typeof document !== 'undefined' && !!docume
 function resize() {
   const el = canvas.value
   if (!el) return
-  const rect = el.getBoundingClientRect()
+  const turn = immersive.value && window.innerHeight > window.innerWidth
+  if (turn !== rotated.value) {
+    rotated.value = controls.rotated = turn
+    nextTick(resize)
+    return
+  }
+  // clientWidth/Height 是旋转前的布局尺寸，正好是横屏画面的宽高
+  const width = el.clientWidth, height = el.clientHeight
   const dpr = Math.min(window.devicePixelRatio || 1, 2)
-  el.width = Math.round(rect.width * dpr)
-  el.height = Math.round(rect.height * dpr)
-  view = computeView(rect.width, rect.height, dpr)
-  portrait.value = immersive.value && rect.height > rect.width
-  compact.value = rect.height < 480
-  narrow.value = rect.width < 600
+  el.width = Math.round(width * dpr)
+  el.height = Math.round(height * dpr)
+  view = computeView(width, height, dpr)
+  compact.value = height < 480
+  narrow.value = width < 600
 }
 
 controls.toWorld = (x, y) => ({ x: (x - view.ox) / view.scale, y: (y - view.oy) / view.scale })
@@ -149,6 +156,7 @@ onMounted(() => {
   controls.attach(canvas.value!)
   document.addEventListener('visibilitychange', onVisibility)
   document.addEventListener('fullscreenchange', onFullscreenChange)
+  window.addEventListener('resize', resize)
   last = performance.now()
   frame = requestAnimationFrame(loop)
 })
@@ -158,11 +166,12 @@ onBeforeUnmount(() => {
   controls.detach()
   document.removeEventListener('visibilitychange', onVisibility)
   document.removeEventListener('fullscreenchange', onFullscreenChange)
+  window.removeEventListener('resize', resize)
 })
 </script>
 
 <template>
-  <div ref="shell" class="shell" :class="{ immersive, compact, narrow, 'in-menu': phase === 'menu' }">
+  <div ref="shell" class="shell" :class="{ immersive, rotated, compact, narrow, 'in-menu': phase === 'menu' }">
     <canvas ref="canvas" class="screen" aria-label="深渊骑士游戏画面" />
     <div class="corner">
       <button v-if="phase === 'play'" type="button" aria-label="暂停" @click="pause">❚❚</button>
@@ -215,16 +224,13 @@ onBeforeUnmount(() => {
       <p>到达第 {{ summary.level }} 层 · 击败 {{ summary.kills }} 个敌人 · {{ formatDuration(summary.time) }}</p>
     </GameOver>
 
-    <div v-if="portrait" class="rotate" role="status">
-      <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="20" y="8" width="24" height="44" rx="4" /><path d="M10 40a22 22 0 0 0 22 16M54 24A22 22 0 0 0 32 8" /><path d="M28 60l4-4-4-4M36 4l-4 4 4 4" /></svg>
-      <p>请把手机横过来游玩</p>
-    </div>
   </div>
 </template>
 
 <style scoped>
 .shell { position:relative; width:100%; aspect-ratio:16/9; max-height:calc(100dvh - var(--header-h) - 120px); min-height:300px; border-radius:20px; overflow:hidden; background:#07080d; box-shadow:0 0 0 1px var(--line),0 30px 60px -40px rgba(17,24,39,.6); user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
 .shell.immersive { position:fixed; inset:0; z-index:1000; width:100vw; height:100dvh; max-height:none; aspect-ratio:auto; border-radius:0; }
+.shell.immersive.rotated { inset:0 auto auto 0; width:100dvh; height:100vw; transform-origin:0 0; transform:rotate(90deg) translateY(-100%); }
 .shell:fullscreen { width:100vw; height:100vh; max-height:none; border-radius:0; }
 .screen { display:block; width:100%; height:100%; touch-action:none; cursor:crosshair; }
 .corner { position:absolute; z-index:6; top:calc(env(safe-area-inset-top) + 62px); left:calc(env(safe-area-inset-left) + 12px); display:flex; gap:6px; }
@@ -256,9 +262,6 @@ kbd { display:inline-block; min-width:22px; margin-right:6px; padding:2px 6px; b
 .items canvas { width:24px; height:24px; }
 .big { font:800 48px var(--font-mono); }
 .big small { margin-left:4px; font-size:16px; }
-.rotate { position:absolute; inset:0; z-index:20; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; background:#07080d; color:#e8ecf5; font-size:15px; }
-.rotate svg { width:72px; fill:none; stroke:#ffd166; stroke-width:3; stroke-linecap:round; stroke-linejoin:round; animation:turn 2s ease-in-out infinite; }
-@keyframes turn { 0%,30% { transform:rotate(0); } 60%,100% { transform:rotate(-90deg); } }
 @media (max-height: 520px) { .menu .lead, .menu .best { display:none; } .menu h2 { font-size:30px; } .menu .keys { margin:0; font-size:12px; } .panel { gap:6px; padding:12px; } }
 @media (max-width: 640px) { .keys { grid-template-columns:1fr 1fr; } .shell:not(.immersive) { aspect-ratio:4/3; } }
 </style>
