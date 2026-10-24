@@ -7,26 +7,31 @@
 `captcha-verify-param` 请求头。取消、失败或加载超时不会发送邮件；发送失败也需要重新验证。
 验证通过后仍保留邮箱、IP、每日总量与重发间隔限制。
 
-ESA 控制台的 AI 验证码规则必须保护 `copylee.cn/api/account/code` 的 POST 请求，
-开启「拦截空 Token」。回源请求头规则 `email-code-origin-auth` **仅匹配**
+ESA 控制台的 AI 验证码规则保护 `copylee.cn/api/account/code` 的 POST 请求，
+开启「拦截空 Token」。AI 验签发生在边缘，后端不负责验证票据。
+
+### Caddy 回源身份认证
+
+回源防绕过独立于 AI 验证码。ESA 回源请求头规则 `email-code-origin-auth` 仅匹配
 `http.host eq "copylee.cn" and http.request.uri.path eq "/api/account/code" and http.request.method eq "POST"`，
-用「添加 / 静态」覆盖 `x-copylee-esa-origin`，值与服务器的 `COPYLEE_ESA_ORIGIN_SECRET` 相同。
-禁止将此密钥注入其他路径、回显给客户端或写入前端。域名别名和路径变体不得使用更宽的注入规则，
-否则可能在未命中验证码规则时被错误授信。
+用「添加 / 静态」覆盖 `x-copylee-esa-origin`。该头名称沿用现有配置；Caddy 将其作为普通回源密钥，
+不依赖阿里云的验签参数或状态码。禁止将密钥注入其他路径、回显给客户端或写入前端。
 
-服务器设置 `COPYLEE_EMAIL_CAPTCHA_ENABLED=true`。启用后，后端在生成验证码和调用 SMTP 前
-常量时间比较回源密钥，拒绝缺失/伪造密钥和空票据；缺少服务器密钥时返回 503，禁止降级放行。
-后端不信任客户端伪造的 `X-Captcha-Verify-Code`，也不把票据存在当作验签成功。
-可信依据是 ESA 先验签、再为该精确接口覆盖注入的回源密钥。
-Uvicorn 继续只监听 `127.0.0.1:8000`。Caddy 访问日志过滤
-`X-Copylee-Esa-Origin` 和 `Captcha-Verify-Param` 两个请求头，避免记录密钥与票据。
-仅检查 Origin、Host 或客户端票据不能阻止源站绕过。
+Caddy 在代理前校验密钥与原始 URI；规范化后落到发送接口的编码路径、重复斜杠与尾斜杠变体均受保护，
+只放行原始 `/api/account/code`（允许查询参数）。校验成功后剥离回源密钥和验证码票据再交给后端。
+后端只执行原有来源校验、邮箱规则、限流和发信业务，不读取回源密钥或厂商验签结果。
+Uvicorn 继续只监听 `127.0.0.1:8000`，不得通过其他反向代理入口公开转发该接口。
+Caddy 访问日志过滤 `X-Copylee-Esa-Origin` 和 `Captcha-Verify-Param`，避免记录密钥与票据。
 
-配置顺序：先配置 ESA 验签和精确回源规则，再部署后端和前端并启用环境变量。
-密钥轮换需同步更新 ESA 与服务器，期间发送接口可能暂时返回 403。
-回滚应回滚应用版本并维持入口保护；不要单独关闭空 Token 拦截或后端校验。
-验收应覆盖正常票据、空/无效/重复票据，以及携带正确 Host/Origin、伪造票据和验签结果的源站直连。
-本地开发默认关闭 ESA，不向生产申请票据。
+真实密钥只保存在边缘规则与 `/etc/caddy/email-code-origin.caddy`（`root:caddy`、0640）。
+主配置显式导入该文件，文件缺失或语法错误时配置校验/重载失败，现有运行配置继续生效。
+安装、维护、轮换与停用验证码的方法见[部署指南](../deploy/README.md#邮箱发送接口的回源保护)。
+`COPYLEE_EMAIL_CAPTCHA_ENABLED` 仅控制前端 SDK；关闭此项不会关闭 Caddy 入口认证。
+
+验收包括真实票据成功、无效/重复票据、正确 Host/Origin 的源站直连、伪造验签头和路径变体。
+Caddy 集成检查执行 `python3 scripts/test-origin-guard.py`，需要已安装 Caddy；测试使用临时本地
+端口和假上游，不访问生产数据或发送邮件，并验证正确回源密钥在无厂商票据时也能转发。
+本地开发默认关闭 AI 验证码。
 
 [项目首页](../README.md) · [开发指南](development.md) · [内容与接口](content.md) · [登录与安全](security.md) · [备份与恢复](maintenance.md) · [部署指南](../deploy/README.md)
 

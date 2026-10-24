@@ -34,7 +34,39 @@
 - [备份与恢复](../docs/maintenance.md)：快照格式、图片引用与恢复要求。
 - [SFTPGo 部署](sftpgo/README.md)：配套文件管理、WebDAV 与 SFTP 服务。
 
-## 前端部署
+## 邮箱发送接口的回源保护
+
+`POST /api/account/code` 的防绕过由 Caddy 管理，与验证码厂商解耦。
+[HTTPS 主配置](Caddyfile.example) 在代理前导入
+`/etc/caddy/email-code-origin.caddy`；配置模板是
+[email-code-origin.caddy.example](email-code-origin.caddy.example)。
+安装时用随机 64 位十六进制密钥替换占位符，文件设为 `root:caddy`、0640。
+在边缘回源规则中覆盖写入相同的 `X-Copylee-Esa-Origin` 请求头，
+规则精确限制到主站发送接口的 POST 请求。真实密钥禁止提交 Git。
+不要把此头注入其他接口，也不要新增绕开 Caddy 保护的公开代理入口。
+
+Caddy 校验原始请求路径与密钥，拒绝缺失/错误密钥和路径变体；放行后移除
+`X-Copylee-Esa-Origin` 和 `Captcha-Verify-Param` 再转发给后端。
+后端无需保存回源密钥，也不依赖 AI 验签。访问日志继续过滤这两个请求头。
+
+修改后先执行 `caddy validate --config /etc/caddy/Caddyfile`，再执行
+`systemctl reload caddy`，随后检查正常流量与源站直连。不要只修改仓库示例而遗漏服务器配置。
+回源配置文件是必需的显式导入项，缺失时禁止启用新配置。
+首次启用必须先配置边缘回源头、安装 Caddy 保护并验证，再发布不含入口认证的后端。
+密钥轮换应同步更新边缘与私密配置并重载 Caddy，期间可能暂时返回 403。
+回滚后端时保留 Caddy 保护；若回滚到仍校验密钥的旧版本，需同时恢复其环境密钥及头部转发。
+
+以后停用 AI 验证码：关闭边缘的 AI 验签规则，将
+`COPYLEE_EMAIL_CAPTCHA_ENABLED=false` 并重启后端，使账户页停止加载 SDK；
+保留回源头规则与 Caddy 保护即可，无需修改后端代码。
+更换 CDN 时，在新边缘配置等效的回源头覆盖规则，并同步密钥。
+若完全撤掉 CDN，则应在 Caddy 中明确调整访问策略；不要留下无人注入密钥却仍要求密钥的配置。
+
+集成检查：在安装了 Caddy 的环境执行 `python3 scripts/test-origin-guard.py`。
+检查使用仓库中的实际代理路由，验证拒绝请求不会触达上游、路径变体被拒绝、
+合法回源不依赖任何验证码票据，以及敏感请求头不会转发给后端。
+
+## 前端产物发布
 
 在仓库根目录执行 `npm ci` 和 `npm run build`，将 `dist/` 的全部内容上传到 `/var/www/copylee`，包括 `.vite/manifest.json`。文章模板通过该清单复用前端公共样式。Caddy 路由与初次安装步骤见 [后端部署](backend/README.md)。
 

@@ -36,42 +36,15 @@ def code_for(sent):
     return sent[-1][1].split("验证码：")[1][:6]
 
 
-def test_esa_captcha_blocks_origin_bypass_before_sending(site):
+def test_email_business_does_not_depend_on_captcha_provider(site):
     client, _, settings, sent = site
-    settings.email_captcha_enabled = True
-    settings.esa_origin_secret = "test-only-origin-secret"
-    body = {"email": EMAIL, "purpose": "register"}
-    for extra in ({}, {"captcha-verify-param": "forged-ticket"},
-                  {"captcha-verify-param": "forged-ticket", "X-Captcha-Verify-Code": "T001",
-                   "X-Copylee-Esa-Origin": "forged-secret"},
-                  {"X-Copylee-Esa-Origin": settings.esa_origin_secret}):
-        response = client.post("/api/account/code", json=body,
-                               headers={"Origin": ORIGIN, **extra})
-        assert response.status_code == 403
-        assert not sent
+    settings.email_captcha_enabled = True  # 只控制前端 SDK，不改变发信业务。
+    response = client.post("/api/account/code", json={"email": EMAIL, "purpose": "register"},
+                           headers={"Origin": ORIGIN})
+    assert response.status_code == 200 and len(sent) == 1
     public = client.get("/api/account/config").json()
     assert public["captcha"]["enabled"] is True
-    assert settings.esa_origin_secret not in str(public)
-    encoded = client.post("/api/account/%63ode", json=body, headers={
-        "Origin": ORIGIN, "captcha-verify-param": "ticket",
-        "X-Copylee-Esa-Origin": settings.esa_origin_secret,
-    })
-    assert encoded.status_code == 403 and not sent
-    # 只有匹配 ESA 规则、已验签的请求才能获得回源密钥。
-    response = client.post("/api/account/code", json=body, headers={
-        "Origin": ORIGIN, "captcha-verify-param": "edge-verified-ticket",
-        "X-Copylee-Esa-Origin": settings.esa_origin_secret,
-    })
-    assert response.status_code == 200 and len(sent) == 1
-
-
-def test_esa_missing_secret_fails_closed(site):
-    client, _, settings, sent = site
-    settings.email_captcha_enabled = True
-    settings.esa_origin_secret = ""
-    response = client.post("/api/account/code", json={"email": EMAIL, "purpose": "register"},
-                           headers={"Origin": ORIGIN, "captcha-verify-param": "ticket"})
-    assert response.status_code == 503 and not sent
+    assert "secret" not in str(public).lower()
 
 
 def signup(client, sent, email=EMAIL):

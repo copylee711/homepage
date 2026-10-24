@@ -1,0 +1,10 @@
+# 安装到 /etc/caddy/email-code-origin.caddy，root:caddy 0640。
+# 用随机 64 位十六进制密钥替换占位符，与边缘回源规则同步；真实文件禁止提交 Git。
+# 只做入口认证，不检查任何厂商的验证码票据。
+@invalid_email_origin {
+    not {
+        header X-Copylee-Esa-Origin REPLACE_WITH_RANDOM_64_HEX_SECRET
+        expression "{http.request.orig_uri} == '/api/account/code' || {http.request.orig_uri}.startsWith('/api/account/code?')"
+    }
+}
+respond @invalid_email_origin "Forbidden" 403

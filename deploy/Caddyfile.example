@@ -25,7 +25,17 @@ copylee.cn {
     encode zstd gzip
     @backend path /api /api/* /posts /posts/* /notes /notes/* /privacy /sitemap.xml /feed.xml /robots.txt /content-assets/*
     handle @backend {
-        reverse_proxy 127.0.0.1:8000
+        route {
+            # 必须先校验回源身份，再代理；文件安装见 deploy/README.md。
+            @email_code path /api/account/code /api/account/code/
+            route @email_code {
+                import /etc/caddy/email-code-origin.caddy
+            }
+            reverse_proxy 127.0.0.1:8000 {
+                header_up -X-Copylee-Esa-Origin
+                header_up -Captcha-Verify-Param
+            }
+        }
     }
     handle_path /media/* {
         root * /var/lib/copylee/media

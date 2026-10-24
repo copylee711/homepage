@@ -332,7 +332,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def account_code(body: CodeRequest, request: Request,
                            session: Session = Depends(database)):
         check_origin(request)
-        accounts.require_email_captcha(request)
         prepared = accounts.prepare_code(request, session, body.email, body.purpose)
         if prepared:
             name = public_site(session)["name"]

@@ -19,11 +19,10 @@ class Settings(BaseSettings):
     session_hours: int = 12
     # 审计日志目录；留空时写入 data_dir/logs
     log_dir: Path | None = None
-    # ESA 在边缘验签后，仅为指定发送接口覆盖写入回源密钥。
+    # 仅向前端提供验证码启用配置；入口认证由 Caddy 管理。
     email_captcha_enabled: bool = False
     email_captcha_prefix: str = "esa-rwe96uub0q"
     email_captcha_scene_id: str = "trwiyf09"
-    esa_origin_secret: str = ""
 
     @field_validator("site_url")
     @classmethod

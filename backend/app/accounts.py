@@ -81,22 +81,6 @@ def public_config(session: Session) -> dict:
     return {"registrationOpen": value["registrationOpen"], "allowedDomains": value["allowedDomains"]}
 
 
-def require_email_captcha(request: Request):
-    """信任边缘验签的前提是回源身份已认证；客户端提交的票据本身不代表通过。"""
-    settings = request.app.state.settings
-    if not settings.email_captcha_enabled:
-        return
-    if not settings.esa_origin_secret:
-        raise HTTPException(503, "安全验证尚未配置，请稍后再试")
-    if request.scope.get("raw_path") != b"/api/account/code":
-        raise HTTPException(403, "请使用本站的验证码发送入口")
-    supplied = request.headers.get("x-copylee-esa-origin", "")
-    if not secrets.compare_digest(supplied.encode(), settings.esa_origin_secret.encode()):
-        raise HTTPException(403, "请通过本站页面完成安全验证")
-    if not request.headers.get("captcha-verify-param"):
-        raise HTTPException(403, "请先完成安全验证")
-
-
 def admin_config(session: Session) -> dict:
     value = dict(config(session))
     value["hasSmtpPassword"] = bool(value.pop("smtpPassword"))
