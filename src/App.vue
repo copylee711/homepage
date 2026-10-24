@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent, onBeforeUnmount, onMounted } from 'vue'
+import { defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
 import { contentStatus, ready, reloadContent, startContent } from './content'
 import AccountPage from './components/AccountPage.vue'
 import AdminPage from './components/AdminPage.vue'
@@ -23,6 +23,26 @@ let stop: (() => void) | undefined
 let stopScut: (() => void) | undefined
 onMounted(() => { if (!isAdmin) { stop = startContent(); stopScut = startScut() } })
 onBeforeUnmount(() => { stop?.(); stopScut?.() })
+
+// 从其他页面打开 /#projects 等地址时，浏览器加载瞬间目标尚未渲染，原生锚点跳转会落空。
+// 内容就绪后再定位；之后 1.5 秒内上方区块异步加载导致的高度变化会继续校正，用户一旦滚动即停止。
+watch(ready, async value => {
+  const id = decodeURIComponent(location.hash.slice(1))
+  if (!value || !id || isAdmin || isScut || isAccount || isGames) return
+  await nextTick()
+  const target = document.getElementById(id)
+  if (!target) return
+  const align = () => target.scrollIntoView({ behavior: 'instant', block: 'start' })
+  align()
+  const observer = new ResizeObserver(align)
+  observer.observe(document.body)
+  const release = () => {
+    observer.disconnect()
+    for (const event of ['wheel', 'touchstart', 'keydown', 'pointerdown'] as const) removeEventListener(event, release)
+  }
+  for (const event of ['wheel', 'touchstart', 'keydown', 'pointerdown'] as const) addEventListener(event, release, { passive: true })
+  setTimeout(release, 1500)
+})
 </script>
 
 <template>

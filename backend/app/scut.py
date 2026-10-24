@@ -25,6 +25,13 @@ AGENT = "CopyLee-SCUT/1.0"
 JW = "https://jw.scut.edu.cn"
 JW_API = JW + "/zhinan/cms/article/v2/findInformNotice.do"
 MATH_HOME = "https://www2.scut.edu.cn/math/"
+# WebPlus 只把前 10 页列表生成静态 listN.htm，之后由动态 listN.psp 提供（学院站）；
+# 学校主站不提供动态分页，第 11 页起返回 404，可采集的历史到此为止。
+STATIC_PAGES = 10
+
+
+class HistoryEnd(Exception):
+    """官网不再提供更早的列表分页。"""
 
 
 @dataclass(frozen=True)
@@ -162,7 +169,7 @@ def allowed_request(url: str) -> bool:
         return True
     return any(p.hostname == urlsplit(c.url).hostname
                and re.fullmatch(re.escape(urlsplit(c.url).path.replace("/list.htm", "/"))
-                                + r"list(?:[1-9]\d*)?\.htm", p.path)
+                                + r"list(?:[1-9]\d*)?\.(?:htm|psp)", p.path)
                for c in COLUMNS if c.source != "jw")
 
 
@@ -231,8 +238,15 @@ class ListClient:
             response = await self.get(JW_API, {"category": column.category, "tag": column.tag,
                                               "keyword": "", "pageNum": number, "pageSize": 20})
             return parse_jw(response.json())
-        url = column.url.replace("list.htm", f"list{number}.htm") if number > 1 else column.url
-        return parse_html((await self.get(url)).content, url)
+        suffix = "htm" if number <= STATIC_PAGES else "psp"
+        url = column.url.replace("list.htm", f"list{number}.{suffix}") if number > 1 else column.url
+        try:
+            response = await self.get(url)
+        except httpx.HTTPStatusError as exc:
+            if number > STATIC_PAGES and exc.response.status_code == 404:
+                raise HistoryEnd from None
+            raise
+        return parse_html(response.content, url)
 
 
 def save_items(session: Session, column: Column, items: list[dict], cutoff: str, seen: str):
@@ -274,7 +288,10 @@ async def sync_column(engine, client, column: Column, home: list[dict],
             visited: dict[int, Page] = {}
             # Recent checks always run, even while a long historical scan is pending.
             for number in range(1, 201):
-                page = await client.page(column, number)
+                try:
+                    page = await client.page(column, number)
+                except HistoryEnd:
+                    break
                 if not page.items and known:
                     raise ValueError("已有记录的栏目异常为空，保留原索引")
                 visited[number] = page
@@ -300,7 +317,17 @@ async def sync_column(engine, client, column: Column, home: list[dict],
                 # Scan to the real last page, not a date boundary: handles old pinned/unsorted rows.
                 for _ in range(scan_budget):
                     number = state.scan_page
-                    page = visited.get(number) or await client.page(column, number)
+                    try:
+                        page = visited.get(number) or await client.page(column, number)
+                    except HistoryEnd:
+                        # 官网能翻到的历史已全部采集，视为完成一次完整扫描。
+                        state.initialized = True
+                        state.last_full_scan = stamp
+                        state.scan_started = None
+                        state.scan_page = 1
+                        session.add(state)
+                        session.commit()
+                        break
                     if not page.items and known:
                         raise ValueError("历史分页异常为空，保留扫描位置")
                     save_items(session, column, page.items, cutoff, stamp)

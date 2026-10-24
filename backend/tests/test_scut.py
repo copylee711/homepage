@@ -11,6 +11,7 @@ from app.models import ScutColumn, ScutNotice
 from app.scut import (
     COLUMNS,
     MATH_HOME,
+    HistoryEnd,
     ListClient,
     Page,
     allowed_request,
@@ -75,6 +76,8 @@ def test_hard_request_boundary():
     assert allowed_request(MATH_HOME)
     assert allowed_request(COLUMNS[0].url.replace("list.htm", "list4.htm"))
     assert allowed_request("https://jw.scut.edu.cn/robots.txt")
+    # 第 11 页起的动态分页
+    assert allowed_request(COLUMNS[2].url.replace("list.htm", "list11.psp"))
     for url in [item(1)["url"], "https://mp.weixin.qq.com/s/test",
                 "https://www2.scut.edu.cn/_upload/a.pdf", "http://www.scut.edu.cn/new/9010/list.htm",
                 COLUMNS[0].url + "?redirect=bad"]:
@@ -245,3 +248,45 @@ def test_retry_and_robots_no_detail_requests(monkeypatch):
         finally:
             await client.close()
     asyncio.run(scenario())
+
+
+def test_history_ends_where_the_site_stops_paging(index):
+    """学校主站标称 45 页，但第 11 页起返回 404：采集到此为止，不算失败。"""
+    engine, _ = index
+    column = COLUMNS[0]
+    today = datetime.now(timezone.utc).date().isoformat()
+    pages = {n: Page([item(n, today if n == 1 else "2020-01-01")], 45) for n in range(1, 11)}
+    client = FakeClient({**pages, 11: HistoryEnd()})
+    asyncio.run(sync_column(engine, client, column, [], "", 20))
+    with Session(engine) as session:
+        state = session.get(ScutColumn, column.id)
+        assert state.initialized and state.last_error == "" and state.last_full_scan
+        assert state.scan_page == 1
+
+
+def test_dynamic_pages_after_static_ones(monkeypatch):
+    requested = []
+
+    async def get(self, url, data=None):
+        requested.append(url)
+        if "list11" in url and "www.scut" in url:
+            raise httpx.HTTPStatusError("404", request=httpx.Request("GET", url),
+                                        response=httpx.Response(404))
+        return httpx.Response(200, text='<div class="wp_paging"><em class="all_pages">12</em></div>'
+                              '<ul class="wp_article_list"><li class="list_item"><span class="Article_Title">'
+                              '<a href="/math/2026/1012/c1a1/page.htm">通知</a></span></li></ul>')
+
+    monkeypatch.setattr(ListClient, "get", get)
+
+    async def run():
+        client = ListClient()
+        try:
+            await client.page(COLUMNS[2], 10)
+            await client.page(COLUMNS[2], 11)
+            with pytest.raises(HistoryEnd):
+                await client.page(COLUMNS[0], 11)
+        finally:
+            await client.close()
+
+    asyncio.run(run())
+    assert requested[0].endswith("/list10.htm") and requested[1].endswith("/list11.psp")

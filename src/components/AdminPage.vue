@@ -4,6 +4,10 @@ import { fetchJson } from '../content'
 import type { SiteContent } from '../types'
 import { useTheme } from '../composables/useTheme'
 import { passkeyAvailable, usePasskey } from '../passkeys'
+import { noteSlug, postSlug } from '../slug'
+import AnimatedSelect from './AnimatedSelect.vue'
+import AppIcon from './AppIcon.vue'
+import LogoMark from './LogoMark.vue'
 
 type Draft = { title: string; slug: string; summary: string; markdown: string; cover: string }
 type Article = { id: string; revision: number; draft: Draft; published: object | null; slug_locked: boolean }
@@ -23,6 +27,17 @@ function askOtp(target: 'login' | 'unlock') {
 watch([otpFor, busy], ([target, working]) => { if (target && !working) nextTick(() => otpInput.value?.focus()) }, { flush: 'post' })
 function submitOtp() { return otpFor.value === 'login' ? login() : unlockWithPassword() }
 const tab = ref<'profile' | 'portals' | 'repos' | 'posts' | 'notes' | 'accounts' | 'security'>('profile')
+// 侧栏导航：图标为 24×24 描边路径
+const navItems: { id: typeof tab.value; name: string; icon: string }[] = [
+  { id: 'profile', name: '主页设置', icon: 'M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1Z' },
+  { id: 'portals', name: '入口卡片', icon: 'M4 5h7v7H4Zm9 0h7v7h-7ZM4 14h7v6H4Zm9 0h7v6h-7Z' },
+  { id: 'repos', name: '仓库展示', icon: 'M6 4h10l3 3v13H6Zm4 6h6m-6 4h6m-6 4h3' },
+  { id: 'posts', name: '文章管理', icon: 'M5 19h4L19 9l-4-4L5 15Zm8-12 4 4' },
+  { id: 'notes', name: '笔记管理', icon: 'M6 4h12v16H6Zm3 4h6m-6 4h6m-6 4h4' },
+  { id: 'accounts', name: '用户与邮件', icon: 'M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm-6 9a6 6 0 0 1 12 0m1-9 5-3m-5 6 5 3' },
+  { id: 'security', name: '登录安全', icon: 'M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6Zm-3 9 2 2 4-4' },
+]
+const socialOptions = computed(() => socialPlatforms.map(([value, label]) => ({ value, label })))
 type SecurityState = {elevated_until:number; totp_enabled:boolean; recovery_remaining:number; passkeys:{id:string; name:string; created_at:number; last_used:number|null}[]}
 const security = ref<SecurityState>(), securityOtp = ref(''), keyName = ref('我的设备')
 const enrollment = ref<{secret:string; qr:string}>(), recoveryCodes = ref<string[]>([])
@@ -175,6 +190,23 @@ async function removeUser(user: SiteUser) { await action(async () => {
   siteUsers.value = siteUsers.value.filter(item => item !== user); message.value = '用户已删除。'
 }) }
 function emptyDraft(): Draft { return { title: '', slug: '', summary: '', markdown: '', cover: '' } }
+// 固定链接默认随标题生成；手动修改后不再覆盖，清空后恢复自动生成。
+let autoPostSlug = '', autoNoteSlug = '', slugTimer: ReturnType<typeof setTimeout> | undefined
+const followsTitle = (slug: string, auto: string) => !slug || slug === auto
+watch(() => draft.value.title, title => {
+  if (article.value?.slug_locked || !followsTitle(draft.value.slug, autoPostSlug)) return
+  clearTimeout(slugTimer)
+  slugTimer = setTimeout(async () => {
+    const slug = await postSlug(title)
+    if (draft.value.title !== title || article.value?.slug_locked || !followsTitle(draft.value.slug, autoPostSlug)) return
+    autoPostSlug = slug; draft.value.slug = slug
+  }, 250)
+})
+watch(() => noteEdit.value?.title, title => {
+  const note = noteEdit.value
+  if (!note || note.source !== 'manual' || title === undefined || !followsTitle(note.slug, autoNoteSlug)) return
+  autoNoteSlug = noteSlug(title); note.slug = autoNoteSlug
+})
 
 async function api<T>(path: string, method = 'GET', data?: unknown): Promise<T> {
   try {
@@ -301,11 +333,12 @@ async function importMarkdown(event: Event, target: 'post' | 'note') {
   const title = (heading?.[1] ?? file.name.replace(/\.(md|markdown|txt)$/i, '')).trim().slice(0, 200)
   if (heading && text.trimStart().startsWith(heading[0])) text = text.trimStart().slice(heading[0].length).trimStart()
   const base = file.name.replace(/\.(md|markdown|txt)$/i, '').toLowerCase()
-  const slug = (target === 'post' ? base.replace(/[^a-z0-9]+/g, '-') : base.replace(/[^a-z0-9一-鿿]+/g, '-')).replace(/^-+|-+$/g, '').slice(0, 120)
+  const slug = noteSlug(base)
   if (target === 'post') {
     if (dirty.value && draft.value.title && !confirm('当前文章有未保存修改，导入会替换编辑区，继续吗？')) return
     article.value = undefined
-    draft.value = { ...emptyDraft(), title, slug, markdown: text }
+    // 文章地址由标题自动生成（中文转拼音）
+    draft.value = { ...emptyDraft(), title, markdown: text }
     lastDraft.value = ''; preview.value = ''
   } else {
     newNote()
@@ -332,8 +365,8 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', preventLeave)
 
 <template>
   <div class="admin-shell">
-    <header class="admin-top"><a href="/" class="admin-brand">Copy Lee<span>内容管理</span></a>
-      <div class="top-actions"><a href="/" target="_blank">查看网站 ↗</a><button @click="toggle" :aria-label="theme === 'dark' ? '切换浅色主题' : '切换深色主题'">◐</button><button v-if="csrf" @click="logout" :disabled="busy">退出</button></div>
+    <header class="admin-top"><a href="/" class="admin-brand"><LogoMark class="admin-logo" />Copy Lee<span>内容管理</span></a>
+      <div class="top-actions"><a href="/" target="_blank">查看网站 ↗</a><button class="icon-button" @click="toggle" :aria-label="theme === 'dark' ? '切换浅色主题' : '切换深色主题'"><AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" /></button><button v-if="csrf" @click="logout" :disabled="busy">退出</button></div>
     </header>
     <p v-if="error" class="feedback error" role="alert">{{ error }}</p>
     <p v-if="message" class="feedback success" role="status">{{ message }}</p>
@@ -350,7 +383,7 @@ set -a; . /etc/copylee/backend.env; set +a
 runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pre><p>设备丢失、无法通过两步验证时，再执行以下命令清除 Passkey、两步验证与恢复码：</p><pre>runuser -u copylee -- .venv/bin/python -m app.cli reset-security --confirm</pre></details>
     </main>
     <div v-else class="admin-layout">
-      <aside class="admin-nav"><p class="eyebrow">Workspace</p><button v-for="item in [{id:'profile',name:'主页设置'},{id:'portals',name:'入口卡片'},{id:'repos',name:'仓库展示'},{id:'posts',name:'文章管理'},{id:'notes',name:'笔记管理'},{id:'accounts',name:'用户与邮件'},{id:'security',name:'登录安全'}]" :key="item.id" :class="{selected:tab===item.id}" @click="tab=item.id as typeof tab">{{ item.name }}<span>↗</span></button><p class="nav-note">内容保存后即可更新。<br>页面样式仍由代码管理。</p></aside>
+      <aside class="admin-nav"><p class="eyebrow">Workspace</p><button v-for="item in navItems" :key="item.id" :class="{selected:tab===item.id}" :aria-current="tab===item.id ? 'page' : undefined" @click="tab=item.id"><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="item.icon" /></svg>{{ item.name }}</button><p class="nav-note">内容保存后即可更新。<br>页面样式仍由代码管理。</p></aside>
       <main class="admin-main"><fieldset :disabled="busy">
         <template v-if="tab==='security'">
           <div class="section-head"><div><p class="eyebrow">Account access</p><h1>登录安全</h1></div></div>
@@ -376,18 +409,18 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
           <div class="section-head"><div><p class="eyebrow">Site content</p><h1>{{ tab==='profile' ? '主页设置' : tab==='portals' ? '入口卡片' : '仓库展示' }}</h1></div>
             <div class="buttons"><button @click="reloadSettings">重新加载</button><button class="primary" @click="saveSettings">{{busy ? '处理中…' : '保存设置'}}</button></div></div>
           <template v-if="tab==='profile'">
-            <h2 class="group-title first">基本信息</h2><p class="subtle">显示在主页首屏。</p>
+            <section class="edit-card"><h2>基本信息</h2><p class="subtle">显示在主页首屏。</p>
             <div class="form-grid">
               <label>显示名称<input v-model="settings.name" maxlength="80"></label><label>问候语<input v-model="settings.greeting" maxlength="100"></label>
               <label class="wide">个人简介<textarea v-model="settings.intro" rows="3" maxlength="2000"></textarea></label>
               <label class="wide"><span class="label-line">身份标签<span class="field-hint">每行一个</span></span><textarea v-model="rolesText" rows="3"></textarea></label>
-            </div>
-            <h2 class="group-title">链接</h2><p class="subtle">导航栏与页脚中的 GitHub、Cloud 入口。</p>
+            </div></section>
+            <section class="edit-card"><h2>链接</h2><p class="subtle">导航栏与页脚中的 GitHub、Cloud 入口。</p>
             <div class="form-grid">
               <label>GitHub 用户名<input v-model="settings.github" maxlength="39"></label>
               <label>Cloud 地址<input v-model="settings.cloud" type="url" placeholder="https://…"></label>
-            </div>
-            <h2 class="group-title">备案信息</h2><p class="subtle">显示在全站页脚右下角，留空则不显示。</p>
+            </div></section>
+            <section class="edit-card"><h2>备案信息</h2><p class="subtle">显示在全站页脚右下角，留空则不显示。</p>
             <div class="form-grid">
               <label>ICP 备案号<input v-model="settings.icp" maxlength="100" placeholder="粤ICP备XXXXXXXXXX号-1"><span class="field-hint">链接到工信部备案查询 beian.miit.gov.cn</span></label>
               <label>公安备案号<input v-model="settings.police.text" maxlength="100" placeholder="粤公网安备XXXXXXXXXXXXXX号"><span class="field-hint">填写完整备案号，查询链接编号自动识别：{{ policeCode || '—' }}</span></label>
@@ -395,21 +428,21 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
                 <span class="field-hint">页脚预览</span>
                 <p><span v-if="settings.icp">{{ settings.icp }}</span><span v-if="settings.police.text"><img src="/beian-police.png" alt="" width="14" height="16">{{ settings.police.text }}</span></p>
               </div>
-            </div>
-            <h2 class="group-title">社交主页</h2><p class="subtle">图标显示在页脚。关闭“公开显示”或留空地址的条目不会出现在网站上。</p>
+            </div></section>
+            <section class="edit-card"><h2>社交主页</h2><p class="subtle">图标显示在页脚。关闭“公开显示”或留空地址的条目不会出现在网站上。</p>
             <div v-for="(social,index) in settings.socials" :key="index" class="social-row">
-              <label>平台<select v-model="social.platform"><option v-for="[value,name] in socialPlatforms" :key="value" :value="value">{{ name }}</option></select></label>
+              <AnimatedSelect v-model="social.platform" label="平台" :options="socialOptions" />
               <label class="social-url">{{ social.platform==='email' ? '邮箱地址' : '主页地址' }}<input v-model="social.url" :type="social.platform==='email' ? 'email' : 'url'" :placeholder="social.platform==='email' ? 'me@example.com' : 'https://…'"></label>
               <label class="checkbox"><input type="checkbox" v-model="social.visible">公开显示</label>
               <div class="buttons"><button @click="move(settings.socials,index,-1)" :disabled="index===0">上移</button><button class="danger" @click="settings.socials.splice(index,1)">移除</button></div>
             </div>
-            <button @click="settings.socials.push({platform:'instagram',url:'',visible:true})">＋ 添加社交主页</button>
+            <button @click="settings.socials.push({platform:'instagram',url:'',visible:true})">＋ 添加社交主页</button></section>
           </template>
           <template v-if="tab==='portals'">
             <p class="subtle">卡片按列表顺序展示。隐藏卡片仍可在这里继续编辑。</p>
             <section v-for="(portal,index) in settings.portals" :key="index" class="edit-card">
               <div class="card-head"><span class="eyebrow">入口 {{ String(index+1).padStart(2,'0') }}</span><div class="buttons"><button @click="move(settings.portals,index,-1)" :disabled="index===0">上移</button><button @click="move(settings.portals,index,1)" :disabled="index===settings.portals.length-1">下移</button><button class="danger" @click="settings.portals.splice(index,1)">移除</button></div></div>
-              <div class="form-grid"><label>名称<input v-model="portal.title" maxlength="80"></label><label>图标<select v-model="portal.icon"><option value="cloud">Cloud</option><option value="note">Notes</option><option value="github">GitHub</option></select></label>
+              <div class="form-grid"><label>名称<input v-model="portal.title" maxlength="80"></label><AnimatedSelect v-model="portal.icon" label="图标" :options="[{value:'cloud',label:'Cloud'},{value:'note',label:'Notes'},{value:'github',label:'GitHub'}]" />
                 <label class="wide">描述<input v-model="portal.description" maxlength="500"></label><label>链接<input v-model="portal.href" placeholder="https://… 或 /notes"></label><label>地址提示<input v-model="portal.hint" maxlength="100"></label></div>
               <label class="checkbox"><input type="checkbox" v-model="portal.visible">公开显示</label>
             </section>
@@ -437,7 +470,7 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
           <section class="edit-card"><h2>验证码邮件（SMTP）</h2><p class="subtle">使用你的个人邮箱发送验证码。QQ 邮箱：设置 → 账号与安全 → 开启 SMTP 服务，获取“授权码”填入下方（不是 QQ 密码）。</p>
             <div class="form-grid">
               <label>SMTP 服务器<input v-model="accountsConfig.smtp.host" placeholder="smtp.qq.com"></label>
-              <div class="form-grid tight"><label>端口<input v-model.number="accountsConfig.smtp.port" type="number" min="1" max="65535"></label><label>加密<select v-model="accountsConfig.smtp.security"><option value="ssl">SSL（465）</option><option value="starttls">STARTTLS（587）</option></select></label></div>
+              <div class="form-grid tight"><label>端口<input v-model.number="accountsConfig.smtp.port" type="number" min="1" max="65535"></label><AnimatedSelect v-model="accountsConfig.smtp.security" label="加密" :options="[{value:'ssl',label:'SSL（465）'},{value:'starttls',label:'STARTTLS（587）'}]" /></div>
               <label>邮箱账号<input v-model="accountsConfig.smtp.username" type="email" placeholder="you@qq.com" autocomplete="off"></label>
               <label>授权码<span class="field-hint">{{ accountsConfig.hasSmtpPassword ? '已保存，加密存储；留空表示不修改' : '尚未设置' }}</span><input v-model="smtpSecret" type="password" autocomplete="new-password" :placeholder="accountsConfig.hasSmtpPassword ? '••••••••' : 'SMTP 授权码'"></label>
               <label>发件人名称<input v-model="accountsConfig.smtp.fromName" placeholder="Copy Lee"></label>
@@ -498,7 +531,7 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
           <div class="writing-layout"><aside class="article-sidebar"><p v-if="!articles.length" class="subtle">还没有文章，从右侧开始写作。</p><button v-for="item in articles" :key="item.id" :class="{selected:article?.id===item.id}" @click="selectArticle(item.id)"><strong>{{ item.title }}</strong><span>{{ item.published ? '已发布' : '草稿' }} · {{ item.updated_at.slice(0,10) }}</span></button></aside>
             <div class="editor"><div class="editor-status"><span>{{ article?.published ? '已有公开版本' : '尚未发布' }}</span><span v-if="dirty">有未保存修改</span></div>
               <label>标题<input v-model="draft.title" maxlength="200" placeholder="写下标题"></label>
-              <label>固定链接<input v-model="draft.slug" :readonly="article?.slug_locked" placeholder="my-first-post" maxlength="120"><span class="field-hint">小写字母、数字和连字符；首次发布后锁定。</span></label>
+              <label>固定链接<span class="slug-field"><span class="slug-prefix">/posts/</span><input v-model="draft.slug" :readonly="article?.slug_locked" placeholder="根据标题自动生成" maxlength="120"></span><span class="field-hint">{{ article?.slug_locked ? '已发布，固定链接已锁定。' : '根据标题自动生成，中文转为拼音；可手动修改，清空后恢复自动生成。首次发布后锁定。' }}</span></label>
               <label>摘要<textarea v-model="draft.summary" rows="2" maxlength="1000"></textarea></label>
               <label>封面地址<input v-model="draft.cover" placeholder="https://… 或 /media/…"></label>
               <div class="markdown-tools"><span class="eyebrow">Markdown</span><div class="buttons"><label class="upload-button">上传图片<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" @change="upload"></label><button @click="renderPreview">预览</button></div></div>
@@ -544,7 +577,7 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
 </template>
 
 <style scoped>
-.admin-shell { min-height:100vh; }
+.admin-shell { --field-line:color-mix(in srgb,var(--line-strong) 55%,transparent); min-height:100vh; background:radial-gradient(1200px 500px at 85% -10%,var(--bg-tint),transparent 70%),var(--bg); }
 .passkey-login { margin-top:16px; width:100%; }
 .step-status { display:flex; align-items:center; gap:10px; margin:8px 0 28px; padding:12px 16px; border:1px solid var(--line); border-radius:10px; font-size:13px; color:var(--muted); }
 .step-status .dot { width:8px; height:8px; border-radius:50%; background:var(--faint); }
@@ -575,50 +608,68 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
 .totp-qr { width:200px; height:200px; display:block; margin:20px 0; }
 .key-row { display:flex; align-items:center; justify-content:space-between; gap:16px; border-top:1px solid var(--line); margin-top:20px; padding-top:16px; }
 .recovery-codes { white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; padding:16px; background:var(--surface); }
-.admin-top { display:flex; justify-content:space-between; align-items:center; padding:20px 40px; border-bottom:1px solid var(--line); }
-.admin-brand { font-size:20px; font-weight:700; display:flex; gap:20px; align-items:center; }
-.admin-brand span { font-size:12px; font-weight:400; color:var(--muted); padding-left:20px; border-left:1px solid var(--line-strong); }
+.admin-top { position:sticky; top:0; z-index:20; display:flex; justify-content:space-between; align-items:center; height:64px; padding:0 32px; border-bottom:1px solid var(--line); background:var(--header-bg); -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px); }
+.admin-brand { font-size:18px; font-weight:700; display:flex; gap:12px; align-items:center; letter-spacing:-.01em; }
+.admin-logo { width:30px; height:auto; }
+.admin-brand span { margin-left:6px; font-size:12px; font-weight:400; color:var(--muted); padding-left:16px; border-left:1px solid var(--line-strong); }
 .top-actions,.buttons { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .top-actions { font-size:13px; }
-button,.upload-button { font:inherit; font-size:13px; padding:9px 16px; border:1px solid var(--line-strong); border-radius:8px; background:var(--surface); color:var(--text); cursor:pointer; }
-button:hover { border-color:var(--accent); }
+.top-actions>a { color:var(--muted); transition:color .2s; }.top-actions>a:hover { color:var(--text); }
+.icon-button { display:grid; place-items:center; width:38px; height:38px; padding:0; }
+.icon-button svg { width:18px; height:18px; }
+button,.upload-button { font:inherit; font-size:13px; font-weight:500; padding:9px 16px; border:1px solid var(--field-line); border-radius:10px; background:var(--surface); color:var(--text); cursor:pointer; transition:border-color .2s,background .2s,color .2s,transform .2s var(--ease),box-shadow .2s; }
+button:hover:not(:disabled),.upload-button:hover { border-color:var(--accent); color:var(--accent); }
+button:active:not(:disabled) { transform:translateY(1px); }
 button:disabled { opacity:.45; cursor:wait; }
 .primary { background:var(--btn-bg); color:var(--btn-fg); border-color:var(--btn-bg); }
+.primary:hover:not(:disabled) { color:var(--btn-fg); border-color:var(--btn-bg); box-shadow:0 8px 20px -10px color-mix(in srgb,var(--btn-bg) 70%,transparent); transform:translateY(-1px); }
 .danger { color:#d15c5c; }
-.admin-layout { display:grid; grid-template-columns:220px 1fr; max-width:1500px; margin:auto; }
-.admin-nav { padding:48px 24px; border-right:1px solid var(--line); }
+button.danger:hover:not(:disabled) { color:#d15c5c; border-color:#d15c5c; background:rgba(209,92,92,.06); }
+.admin-layout { display:grid; grid-template-columns:232px 1fr; max-width:1440px; margin:auto; }
+.admin-nav { position:sticky; top:64px; align-self:start; height:calc(100vh - 64px); overflow:auto; padding:36px 16px; border-right:1px solid var(--line); }
+.admin-nav>.eyebrow { padding:0 12px; margin:0 0 12px; }
 .eyebrow { font-size:11px; color:var(--faint); letter-spacing:.14em; text-transform:uppercase; }
-.admin-nav>button { display:flex; justify-content:space-between; width:100%; border:0; background:none; margin:10px 0; padding:14px; text-align:left; }
-.admin-nav>button span { opacity:0; }
-.admin-nav>button.selected { background:var(--accent-soft); color:var(--accent); }
-.admin-nav>button.selected span { opacity:1; }
-.nav-note { margin-top:40px; font-size:12px; color:var(--faint); line-height:1.9; }
-.admin-main { padding:48px clamp(24px,4vw,64px); min-width:0; }
+.admin-nav>button { position:relative; display:flex; align-items:center; gap:12px; width:100%; border:0; background:none; margin:2px 0; padding:11px 12px; text-align:left; font-size:14px; font-weight:400; color:var(--text-2); }
+.admin-nav>button svg { width:18px; height:18px; flex:none; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; opacity:.75; }
+.admin-nav>button:hover:not(:disabled) { background:color-mix(in srgb,var(--text) 4%,transparent); color:var(--text); }
+.admin-nav>button.selected { background:var(--accent-soft); color:var(--accent); font-weight:500; }
+.admin-nav>button.selected svg { opacity:1; }
+.admin-nav>button.selected::before { content:''; position:absolute; left:-16px; top:10px; bottom:10px; width:3px; border-radius:0 3px 3px 0; background:var(--accent); }
+.nav-note { margin:32px 12px 0; font-size:12px; color:var(--faint); line-height:1.9; }
+.admin-main { padding:40px clamp(24px,4vw,56px) 80px; min-width:0; max-width:1120px; }
 fieldset { border:0; padding:0; margin:0; min-width:0; }
-.section-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:36px; gap:20px; }
+.section-head { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:28px; gap:20px; }
+.section-head .eyebrow { margin:0; }
 h1 { font-size:32px; margin:8px 0 0; letter-spacing:-.025em; }
-h2 { font-size:18px; }
+h2 { font-size:17px; margin:0; letter-spacing:-.01em; }
 .subtle { color:var(--muted); font-size:14px; margin:8px 0 20px; }
 .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
-label { display:flex; flex-direction:column; gap:8px; font-size:13px; color:var(--text-2); }
+label { display:flex; flex-direction:column; gap:8px; font-size:13px; font-weight:500; color:var(--text-2); }
+.admin-main :deep(.select-field label) { font-size:13px; font-weight:500; color:var(--text-2); }
+.admin-main :deep(.select-trigger) { min-height:44px; padding:10px 13px; border-color:var(--field-line); border-radius:10px; background:var(--bg); font-size:15px; }
 .wide { grid-column:1 / -1; }
-input,textarea,select { width:100%; font:inherit; font-size:15px; border:1px solid var(--line-strong); border-radius:8px; padding:11px 13px; background:var(--bg); color:var(--text); }
+input,textarea,select { width:100%; font:inherit; font-size:15px; font-weight:400; border:1px solid var(--field-line); border-radius:10px; padding:10px 13px; background:var(--bg); color:var(--text); transition:border-color .2s,box-shadow .2s; }
+input:hover,textarea:hover,select:hover { border-color:var(--line-strong); }
+input:focus,textarea:focus,select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); }
+input::placeholder,textarea::placeholder { color:var(--faint); }
 textarea { resize:vertical; }
 input:read-only { color:var(--muted); }
-.field-hint { color:var(--muted); font-size:12px; line-height:1.7; }
-.edit-card { border-top:1px solid var(--line); padding:24px 0 32px; }
+.field-hint { color:var(--muted); font-size:12px; font-weight:400; line-height:1.7; }
+.edit-card { margin-bottom:20px; padding:24px 28px 28px; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); box-shadow:0 1px 2px rgba(17,24,39,.03),0 12px 32px -24px rgba(17,24,39,.12); }
+.edit-card>h2+.subtle { margin-top:6px; }
 .card-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; gap:16px; }
 .checkbox { flex-direction:row; align-items:center; margin-top:18px; }
 .checkbox input { width:16px; height:16px; accent-color:var(--accent); }
-.sync-panel { display:flex; justify-content:space-between; align-items:center; gap:20px; border:1px solid var(--line); padding:24px; border-radius:12px; margin-bottom:32px; }
+.sync-panel { display:flex; justify-content:space-between; align-items:center; gap:20px; border:1px solid var(--line); padding:24px 28px; border-radius:var(--radius); background:var(--surface); margin-bottom:20px; }
 .sync-panel p { margin:8px 0; }.sync-error { color:#d15c5c; font-size:13px; }
-.social-row { display:grid; grid-template-columns:150px 1fr auto auto; gap:16px; align-items:end; padding:16px 0; border-top:1px solid var(--line); }
+.social-row { display:grid; grid-template-columns:170px 1fr auto auto; gap:16px; align-items:end; padding:16px 0; border-top:1px solid var(--line); }
+.subtle+.social-row { border-top:0; padding-top:4px; }
 .social-row .checkbox { margin:0 0 12px; white-space:nowrap; }
 .social-row+button { margin-top:12px; }
 .notes-source { display:block; }
 .source-status { display:flex; flex-direction:column; gap:10px; align-items:flex-start; }
 .source-status .checkbox { margin:24px 0 0; flex-wrap:wrap; }
-.note-editor { margin-bottom:32px; padding:24px; border:1px solid var(--accent); border-radius:12px; }
+.note-editor { margin-bottom:24px; padding:24px 28px; border:1px solid color-mix(in srgb,var(--accent) 45%,transparent); border-radius:var(--radius); background:var(--surface); box-shadow:0 0 0 4px var(--accent-soft); }
 .note-editor .form-grid { margin-bottom:8px; }
 .note-editor .checkbox { margin:16px 0 0; }
 .note-toolbar { display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:16px; }
@@ -649,21 +700,28 @@ input:read-only { color:var(--muted); }
 .beian-preview { display:flex; flex-direction:column; gap:10px; padding:16px 18px; border:1px dashed var(--line-strong); border-radius:8px; }
 .beian-preview p { display:flex; flex-wrap:wrap; gap:8px 20px; margin:0; color:var(--faint); font-size:13px; }
 .beian-preview p span { display:inline-flex; align-items:center; gap:6px; }
-.feedback { padding:14px 24px; margin:16px 40px 0; border-radius:8px; font-size:14px; }
-.error { color:#d15c5c; background:rgba(209,92,92,.08); }.success { color:var(--accent); background:var(--accent-soft); }
-.login-panel { max-width:440px; margin:12vh auto; padding:0 24px; }
+.feedback { position:fixed; z-index:40; left:50%; top:76px; transform:translateX(-50%); width:max-content; max-width:min(640px,calc(100vw - 32px)); margin:0; padding:12px 20px; border-radius:12px; font-size:14px; box-shadow:0 16px 40px -16px rgba(0,0,0,.25); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); animation:toast-in .4s var(--ease); }
+@keyframes toast-in { from { opacity:0; transform:translate(-50%,-8px); } }
+.error { color:#d15c5c; background:color-mix(in srgb,var(--surface) 90%,#d15c5c); border:1px solid rgba(209,92,92,.25); }.success { color:var(--accent); background:color-mix(in srgb,var(--surface) 90%,var(--accent)); border:1px solid color-mix(in srgb,var(--accent) 25%,transparent); }
+.login-panel { max-width:440px; margin:10vh auto; padding:40px 36px; border:1px solid var(--line); border-radius:20px; background:var(--surface); box-shadow:0 30px 60px -36px rgba(17,24,39,.25); }
 .login-panel h1 { font-size:40px; }.login-panel label { margin-top:24px; }.login-panel .primary { width:100%; margin-top:28px; padding:13px; }
 .login-hint { color:var(--faint); font-size:12px; margin-top:24px; }
 .writing-layout { display:grid; grid-template-columns:210px 1fr; gap:36px; }
 .article-sidebar { border-right:1px solid var(--line); padding-right:20px; }
-.article-sidebar button { width:100%; border:0; border-radius:0; text-align:left; padding:14px 10px; margin-bottom:8px; background:none; }
+.article-sidebar button { width:100%; border:0; border-radius:10px; text-align:left; padding:12px; margin-bottom:4px; background:none; color:var(--text); }
+.article-sidebar button:hover:not(:disabled) { color:var(--text); background:color-mix(in srgb,var(--text) 4%,transparent); }
 .article-sidebar button.selected { background:var(--accent-soft); }.article-sidebar strong { display:block; overflow-wrap:anywhere; font-size:14px; font-weight:500; }.article-sidebar span { display:block; color:var(--muted); font-size:11px; margin-top:6px; }
-.editor { min-width:0; }.editor>label { margin-bottom:20px; }.editor-status { display:flex; gap:20px; color:var(--muted); font-size:12px; margin-bottom:24px; }
+.editor { min-width:0; }.editor>label { margin-bottom:20px; }.editor-status { display:flex; gap:10px; color:var(--muted); font-size:12px; margin-bottom:24px; }
+.editor-status span { padding:4px 10px; border-radius:999px; background:color-mix(in srgb,var(--text) 5%,transparent); }
+.editor-status span+span { color:#b7791f; background:rgba(214,158,46,.12); }
+.slug-field { display:flex; align-items:stretch; }
+.slug-prefix { display:flex; align-items:center; padding:0 12px; border:1px solid var(--field-line); border-right:0; border-radius:10px 0 0 10px; background:color-mix(in srgb,var(--text) 3%,transparent); color:var(--muted); font:13px var(--font-mono); }
+.slug-field input { border-radius:0 10px 10px 0; font-family:var(--font-mono); font-size:14px; }
 .markdown-tools { display:flex; align-items:center; justify-content:space-between; margin:28px 0 12px; }
 .upload-button { position:relative; overflow:hidden; display:block; }.upload-button input { position:absolute; inset:0; opacity:0; cursor:pointer; }
 .markdown-input { font-family:var(--font-mono); font-size:14px; line-height:1.8; }
 .editor-actions { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:28px 0 14px; }.editor-actions>a { font-size:13px; color:var(--accent); }
-.preview-panel { margin-top:28px; padding:24px; border:1px solid var(--line); border-radius:12px; }.preview-panel h2 { margin-bottom:24px; }
+.preview-panel { margin-top:28px; padding:28px; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); }.preview-panel h2 { margin-bottom:24px; }
 @media(max-width:1050px) { .writing-layout { grid-template-columns:1fr; }.article-sidebar { border-right:0; border-bottom:1px solid var(--line); max-height:220px; overflow:auto; }.admin-layout { grid-template-columns:180px 1fr; } }
-@media(max-width:700px) { .admin-top { padding:16px 20px; }.admin-brand span { display:none; }.admin-layout { grid-template-columns:1fr; }.admin-nav { padding:16px 20px; border-right:0; display:flex; gap:6px; overflow:auto; }.admin-nav>.eyebrow,.nav-note { display:none; }.admin-nav>button { white-space:nowrap; margin:0; width:auto; padding:10px 12px; }.admin-nav>button span { display:none; }.admin-main { padding:24px 20px; }.form-grid { grid-template-columns:1fr; }.section-head,.sync-panel { align-items:flex-start; flex-direction:column; }.social-row { grid-template-columns:1fr; }.note-list li { flex-direction:column; align-items:flex-start; }.feedback { margin:16px 20px 0; }.card-head { flex-wrap:wrap; } }
+@media(max-width:700px) { .admin-top { padding:0 16px; }.admin-brand span { display:none; }.admin-layout { grid-template-columns:1fr; }.admin-nav { padding:16px 20px; border-right:0; display:flex; gap:6px; overflow:auto; }.admin-nav>.eyebrow,.nav-note { display:none; }.admin-nav { position:static; height:auto; }.admin-nav>button { white-space:nowrap; margin:0; width:auto; padding:9px 12px; }.admin-nav>button.selected::before { display:none; }.edit-card,.sync-panel,.note-editor { padding:20px; }.login-panel { margin:6vh 16px; padding:32px 24px; }.admin-main { padding:24px 20px; }.form-grid { grid-template-columns:1fr; }.section-head,.sync-panel { align-items:flex-start; flex-direction:column; }.social-row { grid-template-columns:1fr; }.note-list li { flex-direction:column; align-items:flex-start; }.card-head { flex-wrap:wrap; } }
 </style>
