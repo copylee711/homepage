@@ -126,6 +126,13 @@ class DriveSFTPServer(asyncssh.SFTPServer):
 
     # —— 路径与属性 ——
 
+    def format_user(self, uid):
+        # ls -l 里显示的属主：网盘没有系统用户的概念，统一显示登录名。
+        return self.channel.get_connection().get_extra_info("drive_login") or "drive"
+
+    def format_group(self, gid):
+        return "drive"
+
     async def realpath(self, path):
         return virtual(path).encode()
 
