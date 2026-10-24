@@ -276,6 +276,18 @@ def issue(request: Request, response: Response, session: Session, user: User) ->
     return {"user": profile(user), "csrf": row.csrf}
 
 
+def share_cookie(request: Request, response: Response, row: UserSession):
+    """把旧的、仅限主站的登录 Cookie 换成全站共用的，网盘子域名也能识别。"""
+    settings = request.app.state.settings
+    if not settings.cookie_domain:
+        return
+    response.delete_cookie(USER_COOKIE, path="/api")
+    response.set_cookie(USER_COOKIE, request.cookies.get(USER_COOKIE, ""),
+                        max_age=max(int(row.expires_at - time.time()), 0), httponly=True,
+                        secure=settings.secure_cookie, samesite="lax", path="/api",
+                        domain=settings.cookie_domain)
+
+
 def clear_cookie(response: Response, settings):
     response.delete_cookie(USER_COOKIE, path="/api")
     if settings.cookie_domain:

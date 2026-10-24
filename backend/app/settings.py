@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     email_captcha_enabled: bool = False
     email_captcha_prefix: str = "esa-rwe96uub0q"
     email_captcha_scene_id: str = "trwiyf09"
+    # 意见反馈使用单独的 ESA 验证场景（滑块验证）。
+    feedback_captcha_scene_id: str = "12wbwicc"
     # 图床公开地址，例如 https://image.copylee.cn；留空时使用 site_url/images（由后端直接提供）。
     image_url: str = ""
     # 网盘网页地址（例如 https://cloud.copylee.cn），用于分享链接与客户端配置说明。

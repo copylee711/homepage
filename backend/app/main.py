@@ -316,6 +316,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "enabled": settings.email_captcha_enabled,
             "prefix": settings.email_captcha_prefix,
             "sceneId": settings.email_captcha_scene_id,
+            "feedbackSceneId": settings.feedback_captcha_scene_id,
         }}
 
     @app.post("/api/account/code")
@@ -364,8 +365,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"ok": True}
 
     @app.get("/api/account/me")
-    def account_me(request: Request, session: Session = Depends(database)):
+    def account_me(request: Request, response: Response, session: Session = Depends(database)):
         user, row = current_user(request, session)
+        accounts.share_cookie(request, response, row)
         plan = storage.plan(session, user.id)
         # 前端据此显示或隐藏网盘、图床与后台入口；新用户默认都没有。
         features = {"drive": plan.drive_enabled, "images": plan.images_enabled,

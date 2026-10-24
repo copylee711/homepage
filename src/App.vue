@@ -19,6 +19,13 @@ const GamesPage = defineAsyncComponent(() => import('./games/GamesPage.vue'))
 const DrivePage = defineAsyncComponent(() => import('./components/drive/DrivePage.vue'))
 const SharePage = defineAsyncComponent(() => import('./components/drive/SharePage.vue'))
 const onCloud = location.hostname.startsWith('cloud.')
+// 网盘子域名上的账户页直接回主站（登录 Cookie 两边共用），完成后再跳回来。
+if (onCloud && /^\/account\/?$/.test(location.pathname)) {
+  const params = new URLSearchParams(location.search)
+  const back = params.get('next') ?? '/'
+  params.set('next', /^\/(?!\/)/.test(back) ? location.origin + back : location.origin + '/')
+  location.replace(`${location.origin.replace('//cloud.', '//')}/account?${params}`)
+}
 const isShare = /^\/s\/[A-Za-z0-9]+\/?$/.test(location.pathname)
 const isDrive = !isShare && (/^\/drive(\/|$)/.test(location.pathname) || (onCloud && location.pathname === '/'))
 const isAdmin = location.pathname === '/admin' || location.pathname.startsWith('/admin/')

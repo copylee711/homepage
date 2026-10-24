@@ -5,7 +5,8 @@ import type { DriveMount, StorageSummary } from '../drive'
 import '../styles/admin-panel.css'
 
 type Row = { id: string; email: string; name: string; disabled: boolean; storage: StorageSummary; login: string; mounts: DriveMount[] }
-type State = { users: Row[]; admin_images: number; image_count: number; oss_configured: boolean; connection: { sftp_host: string; sftp_port: number; dav_url: string } }
+type Server = { disk_total: number; disk_used: number; disk_free: number; drive_local: number; images: number; allocated: number; oss_used: number; oss_allocated: number }
+type State = { users: Row[]; server: Server; admin_images: number; image_count: number; oss_configured: boolean; connection: { sftp_host: string; sftp_port: number; dav_url: string } }
 type Draft = { drive_enabled: boolean; images_enabled: boolean; quota_mb: number; max_image_mb: number; login: string }
 const props = defineProps<{ api: <T>(path: string, method?: string, data?: unknown) => Promise<T> }>()
 const emit = defineEmits<{ notify: [text: string]; fail: [text: string] }>()
@@ -17,6 +18,10 @@ const mountForm = ref<Record<string, { path: string; location: string; quota_mb:
 const filter = ref<'enabled' | 'all'>('enabled')
 const busy = ref(false)
 
+const server = computed(() => state.value?.server)
+const pct = (part: number, whole: number) => whole ? Math.min(100, part / whole * 100) : 0
+// 已分配配额超过“当前占用 + 剩余空间”时，所有用户都用满会写满磁盘。
+const overcommit = computed(() => server.value ? server.value.allocated > server.value.drive_local + server.value.images + server.value.disk_free : false)
 const shown = computed(() => (state.value?.users ?? []).filter(user => filter.value === 'all' || user.storage.drive_enabled || user.storage.images_enabled || user.storage.used))
 
 function draftOf(user: Row): Draft {
@@ -75,6 +80,21 @@ onMounted(() => work(load))
     <div class="section-head"><div><p class="eyebrow">Storage</p><h1>网盘与图床</h1></div>
       <div class="buttons"><button :class="{ selected: filter === 'enabled' }" @click="filter = 'enabled'">已开通</button><button :class="{ selected: filter === 'all' }" @click="filter = 'all'">全部用户</button><button @click="work(load)">刷新</button></div></div>
     <p class="subtle">新注册用户默认没有网盘与图床，在这里逐个开通。网盘与图床共用总配额；单独设置配额的挂载点不计入总配额。管理员也按自己的方案计算，避免占满服务器磁盘。</p>
+    <section v-if="server" class="edit-card server">
+      <div class="server-head"><h2>服务器存储</h2><span class="field-hint">数据目录所在磁盘</span></div>
+      <div class="disk" role="img" :aria-label="`磁盘已用 ${formatSize(server.disk_used)}，共 ${formatSize(server.disk_total)}`">
+        <span class="seg drive" :style="{ width: `${pct(server.drive_local, server.disk_total)}%` }" :title="`网盘 ${formatSize(server.drive_local)}`" />
+        <span class="seg images" :style="{ width: `${pct(server.images, server.disk_total)}%` }" :title="`图床 ${formatSize(server.images)}`" />
+        <span class="seg other" :style="{ width: `${pct(Math.max(server.disk_used - server.drive_local - server.images, 0), server.disk_total)}%` }" title="系统与其他文件" />
+      </div>
+      <dl class="figures">
+        <div><dt>磁盘</dt><dd>{{ formatSize(server.disk_used) }} / {{ formatSize(server.disk_total) }}</dd><span class="field-hint">剩余 {{ formatSize(server.disk_free) }}</span></div>
+        <div><dt><i class="dot drive" />网盘（本地）</dt><dd>{{ formatSize(server.drive_local) }}</dd></div>
+        <div><dt><i class="dot images" />图床</dt><dd>{{ formatSize(server.images) }}</dd></div>
+        <div><dt>已分配总配额</dt><dd :class="{ warn: overcommit }">{{ formatSize(server.allocated) }}</dd><span class="field-hint">{{ overcommit ? '超过可用空间，用户都用满会写满磁盘' : `可再分配约 ${formatSize(Math.max(server.drive_local + server.images + server.disk_free - server.allocated, 0))}` }}</span></div>
+        <div v-if="state?.oss_configured"><dt>OSS</dt><dd>{{ formatSize(server.oss_used) }}</dd><span class="field-hint">挂载点配额合计 {{ formatSize(server.oss_allocated) }}</span></div>
+      </dl>
+    </section>
     <p v-if="state" class="field-hint connection">SFTP：<code>{{ state.connection.sftp_host }}:{{ state.connection.sftp_port }}</code> · WebDAV：<code>{{ state.connection.dav_url }}</code> · OSS {{ state.oss_configured ? '已配置' : '未配置（OSS 挂载点暂不可用）' }}</p>
     <p v-if="state && !shown.length" class="subtle">还没有开通存储的用户，切换到“全部用户”为他们开通。</p>
     <article v-for="user in shown" :key="user.id" class="edit-card user" :class="{ muted: user.disabled }">
@@ -123,6 +143,17 @@ onMounted(() => work(load))
 
 <style scoped>
 .connection { margin:-8px 0 20px; }
+.server-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+.disk { display:flex; height:10px; margin-top:16px; border-radius:999px; background:var(--bg-tint); overflow:hidden; }
+.seg { height:100%; }
+.seg.drive,.dot.drive { background:var(--accent); }
+.seg.images,.dot.images { background:#7ea2ff; }
+.seg.other { background:var(--line-strong); }
+.figures { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px 20px; margin:18px 0 0; }
+.figures dt { color:var(--muted); font-size:12px; }
+.figures dd { margin:4px 0 2px; font-size:17px; font-weight:600; }
+.figures dd.warn { color:#d15c5c; }
+.dot { display:inline-block; width:8px; height:8px; margin-right:6px; border-radius:2px; }
 .user.muted { opacity:.6; }
 .user header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; }
 .who { display:flex; flex-direction:column; }

@@ -47,6 +47,8 @@ from .models import LoginAttempt, User, UserChallenge, UserPasskey, UserSession
 from .security import OTP_REQUIRED, cipher, recovery_codes, verify_factor
 
 CHALLENGE_COOKIE = "copylee_user_challenge"
+# 前端据此通知浏览器删除这个本站已不认识的 Passkey。
+UNKNOWN_PASSKEY = "这个 Passkey 已不在本站，请改用密码或其他 Passkey 登录"
 PASSKEY_LIMIT = 10
 
 
@@ -281,9 +283,10 @@ def passkey_user(request, response, session, body) -> User:
     row = take_challenge(request, session, body.challenge_id, "login")
     key = session.get(UserPasskey, str(body.credential.get("id", "")))
     user = session.get(User, key.user_id) if key else None
+    if key is None or user is None:
+        record_failure(session, key_ip)
+        raise HTTPException(401, UNKNOWN_PASSKEY)
     try:
-        if key is None or user is None:
-            raise ValueError("unknown credential")
         result = verify_authentication_response(
             credential=body.credential, expected_challenge=base64url_to_bytes(row.challenge),
             expected_rp_id=rp_id, expected_origin=origin,

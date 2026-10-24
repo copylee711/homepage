@@ -37,3 +37,11 @@ export async function usePasskey(options: Record<string, any>, register = false)
   return {id:credential.id, rawId:encode(credential.rawId), type:credential.type, response:data,
     clientExtensionResults:credential.getClientExtensionResults(), authenticatorAttachment:credential.authenticatorAttachment}
 }
+
+/** 服务器已不认识的 Passkey：通知浏览器从密码管理器中移除（Chrome 132+ 支持，其他浏览器忽略）。 */
+export const UNKNOWN_PASSKEY = '这个 Passkey 已不在本站，请改用密码或其他 Passkey 登录'
+export async function forgetPasskey(rpId: string | undefined, credentialId: string) {
+  const api = window.PublicKeyCredential as unknown as { signalUnknownCredential?: (options: { rpId: string; credentialId: string }) => Promise<void> }
+  if (!rpId || !api?.signalUnknownCredential) return
+  await api.signalUnknownCredential({ rpId, credentialId }).catch(() => {})
+}

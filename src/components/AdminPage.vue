@@ -6,7 +6,7 @@ import AdminStorage from './AdminStorage.vue'
 import type { HostedImage, ImageToken } from '../account'
 import type { SiteContent } from '../types'
 import { useTheme } from '../composables/useTheme'
-import { passkeyAvailable, usePasskey } from '../passkeys'
+import { UNKNOWN_PASSKEY, forgetPasskey, passkeyAvailable, usePasskey } from '../passkeys'
 import { noteSlug, postSlug } from '../slug'
 import AnimatedSelect from './AnimatedSelect.vue'
 import AppIcon from './AppIcon.vue'
@@ -50,7 +50,10 @@ const canPasskey = computed(() => passkeyAvailable())
 async function keyLogin() { await action(async () => {
   const options = await api<{options:Record<string,any>;challenge_id:string}>('/api/auth/passkey/options','POST')
   const credential = await usePasskey(options.options)
-  const result = await api<{csrf:string}>('/api/auth/passkey/verify','POST',{challenge_id:options.challenge_id,credential})
+  const result = await api<{csrf:string}>('/api/auth/passkey/verify','POST',{challenge_id:options.challenge_id,credential}).catch(async err => {
+    if (err instanceof Error && err.message === UNKNOWN_PASSKEY) await forgetPasskey(options.options.rpId, credential.id)
+    throw err
+  })
   csrf.value=result.csrf; password.value=''
   await loadAll()
 }) }

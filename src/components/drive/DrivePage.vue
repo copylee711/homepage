@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { account, accountChecked, features, loadAccount } from '../../account'
-import { driveApi, formatSize } from '../../drive'
+import { accountUrl, driveApi, formatSize, mainSite } from '../../drive'
 import type { DriveOverview } from '../../drive'
 import '../../styles/drive.css'
 import DriveFiles from './DriveFiles.vue'
@@ -16,9 +16,8 @@ const section = ref<Section>((() => {
 })())
 const overview = ref<DriveOverview>()
 const error = ref('')
-// 反馈接口受主站 ESA 验证码保护，网盘子域名上跳回主站提交。
-const feedbackUrl = location.hostname.startsWith('cloud.') ? `${location.origin.replace('//cloud.', '//')}/account?tab=feedback` : '/account?tab=feedback'
-const loginUrl = `/account?next=${encodeURIComponent(location.pathname + location.search)}`
+const feedbackUrl = `${mainSite}/account?tab=feedback`
+const loginUrl = accountUrl()
 const storage = computed(() => overview.value?.storage)
 const percent = computed(() => storage.value?.quota ? Math.min(100, storage.value.used / storage.value.quota * 100) : 0)
 const nav: { id: Section; label: string; icon: string }[] = [

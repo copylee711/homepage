@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { account, loadAccount } from '../../account'
+import { accountUrl, mainSite } from '../../drive'
 import { useTheme } from '../../composables/useTheme'
 import AppIcon from '../AppIcon.vue'
 import LogoMark from '../LogoMark.vue'
 
 const { theme, toggle } = useTheme()
 // 网盘子域名上回到主站；在主站 /drive 下则回到首页。
-const home = location.hostname.startsWith('cloud.') ? location.origin.replace('//cloud.', '//') : '/'
+const home = mainSite || '/'
 onMounted(() => { void loadAccount() })
-const loginUrl = `/account?next=${encodeURIComponent(location.pathname + location.search)}`
+const loginUrl = accountUrl()
+const profileUrl = mainSite ? `${mainSite}/account` : '/account'
 </script>
 
 <template>
@@ -17,7 +19,7 @@ const loginUrl = `/account?next=${encodeURIComponent(location.pathname + locatio
     <a class="brand" href="/"><LogoMark class="logo" /><span>Copy Lee</span><em>Cloud</em></a>
     <div class="top-actions">
       <a class="back" :href="home">返回主页</a>
-      <a class="avatar" :href="account ? '/account' : loginUrl" :title="account ? account.name : '登录'" :aria-label="account ? `账户：${account.name}` : '登录'">
+      <a class="avatar" :href="account ? profileUrl : loginUrl" :title="account ? account.name : '登录'" :aria-label="account ? `账户：${account.name}` : '登录'">
         <img v-if="account?.avatar" :src="account.avatar" alt="">
         <span v-else-if="account">{{ account.name.slice(0, 1).toUpperCase() }}</span>
         <svg v-else viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="3.5" /><path d="M5 19.5a7 7 0 0 1 14 0" /></svg>

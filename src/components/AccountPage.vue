@@ -9,7 +9,7 @@ import ImageHosting from './ImageHosting.vue'
 import FeedbackPanel from './FeedbackPanel.vue'
 import StorageSummary from './StorageSummary.vue'
 import AccountSecurity from './AccountSecurity.vue'
-import { passkeyAvailable, usePasskey } from '../passkeys'
+import { UNKNOWN_PASSKEY, forgetPasskey, passkeyAvailable, usePasskey } from '../passkeys'
 import { games, loadMine } from '../games/api'
 import type { GameBest, GameId } from '../games/api'
 import { cancelEmailCaptcha, prepareEmailCaptcha, refreshEmailCaptcha, sendEmailCode, verifyEmailCaptcha } from '../email-captcha'
@@ -28,7 +28,7 @@ const OTP_REQUIRED = '请输入两步验证码或恢复码'
 const otp = ref(''), otpStep = ref(false)
 const canPasskey = passkeyAvailable()
 const cooldown = ref(0)
-interface AccountConfig { registrationOpen: boolean; allowedDomains: string[]; captcha: EmailCaptchaConfig }
+interface AccountConfig { registrationOpen: boolean; allowedDomains: string[]; captcha: EmailCaptchaConfig & { feedbackSceneId?: string } }
 const config = ref<AccountConfig>()
 const captchaBusy = ref(false)
 const favorites = ref<AccountEntry[]>([]), history = ref<AccountEntry[]>([])
@@ -39,7 +39,16 @@ const captchaLifetime = new AbortController()
 
 const domainHint = computed(() => (config.value?.allowedDomains ?? []).slice(0, 8).join('、'))
 // 登录后回到原页面：只接受本站相对路径。
-const next = (() => { const value = new URLSearchParams(location.search).get('next') ?? ''; return /^\/(?!\/)/.test(value) ? value : '' })()
+const next = (() => {
+  const value = new URLSearchParams(location.search).get('next') ?? ''
+  if (/^\/(?!\/)/.test(value)) return value
+  // 也接受本站子域名（如 cloud.）的地址，用于网盘登录后跳回。
+  try {
+    const url = new URL(value)
+    const ok = url.protocol === location.protocol && (url.hostname === location.hostname || url.hostname.endsWith(`.${location.hostname}`))
+    return ok ? url.href : ''
+  } catch { return '' }
+})()
 
 async function run(work: () => Promise<void>) {
   if (busy.value) return
@@ -102,7 +111,12 @@ const submit = () => run(async () => {
 const passkeyLogin = () => run(async () => {
   const options = await accountApi<{ options: Record<string, any>; challenge_id: string }>('/passkey/options', 'POST')
   const credential = await usePasskey(options.options)
-  await afterSignIn(await accountApi('/passkey/verify', 'POST', { challenge_id: options.challenge_id, credential }))
+  try {
+    await afterSignIn(await accountApi('/passkey/verify', 'POST', { challenge_id: options.challenge_id, credential }))
+  } catch (err) {
+    if (err instanceof Error && err.message === UNKNOWN_PASSKEY) await forgetPasskey(options.options.rpId, credential.id)
+    throw err
+  }
 })
 
 async function loadLists() {
@@ -175,6 +189,8 @@ onMounted(async () => {
   const params = new URLSearchParams(location.search)
   if (params.get('mode') === 'register') mode.value = 'register'
   await loadAccount()
+  // 已登录时直接回到来源页面（例如从网盘跳来登录）。
+  if (account.value && next) { location.href = next; return }
   const wanted = params.get('tab')
   if (wanted && tabList.value.some(([value]) => value === wanted)) tab.value = wanted as typeof tab.value
   if (account.value) await loadLists().catch(() => {})
@@ -249,7 +265,7 @@ onBeforeUnmount(() => { clearInterval(timer); clearTimeout(warmup); captchaLifet
             <StorageSummary v-if="features.drive" />
             <ImageHosting v-if="features.images" @enabled="value => { if (!value) loadAccount(true) }" />
           </div>
-          <FeedbackPanel v-else-if="tab === 'feedback'" :captcha="config?.captcha" />
+          <FeedbackPanel v-else-if="tab === 'feedback'" :captcha="config?.captcha && { ...config.captcha, sceneId: config.captcha.feedbackSceneId || config.captcha.sceneId }" />
           <template v-else-if="tab !== 'settings'">
             <div v-if="tab === 'history' && history.length" class="panel-actions"><button class="ghost" type="button" @click="clearHistory">清空记录</button></div>
             <ul class="entries">

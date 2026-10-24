@@ -1,4 +1,7 @@
-/** ESA 验签票据只用于下一次发送请求，不缓存、不写入 URL 或日志。 */
+/** ESA 验签票据只用于下一次请求，不缓存、不写入 URL 或日志。
+ *
+ * 不同接口可以用不同的验证场景（邮箱验证码为无痕验证，反馈为滑块验证），每个场景各自初始化一个实例。
+ */
 export interface EmailCaptchaConfig { enabled: boolean; prefix: string; sceneId: string }
 interface CaptchaInstance { refresh(): void }
 interface CaptchaOptions {
@@ -16,92 +19,103 @@ declare global {
   }
 }
 
-let ready: Promise<void> | undefined
-let instance: CaptchaInstance | undefined
-let trigger: HTMLButtonElement
-let pending: { resolve(token: string): void; reject(error: Error): void } | undefined
-let expires: ReturnType<typeof setTimeout> | undefined
+interface Scene {
+  ready: Promise<void>
+  instance?: CaptchaInstance
+  trigger: HTMLButtonElement
+  pending?: { resolve(token: string): void; reject(error: Error): void }
+  expires?: ReturnType<typeof setTimeout>
+}
 
-function fail(message: string) {
-  const current = pending
-  pending = undefined
-  clearTimeout(expires)
-  current?.reject(new Error(message))
+let script: Promise<void> | undefined
+const scenes = new Map<string, Scene>()
+
+function loadScript(prefix: string): Promise<void> {
+  if (script) return script
+  script = new Promise<void>((resolve, reject) => {
+    window.AliyunCaptchaConfig = { region: 'cn', prefix }
+    const tag = document.createElement('script')
+    tag.src = 'https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js'
+    tag.async = true
+    tag.onerror = () => { script = undefined; reject(new Error('安全验证加载失败，请检查网络并刷新页面')) }
+    tag.onload = () => window.initAliyunCaptcha ? resolve() : reject(new Error('安全验证加载失败，请刷新页面重试'))
+    document.head.append(tag)
+  })
+  return script
+}
+
+function fail(scene: Scene | undefined, message: string) {
+  const current = scene?.pending
+  if (!scene || !current) return
+  scene.pending = undefined
+  clearTimeout(scene.expires)
+  current.reject(new Error(message))
 }
 
 export function prepareEmailCaptcha(config: EmailCaptchaConfig): Promise<void> {
   if (!config.enabled) return Promise.resolve()
-  if (ready) return ready
-  ready = new Promise<void>((resolve, reject) => {
-    // 持久挂载，SPA 离开并返回账户页时不重复初始化 SDK。
-    const element = document.createElement('div')
-    element.id = 'email-captcha-element'
-    trigger = document.createElement('button')
-    trigger.id = 'email-captcha-trigger'
-    trigger.type = 'button'
-    trigger.hidden = true
-    document.body.append(element, trigger)
-    window.AliyunCaptchaConfig = { region: 'cn', prefix: config.prefix }
-    const script = document.createElement('script')
-    script.src = 'https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js'
-    script.async = true
+  const existing = scenes.get(config.sceneId)
+  if (existing) return existing.ready
+  // 持久挂载，SPA 离开并返回页面时不重复初始化 SDK。
+  const key = config.sceneId.replace(/[^A-Za-z0-9_-]/g, '')
+  const element = document.createElement('div')
+  element.id = `captcha-element-${key}`
+  const trigger = document.createElement('button')
+  trigger.id = `captcha-trigger-${key}`
+  trigger.type = 'button'
+  trigger.hidden = true
+  document.body.append(element, trigger)
+  const scene: Scene = { trigger, ready: Promise.resolve() }
+  scene.ready = new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('安全验证加载超时，请刷新页面重试')), 20000)
-    script.onerror = () => {
-      clearTimeout(timeout)
-      reject(new Error('安全验证加载失败，请检查网络并刷新页面'))
-    }
-    script.onload = () => {
-      if (!window.initAliyunCaptcha) {
-        clearTimeout(timeout)
-        reject(new Error('安全验证加载失败，请刷新页面重试'))
-        return
-      }
-      window.initAliyunCaptcha({
-        SceneId: config.sceneId, mode: 'popup', element: '#email-captcha-element',
-        button: '#email-captcha-trigger',
+    loadScript(config.prefix).then(() => {
+      window.initAliyunCaptcha!({
+        SceneId: config.sceneId, mode: 'popup', element: `#${element.id}`, button: `#${trigger.id}`,
         server: ['captcha-esa-open.aliyuncs.com', 'captcha-esa-open-b.aliyuncs.com'],
         getInstance(value) {
-          instance = value
+          scene.instance = value
           // 官方要求初始化与验证请求间隔大于 2 秒。
           setTimeout(() => { clearTimeout(timeout); resolve() }, 2100)
         },
         success(token) {
-          const current = pending
-          pending = undefined
-          clearTimeout(expires)
+          const current = scene.pending
+          scene.pending = undefined
+          clearTimeout(scene.expires)
           current?.resolve(token)
         },
-        fail: () => fail('安全验证未通过，请重试'),
+        fail: () => fail(scene, '安全验证未通过，请重试'),
         onError() {
           clearTimeout(timeout)
           reject(new Error('安全验证暂不可用，请刷新页面重试'))
-          fail('安全验证暂不可用，请刷新页面重试')
+          fail(scene, '安全验证暂不可用，请刷新页面重试')
         },
-        onClose: () => fail('安全验证已取消，请重试'),
+        onClose: () => fail(scene, '安全验证已取消，请重试'),
       })
-    }
-    document.head.append(script)
+    }, error => { clearTimeout(timeout); reject(error) })
   })
-  return ready
+  scene.ready.catch(() => scenes.delete(config.sceneId))
+  scenes.set(config.sceneId, scene)
+  return scene.ready
 }
 
 export async function verifyEmailCaptcha(config: EmailCaptchaConfig, signal?: AbortSignal): Promise<string> {
   if (!config.enabled) return ''
   await prepareEmailCaptcha(config)
   signal?.throwIfAborted()
-  if (pending) throw new Error('安全验证正在进行，请稍候')
+  const scene = scenes.get(config.sceneId)!
+  if (scene.pending) throw new Error('安全验证正在进行，请稍候')
   return new Promise<string>((resolve, reject) => {
-    const abort = () => fail('安全验证已取消')
+    const abort = () => fail(scene, '安全验证已取消')
     const cleanup = () => signal?.removeEventListener('abort', abort)
-    pending = { resolve(token) { cleanup(); resolve(token) }, reject(error) { cleanup(); reject(error) } }
+    scene.pending = { resolve(token) { cleanup(); resolve(token) }, reject(error) { cleanup(); reject(error) } }
     signal?.addEventListener('abort', abort, { once: true })
-    expires = setTimeout(() => fail('安全验证超时，请重试'), 90000)
-    trigger.click()
+    scene.expires = setTimeout(() => fail(scene, '安全验证超时，请重试'), 90000)
+    scene.trigger.click()
   })
 }
 
-export function cancelEmailCaptcha() { fail('安全验证已取消') }
-export function refreshEmailCaptcha() { instance?.refresh() }
+export function cancelEmailCaptcha() { for (const scene of scenes.values()) fail(scene, '安全验证已取消') }
+export function refreshEmailCaptcha() { for (const scene of scenes.values()) scene.instance?.refresh() }
 
 export async function sendEmailCode(email: string, purpose: 'register' | 'reset', token: string) {
   const response = await fetch('/api/account/code', {

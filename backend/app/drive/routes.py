@@ -4,6 +4,7 @@ import asyncio
 import mimetypes
 import re
 import secrets
+import shutil
 import time
 import zipfile
 from pathlib import Path
@@ -17,7 +18,7 @@ from .. import audit, storage
 from ..accounts import client_ip, current_user, record_failure, throttle
 from ..auth import check_origin, current_session, digest
 from ..images import _Sink
-from ..models import DriveAccount, DriveUpload, HostedImage, User
+from ..models import DriveAccount, DriveMount, DriveUpload, HostedImage, StoragePlan, User
 from ..schemas import (
     AppPasswordCreate,
     DriveLogin,
@@ -551,10 +552,28 @@ def storage_row(session: Session, user: User) -> dict:
             "mounts": accounts.mounts(session, user.id)}
 
 
+def server_usage(session: Session, settings) -> dict:
+    """服务器磁盘与已分配配额，便于判断还能给用户分多少空间。"""
+    disk = shutil.disk_usage(settings.data_dir)
+    mounts = session.exec(select(DriveMount)).all()
+    local = sum(m.used_bytes for m in mounts if m.kind == "local")
+    images = sum(session.exec(select(HostedImage.size)).all())
+    plans = session.exec(select(StoragePlan).where(
+        (StoragePlan.drive_enabled) | (StoragePlan.images_enabled))).all()
+    oss = [m for m in mounts if m.kind == "oss"]
+    return {"disk_total": disk.total, "disk_used": disk.used, "disk_free": disk.free,
+            "drive_local": local, "images": images,
+            # 已分配：开通用户的总配额之和（本地磁盘与图床共用）
+            "allocated": sum(p.quota_bytes for p in plans),
+            "oss_used": sum(m.used_bytes for m in oss),
+            "oss_allocated": sum(m.quota_bytes for m in oss)}
+
+
 @router.get("/api/admin/storage")
 def admin_storage(request: Request, session: Session = Depends(admin)):
     users = session.exec(select(User).order_by(User.created_at.desc())).all()
     return {"users": [storage_row(session, user) for user in users],
+            "server": server_usage(session, settings_of(request)),
             "admin_images": storage.images_used(session, storage.ADMIN),
             "image_count": len(session.exec(select(HostedImage.id)).all()),
             "oss_configured": bool(settings_of(request).oss_bucket),

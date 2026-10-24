@@ -144,3 +144,11 @@ export function formatTime(seconds: number | null | undefined) {
   if (!seconds) return ''
   return new Date(seconds * 1000).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
+
+/** 网盘子域名（cloud.）对应的主站地址；在主站本身时为空串，链接保持相对路径。 */
+export const mainSite = location.hostname.startsWith('cloud.') ? location.origin.replace('//cloud.', '//') : ''
+
+/** 登录、注册与反馈都在主站完成（Passkey 与 ESA 验证码只对主站有效），完成后回到当前页面。 */
+export const accountUrl = (query = '') => mainSite
+  ? `${mainSite}/account?${query ? `${query}&` : ''}next=${encodeURIComponent(location.href)}`
+  : `/account?${query ? `${query}&` : ''}next=${encodeURIComponent(location.pathname + location.search)}`
