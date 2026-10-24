@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """对象存储接口；生产环境用阿里云 OSS SDK，测试用 tests 里的内存实现。"""
+
+from __future__ import annotations
 
 import io
 from dataclasses import dataclass

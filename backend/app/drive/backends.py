@@ -1,10 +1,10 @@
-from __future__ import annotations
-
 """存储后端：本地目录、OSS 对象前缀、图床（只读）。
 
 后端只处理挂载点内的相对路径（不带前导 /，根为空串），不关心用户、权限和配额，
 这些由 vfs 负责。所有方法都是同步的，协议层在线程里调用。
 """
+
+from __future__ import annotations
 
 import os
 import shutil
