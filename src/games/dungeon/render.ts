@@ -866,17 +866,11 @@ function drawTouch(ctx: CanvasRenderingContext2D, game: Game, view: View, touch:
   if (game.prompt) button(L.interact, '拾取', false, '#7cffb2', 1, 13)
 }
 
-/** 触屏射击时在场景中显示瞄准方向：手动为虚线准星，自动为锁定框。 */
+/** 触屏自动瞄准时在目标上显示锁定框。 */
 function drawAimGuide(ctx: CanvasRenderingContext2D, game: Game, touch: TouchState, time: number) {
-  const p = game.player, color = game.weapon.color
   ctx.save()
-  if (touch.aim !== null) {
-    const a = touch.aim, len = 150
-    const g = ctx.createLinearGradient(p.x, p.y, p.x + Math.cos(a) * len, p.y + Math.sin(a) * len)
-    g.addColorStop(0, hexA(color, 0.75)); g.addColorStop(1, hexA(color, 0))
-    ctx.strokeStyle = g; ctx.lineWidth = 2; ctx.setLineDash([6, 6]); ctx.lineDashOffset = -time * 40
-    ctx.beginPath(); ctx.moveTo(p.x + Math.cos(a) * 18, p.y + Math.sin(a) * 18); ctx.lineTo(p.x + Math.cos(a) * len, p.y + Math.sin(a) * len); ctx.stroke()
-  } else {
+  // 手动瞄准只靠射击键上的方向弧提示，场景里不画辅助线
+  if (touch.aim === null) {
     const t = game.nearestEnemy()
     if (t) {
       const r = t.r + 7 + Math.sin(time * 8) * 1.5
