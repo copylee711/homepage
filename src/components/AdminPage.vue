@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { fetchJson } from '../content'
-import type { HostedImage, ImageLimits, ImageToken } from '../account'
+import AdminInbox from './AdminInbox.vue'
+import AdminStorage from './AdminStorage.vue'
+import type { HostedImage, ImageToken } from '../account'
 import type { SiteContent } from '../types'
 import { useTheme } from '../composables/useTheme'
 import { passkeyAvailable, usePasskey } from '../passkeys'
@@ -19,18 +21,19 @@ const csrf = ref(''), loading = ref(true), busy = ref(false), error = ref(''), m
 // 成功提示 4 秒后自动消失；错误提示保留到手动关闭或下一次操作。
 let messageTimer: ReturnType<typeof setTimeout> | undefined
 watch(message, value => { clearTimeout(messageTimer); if (value) messageTimer = setTimeout(() => { message.value = '' }, 4000) })
-const username = ref('admin'), password = ref('')
+const email = ref(''), password = ref('')
 // 两步验证码不常驻：密码通过后服务器提示需要验证码，再弹出第二步。
 const OTP_REQUIRED = '请输入两步验证码或恢复码'
-const otpFor = ref<null | 'login' | 'unlock'>(null), otpCode = ref(''), otpInput = ref<HTMLInputElement>()
+const otpFor = ref<null | 'login'>(null), otpCode = ref(''), otpInput = ref<HTMLInputElement>()
 function needsOtp(err: unknown) { return err instanceof Error && err.message === OTP_REQUIRED }
-function askOtp(target: 'login' | 'unlock') {
+function askOtp(target: 'login') {
   otpFor.value = target; otpCode.value = ''; error.value = ''
 }
 // 请求结束、表单解除禁用后再聚焦验证码输入框。
 watch([otpFor, busy], ([target, working]) => { if (target && !working) nextTick(() => otpInput.value?.focus()) }, { flush: 'post' })
-function submitOtp() { return otpFor.value === 'login' ? login() : unlockWithPassword() }
-const tab = ref<'profile' | 'portals' | 'repos' | 'posts' | 'notes' | 'images' | 'accounts' | 'security'>('profile')
+function submitOtp() { return login() }
+const tab = ref<'profile' | 'portals' | 'repos' | 'posts' | 'notes' | 'storage' | 'accounts' | 'inbox'>('profile')
+const unread = ref(0)
 // 侧栏导航：图标为 24×24 描边路径
 const navItems: { id: typeof tab.value; name: string; icon: string }[] = [
   { id: 'profile', name: '主页设置', icon: 'M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1Z' },
@@ -38,81 +41,18 @@ const navItems: { id: typeof tab.value; name: string; icon: string }[] = [
   { id: 'repos', name: '仓库展示', icon: 'M6 4h10l3 3v13H6Zm4 6h6m-6 4h6m-6 4h3' },
   { id: 'posts', name: '文章管理', icon: 'M5 19h4L19 9l-4-4L5 15Zm8-12 4 4' },
   { id: 'notes', name: '笔记管理', icon: 'M6 4h12v16H6Zm3 4h6m-6 4h6m-6 4h4' },
-  { id: 'images', name: '图床', icon: 'M4 5h16v14H4Zm0 11 5-5 4 4 2-2 5 5M15 9.5a1.5 1.5 0 1 0 0-.01' },
+  { id: 'storage', name: '网盘与图床', icon: 'M4 7h16v11H4Zm0 0 2-3h12l2 3M8 12h8' },
   { id: 'accounts', name: '用户与邮件', icon: 'M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm-6 9a6 6 0 0 1 12 0m1-9 5-3m-5 6 5 3' },
-  { id: 'security', name: '登录安全', icon: 'M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6Zm-3 9 2 2 4-4' },
+  { id: 'inbox', name: '收件箱', icon: 'M4 6h16v12H4Zm0 0 8 7 8-7' },
 ]
 const socialOptions = computed(() => socialPlatforms.map(([value, label]) => ({ value, label })))
-type SecurityState = {elevated_until:number; totp_enabled:boolean; recovery_remaining:number; passkeys:{id:string; name:string; created_at:number; last_used:number|null}[]}
-const security = ref<SecurityState>(), securityOtp = ref(''), keyName = ref('我的设备')
-const enrollment = ref<{secret:string; qr:string}>(), recoveryCodes = ref<string[]>([])
 const canPasskey = computed(() => passkeyAvailable())
-async function loadSecurity() { security.value = await api<SecurityState>('/api/admin/security') }
-// 进入登录安全页面时验证一次身份（密码或 Passkey），10 分钟内修改安全设置无需重复输入。
-const stepUp = ref(false), stepPassword = ref(''), stepInput = ref<HTMLInputElement>()
-const now = ref(Date.now())
-let clock: ReturnType<typeof setInterval> | undefined
-const elevatedMinutes = computed(() => Math.max(0, Math.ceil(((security.value?.elevated_until ?? 0) * 1000 - now.value) / 60000)))
-function openStepUp() {
-  stepUp.value = true; stepPassword.value = ''; otpFor.value = null
-  nextTick(() => stepInput.value?.focus())
-}
-function closeStepUp() { stepUp.value = false; if (!elevatedMinutes.value) tab.value = 'profile' }
-async function finishStepUp(work: () => Promise<{elevated_until: number} | null>) { await action(async () => {
-  const result = await work()
-  if (!result) return
-  if (security.value) security.value.elevated_until = result.elevated_until
-  now.value = Date.now(); stepUp.value = false; stepPassword.value = ''; otpFor.value = null; otpCode.value = ''
-  message.value = '身份已验证，10 分钟内可直接修改安全设置。'
-}) }
-const unlockWithPassword = () => finishStepUp(async () => {
-  try { return await api<{elevated_until: number}>('/api/admin/security/unlock', 'POST', {password: stepPassword.value, otp: otpFor.value ? otpCode.value : ''}) }
-  catch (err) { if (needsOtp(err)) { askOtp('unlock'); return null } throw err }
-})
-const unlockWithPasskey = () => finishStepUp(async () => {
-  const options = await api<{options: Record<string, any>; challenge_id: string}>('/api/admin/security/unlock/passkey/options', 'POST')
-  const credential = await usePasskey(options.options)
-  return api('/api/admin/security/unlock/passkey/verify', 'POST', {challenge_id: options.challenge_id, credential})
-})
-watch(tab, async (next) => {
-  if (next !== 'security') return
-  await loadSecurity().catch(() => {})
-  now.value = Date.now()
-  if (!elevatedMinutes.value) openStepUp()
-})
-// 身份已验证时密码留空；开启两步验证时 otp 为验证器中的新验证码。
-function proof() { return {password: '', otp: securityOtp.value} }
-async function factorOperation(operation:string) { await action(async () => {
-  const result = await api<{secret?:string; qr?:string; recovery_codes?:string[]}>(`/api/admin/security/2fa/${operation}`, 'POST', proof())
-  if(operation==='setup') enrollment.value={secret:result.secret!,qr:result.qr!}
-  else { enrollment.value=undefined; securityOtp.value=''; recoveryCodes.value=result.recovery_codes ?? [] }
-  await loadSecurity(); message.value=operation==='setup' ? '请扫描二维码，然后输入验证码确认绑定。' : '安全设置已更新，其他会话已撤销。'
-}) }
-const pwCurrent = ref(''), pwNew = ref(''), pwConfirm = ref('')
-async function changeAdminPassword() { await action(async () => {
-  if (pwNew.value !== pwConfirm.value) throw new Error('两次输入的新密码不一致')
-  await api('/api/admin/security/password', 'POST', {current: pwCurrent.value, password: pwNew.value})
-  pwCurrent.value = ''; pwNew.value = ''; pwConfirm.value = ''
-  message.value = '密码已修改，其他会话已退出。'
-}) }
 async function keyLogin() { await action(async () => {
   const options = await api<{options:Record<string,any>;challenge_id:string}>('/api/auth/passkey/options','POST')
   const credential = await usePasskey(options.options)
   const result = await api<{csrf:string}>('/api/auth/passkey/verify','POST',{challenge_id:options.challenge_id,credential})
   csrf.value=result.csrf; password.value=''
-  await loadSettings(); await listArticles(); await loadSecurity(); await loadNotes(); await loadAccounts()
-}) }
-async function addPasskey() { await action(async () => {
-  const options = await api<{options:Record<string,any>;challenge_id:string}>('/api/admin/security/passkeys/options','POST',{...proof(),name:keyName.value})
-  const credential = await usePasskey(options.options,true)
-  await api('/api/admin/security/passkeys/verify','POST',{challenge_id:options.challenge_id,credential,name:keyName.value})
-  await loadSecurity(); message.value='Passkey 已绑定，下次可以直接使用设备验证登录。'
-}) }
-async function removePasskey(id:string) { await action(async () => {
-  const body = proof()
-  if(!confirm('撤销后这个 Passkey 将不能再登录，继续吗？')) return
-  await api(`/api/admin/security/passkeys/${encodeURIComponent(id)}/remove`,'POST',body)
-  await loadSecurity(); message.value='Passkey 已撤销，其他会话已退出。'
+  await loadAll()
 }) }
 const settings = ref<SiteContent>(), siteRevision = ref(0)
 const articles = ref<ArticleItem[]>([]), article = ref<Article>(), draft = ref<Draft>(emptyDraft())
@@ -175,25 +115,17 @@ async function previewNote() { await action(async () => {
   notePreview.value = (await api<{html: string}>('/api/admin/preview', 'POST', {markdown: noteEdit.value!.markdown})).html
 }) }
 type AccountsConfig = {registrationOpen:boolean; allowedDomains:string[]; dailyLimit:number; smtp:{host:string; port:number; security:'ssl'|'starttls'; username:string; fromName:string; fromAddress:string}; hasSmtpPassword:boolean}
-type SiteUser = {id:string; email:string; name:string; avatar:string; created_at:string; disabled:boolean; last_login:string|null; images:ImageLimits; totp:boolean; passkeys:number}
-type QuotaDraft = {enabled:boolean; quota_mb:number; max_file_mb:number}
+type SiteUser = {id:string; email:string; name:string; avatar:string; created_at:string; disabled:boolean; last_login:string|null; admin:boolean; totp:boolean; passkeys:number}
 const accountsConfig = ref<AccountsConfig>(), domainsText = ref(''), smtpSecret = ref(''), testTo = ref(''), siteUsers = ref<SiteUser[]>([])
-const quotaDrafts = ref<Record<string, QuotaDraft>>({})
 const MiB = 1024 * 1024
 const mib = (bytes: number) => bytes >= MiB ? `${(bytes / MiB).toFixed(1)} MiB` : `${Math.max(1, Math.round(bytes / 1024))} KiB`
-function quotaDraft(limits: ImageLimits): QuotaDraft { return {enabled: limits.enabled, quota_mb: Math.round((limits.quota ?? 200 * MiB) / MiB), max_file_mb: Math.round(limits.max_file / MiB)} }
-async function saveQuota(user: SiteUser) { await action(async () => {
-  user.images = await api<ImageLimits>(`/api/admin/accounts/users/${user.id}/images`, 'PUT', quotaDrafts.value[user.id])
-  quotaDrafts.value[user.id] = quotaDraft(user.images)
-  message.value = user.images.enabled ? `已为 ${user.email} 开启图床。` : `已关闭 ${user.email} 的图床并撤销其令牌，图片保留。`
-}) }
 type ImagesState = {items: HostedImage[]; total: number; page: number; page_size: number; usage: {owner:string; label:string; count:number; size:number}[]; tokens: ImageToken[]; upload_url: string}
 const imagesState = ref<ImagesState>(), imageOwner = ref(''), adminTokenName = ref('PicList'), adminFreshToken = ref('')
 const imagePages = computed(() => Math.max(1, Math.ceil((imagesState.value?.total ?? 0) / (imagesState.value?.page_size ?? 40))))
 async function loadImages(page = imagesState.value?.page ?? 1) {
   imagesState.value = await api<ImagesState>(`/api/admin/images?page=${page}&owner=${encodeURIComponent(imageOwner.value)}`)
 }
-watch(tab, next => { if (next === 'images') void loadImages(1).catch(err => { error.value = err instanceof Error ? err.message : '图床加载失败' }) })
+watch(tab, next => { if (next === 'storage') void loadImages(1).catch(err => { error.value = err instanceof Error ? err.message : '图床加载失败' }) })
 watch(imageOwner, () => { void action(() => loadImages(1)) })
 async function removeImage(item: HostedImage) { await action(async () => {
   if (!confirm('删除后这张图片的链接将失效，引用它的文章会显示破图。确定删除吗？')) return
@@ -217,7 +149,6 @@ async function uploadToHost(event: Event) {
 async function loadAccounts() {
   const data = await api<{config: AccountsConfig; users: SiteUser[]}>('/api/admin/accounts')
   accountsConfig.value = data.config; domainsText.value = data.config.allowedDomains.join('\n'); siteUsers.value = data.users
-  quotaDrafts.value = Object.fromEntries(data.users.map(user => [user.id, quotaDraft(user.images)]))
 }
 async function saveAccounts(clearSecret = false) { await action(async () => {
   const {hasSmtpPassword: _, ...config} = accountsConfig.value!
@@ -279,7 +210,6 @@ async function action(work: () => Promise<void>) {
   busy.value = true; error.value = ''; message.value = ''
   try { await work() } catch(err) {
     if((err as {status?: number}).status===401) csrf.value=''
-    if((err as {status?: number}).status===428) { if (security.value) security.value.elevated_until = 0; openStepUp() }
     error.value = err instanceof Error ? err.message : '操作失败'
   }
   finally { busy.value = false }
@@ -294,18 +224,21 @@ async function loadSettings() {
 async function listArticles() { articles.value = await api<ArticleItem[]>('/api/admin/posts') }
 async function login() { await action(async () => {
   let data: {csrf: string}
-  try { data = await api<{csrf: string}>('/api/auth/login', 'POST', {username: username.value, password: password.value, otp: otpFor.value ? otpCode.value : ''}) }
+  try { data = await api<{csrf: string}>('/api/auth/login', 'POST', {email: email.value, password: password.value, otp: otpFor.value ? otpCode.value : ''}) }
   catch (err) { if (needsOtp(err)) { askOtp('login'); return } throw err }
   csrf.value = data.csrf; password.value = ''; otpFor.value = null; otpCode.value = ''
-  await loadSettings(); await listArticles(); await loadSecurity(); await loadNotes(); await loadAccounts()
+  await loadAll()
 }) }
+async function loadAll() {
+  await loadSettings(); await listArticles(); await loadNotes(); await loadAccounts()
+  unread.value = (await api<{unread: number}>('/api/admin/inbox?page=1')).unread
+}
 async function logout() { await action(async () => {
   if(((dirty.value && draft.value.title) || siteDirty.value) && !confirm('有未保存修改，仍要退出吗？')) return
   await api('/api/auth/logout', 'POST'); csrf.value = ''; settings.value = undefined
   article.value = undefined; draft.value = emptyDraft(); lastDraft.value = JSON.stringify(draft.value)
   preview.value = ''; articles.value = []; syncState.value = undefined
   noteItems.value = []; notesConfig.value = undefined; noteEdit.value = undefined
-  security.value=undefined; securityOtp.value=''; stepUp.value=false; enrollment.value=undefined; recoveryCodes.value=[]
 }) }
 async function saveSettings() { await action(async () => {
   const result = await api<{revision: number}>('/api/admin/site', 'PUT', {revision: siteRevision.value, site: currentSite()})
@@ -413,16 +346,17 @@ function preventLeave(event: BeforeUnloadEvent) {
   if ((dirty.value && draft.value.title) || siteDirty.value) { event.preventDefault(); event.returnValue = '' }
 }
 onMounted(async () => {
-  clock = setInterval(() => { now.value = Date.now() }, 15000)
   lastDraft.value = JSON.stringify(draft.value)
   window.addEventListener('beforeunload', preventLeave)
   try {
+    // 已在前台登录时预填邮箱；进入后台仍需再次验证。
+    email.value = await fetchJson<{user: {email: string}}>('/api/account/me', {credentials: 'same-origin'}).then(data => data.user.email, () => '')
     csrf.value = (await api<{csrf: string}>('/api/auth/me')).csrf
-    await loadSettings(); await listArticles(); await loadSecurity(); await loadNotes(); await loadAccounts()
+    await loadAll()
   } catch(err) { if((err as {status?: number}).status !== 401) error.value = err instanceof Error ? err.message : '后台加载失败' }
   finally { loading.value = false }
 })
-onBeforeUnmount(() => { window.removeEventListener('beforeunload', preventLeave); clearInterval(clock) })
+onBeforeUnmount(() => { window.removeEventListener('beforeunload', preventLeave) })
 </script>
 
 <template>
@@ -434,48 +368,22 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', preventLeave)
     <Transition name="toast"><p v-if="message && !error" class="feedback success" role="status">{{ message }}<button class="toast-close" aria-label="关闭提示" @click="message = ''">×</button></p></Transition>
     <main v-if="loading" class="login-panel"><p>正在加载后台…</p></main>
     <main v-else-if="!csrf" class="login-panel">
-      <p class="eyebrow">Your personal space</p><h1>欢迎回来。</h1><p class="subtle">登录后编辑主页，或写下新的一篇。</p>
-      <form @submit.prevent="login"><fieldset :disabled="busy"><label>管理员账号<input v-model="username" autocomplete="username" required maxlength="80"></label>
+      <p class="eyebrow">Your personal space</p><h1>欢迎回来。</h1><p class="subtle">使用你的站点账户登录后台；即使已在前台登录，这里也需要再次验证。</p>
+      <form @submit.prevent="login"><fieldset :disabled="busy"><label>邮箱<input v-model="email" type="email" autocomplete="username" required maxlength="254"></label>
         <label>密码<input v-model="password" type="password" autocomplete="current-password" required maxlength="200"></label>
         <button class="primary" type="submit">{{ busy ? '正在登录…' : '登录后台' }}</button></fieldset></form>
       <button @click="keyLogin" :disabled="busy || !canPasskey" class="passkey-login">使用 Passkey 登录</button>
-      <p class="field-hint">已绑定的设备可使用指纹、面容或 PIN，无需输入密码。</p>
-      <details class="login-hint"><summary>忘记密码？</summary><p>SSH 登录服务器后执行（会撤销所有会话，保留 Passkey 与两步验证）：</p><pre>cd /opt/copylee-backend/current
+      <p class="field-hint">可使用在账户页绑定的 Passkey；密码、两步验证与 Passkey 都在<a href="/account?tab=settings">账户设置</a>中管理。</p>
+      <details class="login-hint"><summary>忘记密码或无法登录？</summary><p>忘记密码可在<a href="/account">账户页</a>用邮箱验证码找回。把站点账户设为管理员，或设备丢失需要清除两步验证时，SSH 登录服务器后执行：</p><pre>cd /opt/copylee-backend/current
 set -a; . /etc/copylee/backend.env; set +a
-runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pre><p>设备丢失、无法通过两步验证时，再执行以下命令清除 Passkey、两步验证与恢复码：</p><pre>runuser -u copylee -- .venv/bin/python -m app.cli reset-security --confirm</pre></details>
+runuser -u copylee -- .venv/bin/python -m app.cli set-admin --email you@example.com
+runuser -u copylee -- .venv/bin/python -m app.cli reset-security --email you@example.com</pre></details>
     </main>
     <div v-else class="admin-layout">
-      <aside class="admin-nav"><p class="eyebrow">Workspace</p><button v-for="item in navItems" :key="item.id" :class="{selected:tab===item.id}" :aria-current="tab===item.id ? 'page' : undefined" @click="tab=item.id"><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="item.icon" /></svg>{{ item.name }}</button><p class="nav-note">内容保存后即可更新。<br>页面样式仍由代码管理。</p></aside>
+      <aside class="admin-nav"><p class="eyebrow">Workspace</p><button v-for="item in navItems" :key="item.id" :class="{selected:tab===item.id}" :aria-current="tab===item.id ? 'page' : undefined" @click="tab=item.id"><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="item.icon" /></svg>{{ item.name }}<span v-if="item.id==='inbox' && unread" class="nav-badge">{{ unread > 99 ? '99+' : unread }}</span></button><p class="nav-note">内容保存后即可更新。<br>页面样式仍由代码管理。</p></aside>
       <main class="admin-main"><fieldset :disabled="busy">
-        <template v-if="tab==='security'">
-          <div class="section-head"><div><p class="eyebrow">Account access</p><h1>登录安全</h1></div></div>
-          <p class="subtle">选择适合你的登录方式。Passkey 使用设备验证；开启 TOTP 后，密码登录还需要验证码。</p>
-          <div class="step-status" :class="{ ok: elevatedMinutes }"><span class="dot" aria-hidden="true"></span><span>{{ elevatedMinutes ? `已验证身份，约 ${elevatedMinutes} 分钟内可直接修改` : '尚未验证身份' }}</span><button v-if="!elevatedMinutes" @click="openStepUp">验证身份</button></div>
-          <section class="edit-card security-card"><h2>Passkey</h2><p class="subtle">绑定后可用指纹、面容、设备 PIN 或安全密钥登录。可绑定多个设备，最多 10 个。</p>
-            <div class="form-grid"><label>设备名称<input v-model="keyName" maxlength="80" placeholder="例如：我的手机"></label></div>
-            <button @click="addPasskey" :disabled="!canPasskey">绑定 Passkey</button>
-            <p class="field-hint">正式站点使用 HTTPS 后，请在正式域名重新绑定。本地 Passkey 仅适用于 localhost。</p>
-            <div v-for="key in security?.passkeys" :key="key.id" class="key-row"><div><strong>{{key.name}}</strong><p class="field-hint">{{key.last_used ? `最近使用：${new Date(key.last_used*1000).toLocaleString()}` : '尚未用于登录'}}</p></div><button class="danger" @click="removePasskey(key.id)">撤销</button></div>
-            <p v-if="!security?.passkeys.length" class="field-hint">还没有绑定设备。</p>
-          </section>
-          <section class="edit-card security-card"><h2>两步验证（TOTP）<span class="security-status">{{security?.totp_enabled ? '已开启' : '未开启'}}</span></h2>
-            <p class="subtle">使用验证器 App 生成 6 位验证码。默认关闭，可随时开启；恢复码每个只能使用一次。</p>
-            <template v-if="enrollment"><img class="totp-qr" :src="enrollment.qr" alt="验证器绑定二维码"><label>手动绑定密钥<input :value="enrollment.secret" readonly autocomplete="off"></label><label>验证器中的 6 位验证码<input v-model="securityOtp" autocomplete="one-time-code" inputmode="numeric" maxlength="6"></label><p class="field-hint">二维码和密钥请勿分享。绑定在 10 分钟后失效。</p><button class="primary" @click="factorOperation('enable')">确认开启</button></template>
-            <button v-else-if="!security?.totp_enabled" @click="factorOperation('setup')">开始绑定验证器</button>
-            <div v-else class="buttons"><button @click="factorOperation('recovery')">重新生成恢复码</button><button class="danger" @click="factorOperation('disable')">关闭两步验证</button><span class="field-hint">剩余恢复码：{{security.recovery_remaining}}</span></div>
-          </section>
-          <section class="edit-card security-card"><h2>修改密码</h2><p class="subtle">新密码至少 12 个字符。修改后其他设备上的后台会话会退出，Passkey 与两步验证保持不变。</p>
-            <form class="form-grid" @submit.prevent="changeAdminPassword">
-              <label>当前密码<input v-model="pwCurrent" type="password" autocomplete="current-password" required maxlength="200"></label>
-              <label>新密码<input v-model="pwNew" type="password" autocomplete="new-password" required minlength="12" maxlength="200"></label>
-              <label>确认新密码<input v-model="pwConfirm" type="password" autocomplete="new-password" required minlength="12" maxlength="200"></label>
-              <div class="buttons"><button class="primary" type="submit">修改密码</button></div>
-            </form>
-          </section>
-          <section v-if="recoveryCodes.length" class="edit-card"><h2>保存恢复码</h2><p class="subtle">这些恢复码仅显示一次。请保存到安全位置；重新生成后旧恢复码失效。</p><pre class="recovery-codes">{{recoveryCodes.join('\n')}}</pre><button @click="recoveryCodes=[]">我已保存恢复码</button></section>
-          <p class="field-hint">忘记密码或设备丢失时，可在服务器上重置，步骤见登录页底部。安全设置修改会撤销其他会话。</p>
-        </template>
-        <template v-if="tab !== 'posts' && tab !== 'notes' && tab !== 'images' && tab !== 'accounts' && tab !== 'security' && settings">
+        <AdminInbox v-if="tab==='inbox'" :api="api" @unread="value => unread = value" @notify="text => message = text" @fail="text => error = text" />
+        <template v-if="['profile', 'portals', 'repos'].includes(tab) && settings">
           <div class="section-head"><div><p class="eyebrow">Site content</p><h1>{{ tab==='profile' ? '主页设置' : tab==='portals' ? '入口卡片' : '仓库展示' }}</h1></div>
             <div class="buttons"><button @click="reloadSettings">重新加载</button><button class="primary" @click="saveSettings">{{busy ? '处理中…' : '保存设置'}}</button></div></div>
           <template v-if="tab==='profile'">
@@ -554,21 +462,16 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
             <ul class="note-list user-list">
               <li v-for="user in siteUsers" :key="user.id" :class="{ muted: user.disabled }">
                 <div class="user-info"><span class="user-face"><img v-if="user.avatar" :src="user.avatar" alt=""><template v-else>{{ user.name.slice(0,1).toUpperCase() }}</template></span>
-                  <div class="note-info"><strong>{{ user.name }}<span v-if="user.totp" class="security-status">2FA</span><span v-if="user.passkeys" class="security-status">Passkey × {{ user.passkeys }}</span></strong><span>{{ user.email }} · 注册于 {{ user.created_at.slice(0,10) }}{{ user.last_login ? ` · 最近登录 ${user.last_login.slice(0,10)}` : '' }}</span></div></div>
-                <div class="buttons"><label class="switch"><input type="checkbox" :checked="!user.disabled" @change="setUserState(user, !user.disabled)"><span>{{ user.disabled ? '已停用' : '正常' }}</span></label><button v-if="user.totp || user.passkeys" @click="resetUserSecurity(user)">重置安全</button><button class="danger" @click="removeUser(user)">删除</button></div>
-                <form v-if="quotaDrafts[user.id]" class="quota-row" @submit.prevent="saveQuota(user)">
-                  <label class="switch"><input v-model="quotaDrafts[user.id]!.enabled" type="checkbox"><span>图床{{ quotaDrafts[user.id]!.enabled ? '开启' : '关闭' }}</span></label>
-                  <template v-if="quotaDrafts[user.id]!.enabled"><label>配额 MiB<input v-model.number="quotaDrafts[user.id]!.quota_mb" type="number" min="1" max="100000"></label><label>单张 MiB<input v-model.number="quotaDrafts[user.id]!.max_file_mb" type="number" min="1" max="20"></label></template>
-                  <span class="field-hint">已用 {{ mib(user.images.used) }}</span>
-                  <button type="submit">保存</button>
-                </form>
+                  <div class="note-info"><strong>{{ user.name }}<span v-if="user.admin" class="security-status">管理员</span><span v-if="user.totp" class="security-status">2FA</span><span v-if="user.passkeys" class="security-status">Passkey × {{ user.passkeys }}</span></strong><span>{{ user.email }} · 注册于 {{ user.created_at.slice(0,10) }}{{ user.last_login ? ` · 最近登录 ${user.last_login.slice(0,10)}` : '' }}</span></div></div>
+                <div class="buttons"><label v-if="!user.admin" class="switch"><input type="checkbox" :checked="!user.disabled" @change="setUserState(user, !user.disabled)"><span>{{ user.disabled ? '已停用' : '正常' }}</span></label><button v-if="user.totp || user.passkeys" @click="resetUserSecurity(user)">重置安全</button><button v-if="!user.admin" class="danger" @click="removeUser(user)">删除</button></div>
               </li>
             </ul>
           </section>
         </template>
-        <template v-if="tab==='images'">
-          <div class="section-head"><div><p class="eyebrow">Image hosting</p><h1>图床</h1></div><div class="buttons"><button @click="action(() => loadImages())">刷新</button><label class="upload-button primary">上传图片<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" @change="uploadToHost"></label></div></div>
-          <p class="subtle">管理员上传不受配额限制；文章与笔记编辑器的“上传图片”也存入图床。访客的图床在“用户与邮件”中逐个开启。</p>
+        <template v-if="tab==='storage'">
+          <AdminStorage :api="api" @notify="text => message = text" @fail="text => error = text" />
+          <div class="section-head images-head"><div><p class="eyebrow">Image hosting</p><h2 class="images-title">图床图片</h2></div><div class="buttons"><button @click="action(() => loadImages())">刷新</button><label class="upload-button primary">上传图片<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" @change="uploadToHost"></label></div></div>
+          <p class="subtle">管理员上传不受配额限制；文章与笔记编辑器的“上传图片”也存入图床。用户的图床与网盘在上方的存储方案中开通。</p>
           <section v-if="imagesState" class="edit-card"><h2>用量</h2>
             <ul class="note-list"><li v-for="row in imagesState.usage" :key="row.owner"><div class="note-info"><strong>{{ row.label }}</strong><span>{{ row.count }} 张 · {{ mib(row.size) }}</span></div><button @click="imageOwner = row.owner">只看此用户</button></li></ul>
             <p v-if="!imagesState.usage.length" class="subtle">还没有图片。</p>
@@ -581,7 +484,7 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
           <section v-if="imagesState" class="edit-card"><h2>全部图片<span class="security-status">{{ imagesState.total }} 张</span></h2>
             <div class="buttons"><AnimatedSelect v-model="imageOwner" label="上传者" :options="[{value:'',label:'全部'}, ...imagesState.usage.map(row => ({value:row.owner,label:row.label}))]" /></div>
             <ul class="image-grid"><li v-for="item in imagesState.items" :key="item.id"><a :href="item.url" target="_blank" rel="noopener"><img :src="item.url" :alt="`图片 ${item.id}`" loading="lazy"></a>
-              <p class="field-hint">{{ item.width }}×{{ item.height }} · {{ mib(item.size) }} · {{ item.owner === 'admin' ? '管理员' : siteUsers.find(u => u.id === item.owner)?.email ?? item.owner }}</p>
+              <p class="field-hint">{{ item.width }}×{{ item.height }} · {{ mib(item.size) }} · {{ item.owner === 'admin' ? '旧管理员' : siteUsers.find(u => u.id === item.owner)?.email ?? item.owner }}</p>
               <div class="buttons"><button @click="copyText(`![](${item.url})`)">Markdown</button><button @click="copyText(item.url)">URL</button><button class="danger" @click="removeImage(item)">删除</button></div></li></ul>
             <div v-if="imagePages > 1" class="buttons pager"><button :disabled="imagesState.page <= 1" @click="action(() => loadImages(imagesState!.page - 1))">上一页</button><span class="field-hint">{{ imagesState.page }} / {{ imagePages }}</span><button :disabled="imagesState.page >= imagePages" @click="action(() => loadImages(imagesState!.page + 1))">下一页</button></div>
           </section>
@@ -641,21 +544,6 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
       </fieldset></main>
     </div>
     <Transition name="step">
-      <div v-if="stepUp" class="step-backdrop" @click.self="closeStepUp" @keydown.esc="closeStepUp">
-        <form class="step-dialog" role="dialog" aria-modal="true" aria-labelledby="step-title" @submit.prevent="unlockWithPassword">
-          <p class="eyebrow">Verify it's you</p><h2 id="step-title">验证身份</h2>
-          <p class="subtle">修改登录安全设置前需要确认身份，验证后 10 分钟内无需重复输入。</p>
-          <p v-if="error && !otpFor" class="dialog-error" role="alert">{{ error }}</p>
-          <fieldset :disabled="busy">
-            <label>登录密码<input ref="stepInput" v-model="stepPassword" type="password" autocomplete="current-password" maxlength="200" required></label>
-            <button class="primary" type="submit">{{ busy ? '正在验证…' : '验证' }}</button>
-            <button v-if="security?.passkeys.length && canPasskey" type="button" class="passkey-step" @click="unlockWithPasskey">使用 Passkey 验证</button>
-            <button type="button" class="link-button" @click="closeStepUp">取消</button>
-          </fieldset>
-        </form>
-      </div>
-    </Transition>
-    <Transition name="step">
       <div v-if="otpFor" class="step-backdrop otp-backdrop" @click.self="otpFor = null">
         <form class="step-dialog" role="dialog" aria-modal="true" aria-labelledby="otp-title" @submit.prevent="submitOtp">
           <p class="eyebrow">Two-step verification</p><h2 id="otp-title">输入验证码</h2>
@@ -675,11 +563,10 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
 <style scoped>
 .admin-shell { --field-line:color-mix(in srgb,var(--line-strong) 55%,transparent); min-height:100vh; background:radial-gradient(1200px 500px at 85% -10%,var(--bg-tint),transparent 70%),var(--bg); }
 .passkey-login { margin-top:16px; width:100%; }
-.step-status { display:flex; align-items:center; gap:10px; margin:8px 0 28px; padding:12px 16px; border:1px solid var(--line); border-radius:10px; font-size:13px; color:var(--muted); }
-.step-status .dot { width:8px; height:8px; border-radius:50%; background:var(--faint); }
-.step-status.ok { color:var(--text-2); }
-.step-status.ok .dot { background:#2fa36b; box-shadow:0 0 0 4px rgba(47,163,107,.15); }
-.step-status button { margin-left:auto; }
+.nav-badge { margin-left:auto; min-width:20px; padding:1px 6px; border-radius:999px; background:var(--accent); color:#fff; font:600 11px/18px var(--font-mono); text-align:center; }
+.images-head { margin-top:40px; }
+.images-title { font-size:24px; margin-top:8px; }
+.login-panel .field-hint a,.login-hint a { color:var(--accent); }
 .step-backdrop { position:fixed; inset:0; z-index:50; display:grid; place-items:center; padding:20px; background:rgba(12,13,16,.45); backdrop-filter:blur(6px); }
 .step-dialog { width:min(420px,100%); padding:32px; border:1px solid var(--line); border-radius:16px; background:var(--bg); box-shadow:0 30px 60px -20px rgba(0,0,0,.35); }
 .step-dialog h2 { font-size:26px; margin:6px 0 0; }
@@ -688,7 +575,6 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
 .dialog-error { margin:12px 0 0; padding:10px 14px; border-radius:8px; color:#d15c5c; background:rgba(209,92,92,.08); font-size:13px; }
 .step-dialog label { margin-top:18px; }
 .step-dialog .primary { width:100%; margin-top:24px; padding:12px; }
-.passkey-step { width:100%; margin-top:10px; padding:12px; }
 .link-button { display:block; margin:14px auto 0; border:0; background:none; color:var(--muted); }
 .step-enter-active,.step-leave-active { transition:opacity .25s ease; }
 .step-enter-active .step-dialog,.step-leave-active .step-dialog { transition:transform .35s var(--ease); }
@@ -696,14 +582,8 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin</pr
 .step-enter-from .step-dialog,.step-leave-to .step-dialog { transform:translateY(16px) scale(.98); }
 .login-hint summary { cursor:pointer; color:var(--muted); }
 .login-hint pre { margin:10px 0; padding:12px; overflow:auto; border-radius:8px; background:var(--surface); border:1px solid var(--line); color:var(--text-2); font:12px/1.7 var(--font-mono); white-space:pre; }
-.security-card>button,.security-card>.buttons { margin-top:20px; }
-.security-card>.form-grid+button { margin-top:16px; }
-.security-card>.field-hint { margin-top:12px; }
-.security-card>label,.security-card>.totp-qr { display:block; margin-top:16px; }
 .security-status { margin-left:12px; font-size:12px; color:var(--muted); font-weight:400; }
-.totp-qr { width:200px; height:200px; display:block; margin:20px 0; }
 .key-row { display:flex; align-items:center; justify-content:space-between; gap:16px; border-top:1px solid var(--line); margin-top:20px; padding-top:16px; }
-.recovery-codes { white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; padding:16px; background:var(--surface); }
 .admin-top { position:sticky; top:0; z-index:20; display:flex; justify-content:space-between; align-items:center; height:64px; padding:0 32px; border-bottom:1px solid var(--line); background:var(--header-bg); -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px); }
 .admin-brand { font-size:18px; font-weight:700; display:flex; gap:12px; align-items:center; letter-spacing:-.01em; }
 .admin-logo { width:30px; height:auto; }
@@ -791,9 +671,6 @@ input:read-only { color:var(--muted); }
 .user-face { flex:none; display:grid; place-items:center; width:36px; height:36px; border-radius:50%; overflow:hidden; background:linear-gradient(135deg,var(--accent),#7ea2ff); color:#fff; font-weight:700; }
 .user-face img { width:100%; height:100%; object-fit:cover; }
 .user-list li { flex-wrap:wrap; }
-.quota-row { flex-basis:100%; display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; padding-left:48px; }
-.quota-row label:not(.switch) { display:flex; flex-direction:row; align-items:center; gap:6px; margin:0; font-size:12px; }
-.quota-row input[type=number] { width:88px; padding:6px 8px; }
 .image-grid { list-style:none; margin:16px 0 0; padding:0; display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:14px; }
 .image-grid li { padding:8px; border:1px solid var(--field-line); border-radius:12px; }
 .image-grid img { display:block; width:100%; aspect-ratio:4/3; object-fit:contain; border-radius:8px; background:var(--bg-tint); }

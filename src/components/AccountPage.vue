@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { account, accountApi, accountChecked, loadAccount, signedIn, signOut } from '../account'
+import { account, accountApi, accountChecked, features, loadAccount, signedIn, signOut } from '../account'
 import type { AccountEntry, AccountUser } from '../account'
 import { fetchJson } from '../content'
 import { vReveal } from '../composables/useReveal'
 import PageHeading from './PageHeading.vue'
 import ImageHosting from './ImageHosting.vue'
+import FeedbackPanel from './FeedbackPanel.vue'
+import StorageSummary from './StorageSummary.vue'
 import AccountSecurity from './AccountSecurity.vue'
 import { passkeyAvailable, usePasskey } from '../passkeys'
 import { games, loadMine } from '../games/api'
@@ -15,9 +17,10 @@ import type { EmailCaptchaConfig } from '../email-captcha'
 
 type Mode = 'login' | 'register' | 'reset'
 const mode = ref<Mode>('login')
-const tab = ref<'favorites' | 'history' | 'images' | 'settings'>('favorites')
-const imagesEnabled = ref(false)
-const tabList = computed(() => [['favorites', '收藏'], ['history', '浏览记录'], ...(imagesEnabled.value ? [['images', '图床']] : []), ['settings', '账户设置']])
+const tab = ref<'favorites' | 'history' | 'storage' | 'feedback' | 'settings'>('favorites')
+// 网盘与图床由管理员单独开通；没有权限的用户看不到“存储”标签。
+const hasStorage = computed(() => features.value.drive || features.value.images)
+const tabList = computed(() => [['favorites', '收藏'], ['history', '浏览记录'], ...(hasStorage.value ? [['storage', '存储']] : []), ['feedback', '反馈'], ['settings', '账户设置']])
 const busy = ref(false), error = ref(''), message = ref('')
 const email = ref(''), password = ref(''), code = ref(''), name = ref(''), agree = ref(false)
 // 开启两步验证的账户：密码通过后服务器提示需要验证码，再显示第二步。
@@ -70,6 +73,7 @@ const sendCode = () => run(async () => {
 async function afterSignIn(result: { user: AccountUser; csrf: string }) {
   signedIn(result); password.value = ''; code.value = ''; otp.value = ''; otpStep.value = false
   if (next) { location.href = next; return }
+  await loadAccount(true)
   await loadLists()
 }
 // 第二步验证码只在服务器要求时附带；收到提示后显示输入框，不算作失败。
@@ -104,7 +108,6 @@ const passkeyLogin = () => run(async () => {
 async function loadLists() {
   const [fav, hist] = await Promise.all([accountApi<{ items: AccountEntry[] }>('/favorites'), accountApi<{ items: AccountEntry[] }>('/history')])
   favorites.value = fav.items; history.value = hist.items
-  imagesEnabled.value = await accountApi<{ limits: { enabled: boolean } }>('/images').then(data => data.limits.enabled, () => false)
   gameBests.value = await loadMine().catch(() => ({}))
 }
 const removeFavorite = (item: AccountEntry) => run(async () => {
@@ -140,7 +143,7 @@ const deleteAccount = () => run(async () => {
   account.value = null; deletePassword.value = ''
   message.value = '账户已删除。'
 })
-const logout = () => run(async () => { await signOut(); favorites.value = []; history.value = []; imagesEnabled.value = false; tab.value = 'favorites' })
+const logout = () => run(async () => { await signOut(); favorites.value = []; history.value = []; tab.value = 'favorites' })
 
 const perks = [
   { title: '收藏', text: '在任意笔记或文章页点一下星标，稍后在这里集中查看。', icon: 'm12 3.5 2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.9l-5.2 2.8 1-5.9-4.3-4.1 5.9-.8z' },
@@ -169,8 +172,11 @@ watch([mode, account, accountChecked, config], warmCaptcha)
 onMounted(async () => {
   document.title = 'Account · Copy Lee'
   config.value = await fetchJson<AccountConfig>('/api/account/config').catch(() => undefined)
-  if (new URLSearchParams(location.search).get('mode') === 'register') mode.value = 'register'
+  const params = new URLSearchParams(location.search)
+  if (params.get('mode') === 'register') mode.value = 'register'
   await loadAccount()
+  const wanted = params.get('tab')
+  if (wanted && tabList.value.some(([value]) => value === wanted)) tab.value = wanted as typeof tab.value
   if (account.value) await loadLists().catch(() => {})
 })
 onBeforeUnmount(() => { clearInterval(timer); clearTimeout(warmup); captchaLifetime.abort(); cancelEmailCaptcha() })
@@ -232,13 +238,18 @@ onBeforeUnmount(() => { clearInterval(timer); clearTimeout(warmup); captchaLifet
           <ul class="game-bests" aria-label="游戏最佳成绩">
             <li v-for="g in games" :key="g.id"><a :href="`/games/${g.id}`">{{ g.name }}</a><span>{{ gameBests[g.id] ? `${gameBests[g.id]!.best} ${g.unit} · ${gameBests[g.id]!.plays} 局` : '未玩过' }}</span></li>
           </ul>
+          <a v-if="features.admin" class="ghost wide admin-link" href="/admin">进入管理后台</a>
           <button class="ghost wide" type="button" @click="logout">退出登录</button>
         </aside>
         <div v-reveal="120" class="panel">
           <div class="tabs" role="tablist">
             <button v-for="[value, label] in tabList" :key="value" role="tab" :aria-selected="tab === value" :class="{ active: tab === value }" type="button" @click="tab = value as typeof tab">{{ label }}</button>
           </div>
-          <ImageHosting v-if="tab === 'images'" @enabled="value => { imagesEnabled = value; if (!value) tab = 'favorites' }" />
+          <div v-if="tab === 'storage'" class="storage">
+            <StorageSummary v-if="features.drive" />
+            <ImageHosting v-if="features.images" @enabled="value => { if (!value) loadAccount(true) }" />
+          </div>
+          <FeedbackPanel v-else-if="tab === 'feedback'" :captcha="config?.captcha" />
           <template v-else-if="tab !== 'settings'">
             <div v-if="tab === 'history' && history.length" class="panel-actions"><button class="ghost" type="button" @click="clearHistory">清空记录</button></div>
             <ul class="entries">
@@ -334,6 +345,7 @@ button:disabled { opacity:.5; cursor:default; }
 .game-bests a:hover { color:var(--accent); }
 .game-bests span { color:var(--muted); font-family:var(--font-mono); font-size:12px; }
 .panel { min-width:0; }
+.admin-link { display:block; text-align:center; text-decoration:none; }
 .tabs { max-width:520px; }
 .panel-actions { display:flex; justify-content:flex-end; margin-top:16px; }
 .entries { list-style:none; margin:16px 0 0; padding:0; border-top:1px solid var(--line); }

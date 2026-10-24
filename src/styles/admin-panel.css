@@ -1,0 +1,32 @@
+/* 后台子面板（收件箱、存储）共用的控件样式，与 AdminPage 中的表单保持一致。 */
+.admin-panel { --field-line:color-mix(in srgb,var(--line-strong) 55%,transparent); }
+.admin-panel .section-head { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; margin-bottom:28px; }
+.admin-panel .eyebrow { margin:0; font-size:11px; color:var(--faint); letter-spacing:.14em; text-transform:uppercase; }
+.admin-panel h1 { font-size:32px; margin:8px 0 0; letter-spacing:-.025em; }
+.admin-panel h2 { font-size:17px; margin:0; letter-spacing:-.01em; }
+.admin-panel .subtle { color:var(--muted); font-size:14px; margin:8px 0 20px; }
+.admin-panel .field-hint { color:var(--muted); font-size:12px; font-weight:400; line-height:1.7; }
+.admin-panel .edit-card { margin-bottom:20px; padding:24px 28px 28px; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); box-shadow:0 1px 2px rgba(17,24,39,.03),0 12px 32px -24px rgba(17,24,39,.12); }
+.admin-panel .buttons { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.admin-panel button { font:inherit; font-size:13px; font-weight:500; padding:9px 16px; border:1px solid var(--field-line); border-radius:10px; background:var(--surface); color:var(--text); cursor:pointer; transition:border-color .2s,color .2s,background .2s; }
+.admin-panel button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+.admin-panel button:disabled { opacity:.45; cursor:wait; }
+.admin-panel button.primary { background:var(--btn-bg); color:var(--btn-fg); border-color:var(--btn-bg); }
+.admin-panel button.primary:hover:not(:disabled) { color:var(--btn-fg); }
+.admin-panel button.selected { border-color:var(--accent); color:var(--accent); background:var(--accent-soft); }
+.admin-panel button.danger { color:#d15c5c; }
+.admin-panel button.danger:hover:not(:disabled) { border-color:#d15c5c; background:rgba(209,92,92,.06); }
+.admin-panel label { display:flex; flex-direction:column; gap:6px; font-size:13px; font-weight:500; color:var(--text-2); }
+.admin-panel input:not([type=checkbox]),.admin-panel textarea { width:100%; font:inherit; font-size:14px; font-weight:400; border:1px solid var(--field-line); border-radius:10px; padding:9px 12px; background:var(--bg); color:var(--text); transition:border-color .2s,box-shadow .2s; }
+.admin-panel input:focus,.admin-panel textarea:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); }
+.admin-panel textarea { resize:vertical; line-height:1.7; }
+.admin-panel .switch { flex-direction:row; align-items:center; gap:8px; cursor:pointer; }
+.admin-panel .switch input { appearance:none; width:34px; height:20px; padding:0; border-radius:999px; background:var(--line-strong); position:relative; cursor:pointer; transition:background .25s; }
+.admin-panel .switch input::after { content:''; position:absolute; top:3px; left:3px; width:14px; height:14px; border-radius:50%; background:#fff; transition:transform .25s var(--ease); }
+.admin-panel .switch input:checked { background:var(--accent); }
+.admin-panel .switch input:checked::after { transform:translateX(14px); }
+.admin-panel .switch span { font-size:12px; }
+.admin-panel .tag { margin-left:10px; padding:1px 8px; border:1px solid var(--line); border-radius:999px; font-size:11px; font-weight:400; color:var(--muted); }
+.admin-panel .tag.accent { border-color:var(--accent); color:var(--accent); }
+.admin-panel code { font:12px var(--font-mono); overflow-wrap:anywhere; }
+@media (max-width:700px) { .admin-panel .section-head { flex-direction:column; align-items:flex-start; } .admin-panel .edit-card { padding:20px; } }

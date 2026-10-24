@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { account, loadAccount } from '../account'
+import { account, features, loadAccount } from '../account'
 import { site } from '../content'
 import { useTheme } from '../composables/useTheme'
 import AppIcon from './AppIcon.vue'
@@ -88,7 +88,7 @@ onBeforeUnmount(() => {
         <a href="/games" :class="{ active: isGames }" :aria-current="isGames ? 'page' : undefined">Games</a>
         <a href="/posts">Articles</a>
         <a href="/notes">Notes</a>
-        <a :href="site.cloud" target="_blank" rel="noopener">Cloud</a>
+        <a v-if="features.drive" :href="site.cloud" target="_blank" rel="noopener">Cloud</a>
         </div>
         <a class="account" :class="{ active: isAccount }" href="/account" :aria-label="account ? `账户：${account.name}` : '登录或注册'" :title="account ? account.name : '登录 / 注册'">
           <img v-if="account?.avatar" :src="account.avatar" alt="">

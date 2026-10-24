@@ -118,3 +118,17 @@ export async function sendEmailCode(email: string, purpose: 'register' | 'reset'
   if (data.ok !== true || typeof data.resend_after !== 'number') throw new Error('验证码发送结果异常，请稍后重试')
   return data as { ok: true; resend_after: number }
 }
+
+/** 受 ESA 验证码保护的其他写操作（如意见反馈）：票据放入请求头，边缘判定失败时提示重试。 */
+export async function postWithCaptcha<T>(path: string, body: unknown, token: string, csrf: string): Promise<T> {
+  const response = await fetch(path, {
+    method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(30000),
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, ...(token ? { 'captcha-verify-param': token } : {}) },
+    body: JSON.stringify(body),
+  })
+  const verdict = response.headers.get('x-captcha-verify-code')
+  if (verdict && !['T001', 'T005', 'T006'].includes(verdict)) throw new Error('安全验证未通过，请重试')
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `提交失败 (${response.status})`)
+  return data as T
+}

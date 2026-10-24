@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { features } from '../account'
 import { site } from '../content'
 import LogoMark from './LogoMark.vue'
 import SocialLinks from './SocialLinks.vue'
@@ -18,7 +19,7 @@ const year = new Date().getFullYear()
           <a href="/posts">Articles</a>
           <a href="/notes">Notes</a>
           <a href="/feed.xml">RSS</a>
-          <a :href="site.cloud" target="_blank" rel="noopener">Cloud</a>
+          <a v-if="features.drive" :href="site.cloud" target="_blank" rel="noopener">Cloud</a>
           <a class="top" href="#top">Back to top <span aria-hidden="true">↑</span></a>
         </nav>
       </div>
@@ -27,7 +28,7 @@ const year = new Date().getFullYear()
 
       <div class="legal">
         <span class="copyright">
-          © {{ year }} {{ site.name }}<a href="/privacy">隐私政策</a><a class="admin" href="/admin" rel="nofollow">Admin</a>
+          © {{ year }} {{ site.name }}<a href="/privacy">隐私政策</a><a v-if="features.admin" class="admin" href="/admin" rel="nofollow">Admin</a>
         </span>
         <span v-if="site.icp || site.police.text" class="beian">
           <a v-if="site.icp" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">
