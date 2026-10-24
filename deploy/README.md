@@ -32,6 +32,7 @@
 - [HTTP Caddy 示例](Caddyfile.http.example)：公开主页与文章，管理请求通过 SSH 隧道访问。
 - [HTTPS Caddy 示例](Caddyfile.example)：正式站点与公网管理。
 - [备份与恢复](../docs/maintenance.md)：快照格式、图片引用与恢复要求。
+- 经 ESA 代理的 `copylee.cn`、`www`、`image` 在源站使用 `tls internal`：Let's Encrypt 校验经 ESA 回源会超时，浏览器看到的是 ESA 边缘证书。改回「仅 DNS」前需先去掉 `tls internal`，让 Caddy 重新申请公开证书。`cloud`、`dav` 不经 ESA，仍由 Caddy 自动申请证书。
 - [图床](../docs/image-host.md)：`image.copylee.cn` 的 Caddy 站点、ESA 缓存规则与旧图片迁移。
 - [SFTPGo 部署](sftpgo/README.md)：配套文件管理、WebDAV 与 SFTP 服务。
 
