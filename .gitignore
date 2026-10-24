@@ -17,3 +17,4 @@ __pycache__/
 output/playwright/
 output/ui-preview/
 .playwright-mcp/
+backend/.data-drive/

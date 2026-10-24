@@ -15,20 +15,26 @@ import ScutSection from './components/ScutSection.vue'
 import { startScut } from './scut'
 // 小游戏代码较大，只在 /games 页面按需加载
 const GamesPage = defineAsyncComponent(() => import('./games/GamesPage.vue'))
+// 网盘与分享页按需加载；cloud 子域名的根路径就是网盘。
+const DrivePage = defineAsyncComponent(() => import('./components/drive/DrivePage.vue'))
+const SharePage = defineAsyncComponent(() => import('./components/drive/SharePage.vue'))
+const onCloud = location.hostname.startsWith('cloud.')
+const isShare = /^\/s\/[A-Za-z0-9]+\/?$/.test(location.pathname)
+const isDrive = !isShare && (/^\/drive(\/|$)/.test(location.pathname) || (onCloud && location.pathname === '/'))
 const isAdmin = location.pathname === '/admin' || location.pathname.startsWith('/admin/')
 const isScut = location.pathname.replace(/\/$/, '') === '/scut'
 const isAccount = location.pathname.replace(/\/$/, '') === '/account'
 const isGames = /^\/games(\/|$)/.test(location.pathname)
 let stop: (() => void) | undefined
 let stopScut: (() => void) | undefined
-onMounted(() => { if (!isAdmin) { stop = startContent(); stopScut = startScut() } })
+onMounted(() => { if (!isAdmin) { stop = startContent(); if (!isDrive && !isShare) stopScut = startScut() } })
 onBeforeUnmount(() => { stop?.(); stopScut?.() })
 
 // 从其他页面打开 /#projects 等地址时，浏览器加载瞬间目标尚未渲染，原生锚点跳转会落空。
 // 内容就绪后再定位；之后 1.5 秒内上方区块异步加载导致的高度变化会继续校正，用户一旦滚动即停止。
 watch(ready, async value => {
   const id = decodeURIComponent(location.hash.slice(1))
-  if (!value || !id || isAdmin || isScut || isAccount || isGames) return
+  if (!value || !id || isAdmin || isScut || isAccount || isGames || isDrive || isShare) return
   await nextTick()
   const target = document.getElementById(id)
   if (!target) return
@@ -47,6 +53,11 @@ watch(ready, async value => {
 
 <template>
   <AdminPage v-if="isAdmin" />
+  <template v-else-if="ready && (isDrive || isShare)">
+    <DrivePage v-if="isDrive" />
+    <SharePage v-else />
+    <SiteFooter />
+  </template>
   <template v-else-if="ready">
   <SiteHeader />
   <p v-if="contentStatus.stale" class="content-banner" role="status">暂时无法检查更新，正在显示已加载的内容。<button @click="reloadContent">重试</button></p>

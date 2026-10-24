@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatTime } from '../drive'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { accountApi, csrfToken } from '../account'
 import type { FeedbackItem } from '../account'
@@ -14,7 +15,7 @@ const items = ref<FeedbackItem[]>([])
 const busy = ref(false), error = ref(''), message = ref('')
 const lifetime = new AbortController()
 
-const time = (value: number) => new Date(value * 1000).toLocaleString('zh-CN', { hour12: false }).slice(0, 16)
+const time = (value: number) => formatTime(value)
 
 async function load() {
   items.value = (await accountApi<{ items: FeedbackItem[] }>('/feedback')).items

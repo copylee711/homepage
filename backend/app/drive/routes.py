@@ -127,7 +127,10 @@ def file_response(drive: Drive, path: str, request: Request, inline: bool = Fals
     safe_inline = inline and (previewable or media in {"application/pdf", "text/plain"})
     headers = {"Accept-Ranges": "bytes", "Content-Length": str(max(end - start + 1, 0)),
                "Content-Disposition": disposition(entry.name, safe_inline),
-               "Content-Security-Policy": "sandbox", "Cache-Control": "private, no-store"}
+               "Cache-Control": "private, no-store"}
+    # 浏览器内置 PDF 阅读器在 sandbox 下无法加载，其余类型一律禁止执行脚本。
+    if not (safe_inline and media == "application/pdf"):
+        headers["Content-Security-Policy"] = "sandbox"
     if status == 206:
         headers["Content-Range"] = f"bytes {start}-{end}/{size}"
     return StreamingResponse(body(), status_code=status, media_type=media, headers=headers)
@@ -202,7 +205,7 @@ def download_zip(request: Request, path: list[str] = Query(), session: Session =
 @router.post("/api/drive/mkdir")
 def mkdir(body: DrivePath, request: Request, session: Session = Depends(database)):
     _, drive = user_drive(request, session, write=True)
-    drive.mkdir(body.path)
+    drive.mkdir(body.path, parents=body.parents)
     path = paths.clean(body.path)
     return entry_view(drive.stat(path), path)
 

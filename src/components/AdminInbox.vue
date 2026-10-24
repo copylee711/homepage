@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatTime } from '../drive'
 import { onMounted, ref, watch } from 'vue'
 import '../styles/admin-panel.css'
 
@@ -15,7 +16,7 @@ const inbox = ref<Inbox>()
 const replies = ref<Record<string, string>>({})
 const busy = ref(false)
 
-const time = (value: number) => new Date(value * 1000).toLocaleString('zh-CN', { hour12: false }).slice(0, 16)
+const time = (value: number) => formatTime(value)
 const pages = () => Math.max(1, Math.ceil((inbox.value?.total ?? 0) / (inbox.value?.page_size ?? 30)))
 
 async function work(task: () => Promise<void>) {

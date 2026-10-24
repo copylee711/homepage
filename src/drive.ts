@@ -138,3 +138,9 @@ export async function ensureSignedIn() {
   await loadAccount()
   return account.value
 }
+
+/** 秒级时间戳 → 2026/10/25 08:30（月、日补零，长度固定）。 */
+export function formatTime(seconds: number | null | undefined) {
+  if (!seconds) return ''
+  return new Date(seconds * 1000).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}

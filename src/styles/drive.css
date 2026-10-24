@@ -1,0 +1,25 @@
+/* 网盘界面共用控件（d- 前缀），弹窗通过 Teleport 渲染到 body 也能使用。 */
+.d-btn { display:inline-flex; align-items:center; justify-content:center; gap:7px; padding:8px 14px; border:1px solid color-mix(in srgb,var(--line-strong) 70%,transparent); border-radius:10px; background:var(--surface); color:var(--text); font:500 13px var(--font); white-space:nowrap; cursor:pointer; text-decoration:none; transition:border-color .2s,color .2s,background .2s,transform .2s var(--ease); }
+.d-btn:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+.d-btn:active:not(:disabled) { transform:translateY(1px); }
+.d-btn:disabled { opacity:.45; cursor:default; }
+.d-btn svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+.d-btn.primary { background:var(--btn-bg); border-color:var(--btn-bg); color:var(--btn-fg); }
+.d-btn.primary:hover:not(:disabled) { color:var(--btn-fg); box-shadow:0 8px 20px -10px color-mix(in srgb,var(--btn-bg) 70%,transparent); }
+.d-btn.danger { color:#d15c5c; }
+.d-btn.danger:hover:not(:disabled) { border-color:#d15c5c; background:rgba(209,92,92,.06); color:#d15c5c; }
+.d-btn.quiet { border-color:transparent; background:none; }
+.d-btn.quiet:hover:not(:disabled) { background:var(--bg-tint); border-color:transparent; }
+.d-field { display:flex; flex-direction:column; gap:7px; margin-top:16px; font-size:13px; font-weight:500; color:var(--text-2); }
+.d-field .hint { color:var(--muted); font-size:12px; font-weight:400; line-height:1.6; }
+.d-input { width:100%; min-height:42px; padding:9px 12px; border:1px solid color-mix(in srgb,var(--line-strong) 60%,transparent); border-radius:10px; background:var(--surface); color:var(--text); font:400 14px var(--font); transition:border-color .2s,box-shadow .2s; }
+.d-input:focus { outline:0; border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); }
+textarea.d-input { resize:vertical; line-height:1.6; }
+.d-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; margin-top:24px; }
+.d-note { margin-top:14px; padding:10px 14px; border-radius:10px; font-size:13px; line-height:1.6; }
+.d-note.error { color:#d15c5c; background:rgba(209,92,92,.08); }
+.d-note.ok { color:var(--accent); background:var(--accent-soft); }
+.d-muted { color:var(--muted); font-size:13px; }
+.d-code { padding:2px 6px; border-radius:6px; background:var(--bg-tint); font:12px var(--font-mono); overflow-wrap:anywhere; }
+.d-check { display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; color:var(--text-2); cursor:pointer; }
+.d-check input { width:16px; height:16px; accent-color:var(--accent); }

@@ -322,6 +322,7 @@ class ScoreWrite(StrictModel):
 
 class DrivePath(StrictModel):
     path: str = Field(min_length=1, max_length=4096)
+    parents: bool = False
 
 
 class DrivePaths(StrictModel):
