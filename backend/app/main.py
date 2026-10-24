@@ -110,7 +110,7 @@ from .settings import Settings
 HERE = Path(__file__).parent
 logger = logging.getLogger(__name__)
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
-PRIVACY_EFFECTIVE = "2026 年 10 月 22 日"
+PRIVACY_EFFECTIVE = "2026 年 10 月 24 日"
 PLAIN_404_PREFIXES = ("/api/", "/media/", "/content-assets/", "/assets/")
 Image.MAX_IMAGE_PIXELS = 20_000_000
 
@@ -322,12 +322,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/account/config")
     def account_config(session: Session = Depends(database)):
-        return accounts.public_config(session)
+        return {**accounts.public_config(session), "captcha": {
+            "enabled": settings.email_captcha_enabled,
+            "prefix": settings.email_captcha_prefix,
+            "sceneId": settings.email_captcha_scene_id,
+        }}
 
     @app.post("/api/account/code")
     async def account_code(body: CodeRequest, request: Request,
                            session: Session = Depends(database)):
         check_origin(request)
+        accounts.require_email_captcha(request)
         prepared = accounts.prepare_code(request, session, body.email, body.purpose)
         if prepared:
             name = public_site(session)["name"]

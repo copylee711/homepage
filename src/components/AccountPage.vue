@@ -7,6 +7,8 @@ import { vReveal } from '../composables/useReveal'
 import PageHeading from './PageHeading.vue'
 import { games, loadMine } from '../games/api'
 import type { GameBest, GameId } from '../games/api'
+import { cancelEmailCaptcha, prepareEmailCaptcha, refreshEmailCaptcha, sendEmailCode, verifyEmailCaptcha } from '../email-captcha'
+import type { EmailCaptchaConfig } from '../email-captcha'
 
 type Mode = 'login' | 'register' | 'reset'
 const mode = ref<Mode>('login')
@@ -14,11 +16,14 @@ const tab = ref<'favorites' | 'history' | 'settings'>('favorites')
 const busy = ref(false), error = ref(''), message = ref('')
 const email = ref(''), password = ref(''), code = ref(''), name = ref(''), agree = ref(false)
 const cooldown = ref(0)
-const config = ref<{ registrationOpen: boolean; allowedDomains: string[] }>()
+interface AccountConfig { registrationOpen: boolean; allowedDomains: string[]; captcha: EmailCaptchaConfig }
+const config = ref<AccountConfig>()
+const captchaBusy = ref(false)
 const favorites = ref<AccountEntry[]>([]), history = ref<AccountEntry[]>([])
 const gameBests = ref<Partial<Record<GameId, GameBest | null>>>({})
 const editName = ref(''), currentPassword = ref(''), newPassword = ref(''), deletePassword = ref('')
 let timer: ReturnType<typeof setInterval> | undefined
+const captchaLifetime = new AbortController()
 
 const domainHint = computed(() => (config.value?.allowedDomains ?? []).slice(0, 8).join('、'))
 // 登录后回到原页面：只接受本站相对路径。
@@ -38,9 +43,20 @@ function startCooldown(seconds: number) {
   timer = setInterval(() => { cooldown.value -= 1; if (cooldown.value <= 0) clearInterval(timer) }, 1000)
 }
 const sendCode = () => run(async () => {
-  const result = await accountApi<{ resend_after: number }>('/code', 'POST', { email: email.value, purpose: mode.value === 'register' ? 'register' : 'reset' })
-  startCooldown(result.resend_after)
-  message.value = mode.value === 'register' ? '验证码已发送，请查收邮件（可能在垃圾箱）。' : '如果该邮箱已注册，验证码已发送。'
+  if (!config.value?.captcha) throw new Error('账户配置尚未加载，请刷新页面重试')
+  const targetEmail = email.value.trim()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(targetEmail)) throw new Error('请先填写正确的邮箱地址')
+  const purpose = mode.value === 'register' ? 'register' : 'reset'
+  captchaBusy.value = true
+  try {
+    const token = await verifyEmailCaptcha(config.value.captcha, captchaLifetime.signal)
+    const result = await sendEmailCode(targetEmail, purpose, token)
+    startCooldown(result.resend_after)
+    message.value = purpose === 'register' ? '验证码已发送，请查收邮件（可能在垃圾箱）。' : '如果该邮箱已注册，验证码已发送。'
+  } finally {
+    captchaBusy.value = false
+    refreshEmailCaptcha()
+  }
 })
 async function afterSignIn(result: { user: AccountUser; csrf: string }) {
   signedIn(result); password.value = ''; code.value = ''
@@ -110,12 +126,13 @@ watch(account, value => { editName.value = value?.name ?? '' }, { immediate: tru
 
 onMounted(async () => {
   document.title = 'Account · Copy Lee'
-  config.value = await fetchJson<{ registrationOpen: boolean; allowedDomains: string[] }>('/api/account/config').catch(() => undefined)
+  config.value = await fetchJson<AccountConfig>('/api/account/config').catch(() => undefined)
+  if (config.value?.captcha) void prepareEmailCaptcha(config.value.captcha).catch(() => {})
   if (new URLSearchParams(location.search).get('mode') === 'register') mode.value = 'register'
   await loadAccount()
   if (account.value) await loadLists().catch(() => {})
 })
-onBeforeUnmount(() => clearInterval(timer))
+onBeforeUnmount(() => { clearInterval(timer); captchaLifetime.abort(); cancelEmailCaptcha() })
 </script>
 
 <template>
@@ -133,7 +150,7 @@ onBeforeUnmount(() => clearInterval(timer))
       <div v-else-if="!account" class="auth-layout">
       <div v-reveal class="auth-card">
         <div class="switch" role="tablist">
-          <button v-for="[value, label] in [['login', '登录'], ['register', '注册'], ['reset', '找回密码']]" :key="value" role="tab" :aria-selected="mode === value" :class="{ active: mode === value }" type="button" @click="switchMode(value as Mode)">{{ label }}</button>
+          <button v-for="[value, label] in [['login', '登录'], ['register', '注册'], ['reset', '找回密码']]" :key="value" role="tab" :aria-selected="mode === value" :class="{ active: mode === value }" type="button" :disabled="busy" @click="switchMode(value as Mode)">{{ label }}</button>
         </div>
         <p v-if="mode === 'register' && config && !config.registrationOpen" class="closed">暂未开放注册，敬请期待。</p>
         <form v-else class="auth-form" @submit.prevent="submit">
@@ -142,7 +159,7 @@ onBeforeUnmount(() => clearInterval(timer))
             <p v-if="mode === 'register' && domainHint" class="hint">支持 {{ domainHint }} 等常见邮箱</p>
             <div v-if="mode !== 'login'" class="code-row">
               <label>邮箱验证码<input v-model="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="6 位数字"></label>
-              <button type="button" class="ghost" :disabled="!email || cooldown > 0" @click="sendCode">{{ cooldown > 0 ? `${cooldown} 秒后重发` : '发送验证码' }}</button>
+              <button type="button" class="ghost" :disabled="!email || !config?.captcha || cooldown > 0" :aria-busy="captchaBusy" @click="sendCode">{{ captchaBusy ? '正在验证并发送…' : cooldown > 0 ? `${cooldown} 秒后重发` : '发送验证码' }}</button>
             </div>
             <label v-if="mode === 'register'">昵称<span class="optional">可选</span><input v-model="name" maxlength="40" autocomplete="nickname"></label>
             <label>{{ mode === 'reset' ? '新密码' : '密码' }}<input v-model="password" type="password" :autocomplete="mode === 'login' ? 'current-password' : 'new-password'" :minlength="mode === 'login' ? 1 : 8" maxlength="128" required></label>

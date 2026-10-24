@@ -9,7 +9,11 @@
             roll_keep 2000
             roll_keep_for 4560h
         }
-        format json
+        format filter {
+            wrap json
+            request>headers>X-Copylee-Esa-Origin delete
+            request>headers>Captcha-Verify-Param delete
+        }
     }
 }
 www.copylee.cn {

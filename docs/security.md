@@ -1,5 +1,33 @@
 # 登录与安全
 
+## 邮箱验证码与 ESA
+
+生产的注册和找回密码共用 `POST /api/account/code`。账户页动态加载阿里云官方 SDK，
+使用 ESA 场景进行无痕验证，初始化后至少等待 2 秒，再将单次票据放入
+`captcha-verify-param` 请求头。取消、失败或加载超时不会发送邮件；发送失败也需要重新验证。
+验证通过后仍保留邮箱、IP、每日总量与重发间隔限制。
+
+ESA 控制台的 AI 验证码规则必须保护 `copylee.cn/api/account/code` 的 POST 请求，
+开启「拦截空 Token」。回源请求头规则 `email-code-origin-auth` **仅匹配**
+`http.host eq "copylee.cn" and http.request.uri.path eq "/api/account/code" and http.request.method eq "POST"`，
+用「添加 / 静态」覆盖 `x-copylee-esa-origin`，值与服务器的 `COPYLEE_ESA_ORIGIN_SECRET` 相同。
+禁止将此密钥注入其他路径、回显给客户端或写入前端。域名别名和路径变体不得使用更宽的注入规则，
+否则可能在未命中验证码规则时被错误授信。
+
+服务器设置 `COPYLEE_EMAIL_CAPTCHA_ENABLED=true`。启用后，后端在生成验证码和调用 SMTP 前
+常量时间比较回源密钥，拒绝缺失/伪造密钥和空票据；缺少服务器密钥时返回 503，禁止降级放行。
+后端不信任客户端伪造的 `X-Captcha-Verify-Code`，也不把票据存在当作验签成功。
+可信依据是 ESA 先验签、再为该精确接口覆盖注入的回源密钥。
+Uvicorn 继续只监听 `127.0.0.1:8000`。Caddy 访问日志过滤
+`X-Copylee-Esa-Origin` 和 `Captcha-Verify-Param` 两个请求头，避免记录密钥与票据。
+仅检查 Origin、Host 或客户端票据不能阻止源站绕过。
+
+配置顺序：先配置 ESA 验签和精确回源规则，再部署后端和前端并启用环境变量。
+密钥轮换需同步更新 ESA 与服务器，期间发送接口可能暂时返回 403。
+回滚应回滚应用版本并维持入口保护；不要单独关闭空 Token 拦截或后端校验。
+验收应覆盖正常票据、空/无效/重复票据，以及携带正确 Host/Origin、伪造票据和验签结果的源站直连。
+本地开发默认关闭 ESA，不向生产申请票据。
+
 [项目首页](../README.md) · [开发指南](development.md) · [内容与接口](content.md) · [登录与安全](security.md) · [备份与恢复](maintenance.md) · [部署指南](../deploy/README.md)
 
 ## 管理员与会话
