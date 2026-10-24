@@ -2,7 +2,7 @@
 import manifest from './art/manifest.json'
 
 export type SheetName = keyof typeof manifest
-interface Meta { fw: number; fh: number; cols: number; count: number; ax?: number; ay?: number; ref?: number; boxes?: (number[] | null)[] }
+interface Meta { fw: number; fh: number; cols: number; count: number; ax?: number; ay?: number; ref?: number; boxes?: (number[] | null)[]; pins?: Record<string, number[]> }
 
 const urls = import.meta.glob('./art/*.webp', { eager: true, query: '?url', import: 'default' }) as Record<string, string>
 const images = new Map<SheetName, HTMLImageElement>()
@@ -53,7 +53,7 @@ export interface DrawOptions {
   rotate?: number
   alpha?: number
   /** sheet：表的统一锚点；center/bottom：该帧内容的中心或底部中心；grip：握把（左侧 22%）；head：弹头（右侧 72%） */
-  anchor?: 'sheet' | 'center' | 'bottom' | 'grip' | 'head'
+  anchor?: 'sheet' | 'center' | 'bottom' | 'grip' | 'head' | 'pin'
   /** 让该帧内容高度等于此值（世界单位），优先于 height */
   fit?: number
   /** 用另一帧的内容框计算锚点与缩放，让同一动画的各帧保持对齐 */
@@ -72,7 +72,9 @@ export function drawFrame(ctx: CanvasRenderingContext2D, name: SheetName, index:
   const k = o.fit && box ? o.fit / (box[3] - box[1]) : o.height / (m.ref ?? m.fh)
   const sx = (index % m.cols) * m.fw, sy = Math.floor(index / m.cols) * m.fh
   let ax = m.ax ?? m.fw / 2, ay = m.ay ?? m.fh / 2
-  if (o.anchor && o.anchor !== 'sheet' && box) {
+  const pin = m.pins?.[index]
+  if (o.anchor === 'pin' && pin) { ax = pin[0]; ay = pin[1] }
+  else if (o.anchor && o.anchor !== 'sheet' && box) {
     const w = box[2] - box[0]
     ax = o.anchor === 'grip' ? box[0] + w * 0.22 : o.anchor === 'head' ? box[0] + w * 0.72 : (box[0] + box[2]) / 2
     ay = o.anchor === 'bottom' ? box[3] : (box[1] + box[3]) / 2

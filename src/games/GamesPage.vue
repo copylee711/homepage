@@ -5,6 +5,7 @@ import { vReveal } from '../composables/useReveal'
 import PageHeading from '../components/PageHeading.vue'
 import { formatDuration, games, loadMine, localBest } from './api'
 import type { GameBest, GameId } from './api'
+import HealthNotice from './HealthNotice.vue'
 import Leaderboard from './Leaderboard.vue'
 import { muted, toggleMute } from './sound'
 import Sheep from './sheep/Sheep.vue'
@@ -50,6 +51,7 @@ onMounted(() => {
           </div>
           <Leaderboard :game="game.id" :unit="game.unit" :refresh="refresh" />
         </div>
+        <HealthNotice />
       </div>
     </template>
     <template v-else>
@@ -83,6 +85,7 @@ onMounted(() => {
             </div>
           </a>
         </div>
+        <HealthNotice />
       </div>
     </template>
   </section>

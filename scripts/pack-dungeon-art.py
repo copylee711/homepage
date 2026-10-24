@@ -115,6 +115,20 @@ def pack_sheet(path: Path, cols: int, rows: int, count: int, ref: int, anchor: s
     return sheet, meta
 
 
+def add_pins(sheet: Image.Image, meta: dict, frames: list[int]):
+    """为火焰会变形的帧计算固定支点：取内容下 40% 的水平中心与底部。"""
+    alpha = np.asarray(sheet.getchannel("A"))
+    pins = {}
+    for index in frames:
+        x0, y0 = (index % meta["cols"]) * meta["fw"], (index // meta["cols"]) * meta["fh"]
+        cell = alpha[y0:y0 + meta["fh"], x0:x0 + meta["fw"]] > 40
+        ys, xs = np.nonzero(cell)
+        top, bottom = ys.min(), ys.max() + 1
+        lower = ys >= bottom - (bottom - top) * 0.4
+        pins[str(index)] = [round((xs[lower].min() + xs[lower].max() + 1) / 2, 1), int(bottom)]
+    meta["pins"] = pins
+
+
 def pack_tiles(path: Path):
     image = Image.open(path).convert("RGB")
     w, h = image.size
@@ -136,6 +150,8 @@ def main():
     manifest = {}
     for name, (file, cols, rows, count, ref, anchor) in SHEETS.items():
         sheet, meta = pack_sheet(find(src, file), cols, rows, count, ref, anchor)
+        if name == "pickups":
+            add_pins(sheet, meta, [8, 9, 10])
         sheet.save(OUT / f"{name}.webp", "WEBP", quality=86, method=6)
         manifest[name] = meta
         print(name, sheet.size)

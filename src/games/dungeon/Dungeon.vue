@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { formatDuration, localBest, submitScore } from '../api'
 import { dungeonSound, muted, toggleMute } from '../sound'
 import GameOver from '../GameOver.vue'
+import HealthNotice from '../HealthNotice.vue'
 import type { ItemDef } from './data'
 import { Game } from './game'
 import { Controls } from './input'
@@ -186,6 +187,7 @@ onBeforeUnmount(() => {
       <button type="button" class="go" @click="start">开始冒险</button>
       <p v-if="artProgress < 1" class="best">正在加载美术素材 {{ Math.round(artProgress * 100) }}%</p>
       <p v-if="best" class="best">最佳 {{ best.best }} 分 · 第 {{ best.detail }} 层</p>
+      <HealthNotice dark class="notice" />
     </div>
 
     <div v-else-if="phase === 'paused'" class="panel">
@@ -224,6 +226,7 @@ onBeforeUnmount(() => {
 .panel { position:absolute; inset:0; z-index:5; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:24px; background:rgba(5,6,12,.55); color:#e8ecf5; text-align:center; backdrop-filter:blur(3px); overflow:auto; }
 .menu { background:linear-gradient(90deg,rgba(5,6,12,.15) 0%,rgba(5,6,12,.55) 45%,rgba(5,6,12,.88) 100%),var(--hero) center/cover no-repeat; backdrop-filter:none; align-items:flex-end; padding-right:clamp(24px,7%,90px); text-align:right; }
 .menu .keys { justify-items:end; }
+.menu .notice { position:absolute; left:16px; right:16px; bottom:10px; text-align:center; }
 .eyebrow { color:#ffd166; font:600 12px var(--font); letter-spacing:.2em; }
 .panel h2 { font-size:clamp(28px,6vw,52px); font-weight:800; letter-spacing:.04em; text-shadow:0 6px 30px rgba(255,140,60,.35); }
 .lead { max-width:520px; color:rgba(232,236,245,.75); font-size:14px; line-height:1.7; }

@@ -165,7 +165,18 @@ export function torchSpots(room: Room): [number, number][] {
 
 export function drawTorchesArt(ctx: CanvasRenderingContext2D, game: Game, time: number) {
   if (!has('pickups')) return false
-  torchSpots(game.room).forEach(([x, y], i) => drawFrame(ctx, 'pickups', 8 + loop(time + i * 0.37, 8, 3), x, y + 12, { height: 0, fit: 26, anchor: 'bottom', anchorFrom: 8 }))
+  // 生成的三帧火把支架位置不一致，固定用第一帧，火焰闪烁由程序叠加
+  torchSpots(game.room).forEach(([x, y], i) => {
+    const f = Math.sin(time * 11 + i * 2.1) * 0.5 + Math.sin(time * 17.3 + i) * 0.5
+    drawFrame(ctx, 'pickups', 8, x, y + 12, { height: 0, fit: 26, anchor: 'pin', scaleY: 1 })
+    ctx.save()
+    ctx.globalCompositeOperation = 'lighter'
+    const g = ctx.createRadialGradient(x + 2, y - 6, 0, x + 2, y - 6, 9 + f * 1.5)
+    g.addColorStop(0, `rgba(255,200,110,${0.55 + f * 0.15})`); g.addColorStop(1, 'rgba(255,120,40,0)')
+    ctx.fillStyle = g
+    ctx.beginPath(); ctx.ellipse(x + 2, y - 7 - f, 7, 10 + f * 1.5, 0, 0, 7); ctx.fill()
+    ctx.restore()
+  })
   return true
 }
 
