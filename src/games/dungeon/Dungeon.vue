@@ -19,6 +19,9 @@ const canvas = ref<HTMLCanvasElement>()
 const phase = ref<'menu' | 'play' | 'paused' | 'over'>('menu')
 const immersive = ref(false)
 const portrait = ref(false)
+/** 画面过矮或过窄时精简开始界面 */
+const compact = ref(false)
+const narrow = ref(false)
 const coarse = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
 const best = ref(localBest('dungeon'))
 const result = ref<{ improved: boolean; synced: boolean; error?: string }>()
@@ -44,6 +47,8 @@ function resize() {
   el.height = Math.round(rect.height * dpr)
   view = computeView(rect.width, rect.height, dpr)
   portrait.value = immersive.value && rect.height > rect.width
+  compact.value = rect.height < 480
+  narrow.value = rect.width < 600
 }
 
 controls.toWorld = (x, y) => ({ x: (x - view.ox) / view.scale, y: (y - view.oy) / view.scale })
@@ -157,7 +162,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="shell" class="shell" :class="{ immersive }">
+  <div ref="shell" class="shell" :class="{ immersive, compact, narrow, 'in-menu': phase === 'menu' }">
     <canvas ref="canvas" class="screen" aria-label="深渊骑士游戏画面" />
     <div class="corner">
       <button v-if="phase === 'play'" type="button" aria-label="暂停" @click="pause">❚❚</button>
@@ -187,6 +192,7 @@ onBeforeUnmount(() => {
       <button type="button" class="go" @click="start">开始冒险</button>
       <p v-if="artProgress < 1" class="best">正在加载美术素材 {{ Math.round(artProgress * 100) }}%</p>
       <p v-if="best" class="best">最佳 {{ best.best }} 分 · 第 {{ best.detail }} 层</p>
+      <p v-if="coarse && !immersive" class="hint">开始后会自动进入横屏全屏</p>
       <HealthNotice dark class="notice" />
     </div>
 
@@ -226,7 +232,13 @@ onBeforeUnmount(() => {
 .panel { position:absolute; inset:0; z-index:5; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:24px; background:rgba(5,6,12,.55); color:#e8ecf5; text-align:center; backdrop-filter:blur(3px); overflow:auto; }
 .menu { background:linear-gradient(90deg,rgba(5,6,12,.15) 0%,rgba(5,6,12,.55) 45%,rgba(5,6,12,.88) 100%),var(--hero) center/cover no-repeat; backdrop-filter:none; align-items:flex-end; padding-right:clamp(24px,7%,90px); text-align:right; }
 .menu .keys { justify-items:end; }
-.menu .notice { position:absolute; left:16px; right:16px; bottom:10px; text-align:center; }
+.menu .notice { max-width:560px; margin-top:6px; text-align:inherit; }
+.compact .menu .lead,.compact .menu .keys,.compact .menu .best,.compact .menu .eyebrow { display:none; }
+.compact .menu h2 { font-size:28px; }
+.compact .menu .go { margin-top:2px; padding:10px 28px; }
+.narrow .menu { align-items:center; text-align:center; padding:16px; background:linear-gradient(rgba(5,6,12,.35),rgba(5,6,12,.82)),var(--hero) 30% center/cover no-repeat; }
+.narrow .menu .keys { justify-items:center; }
+.in-menu .corner { top:calc(env(safe-area-inset-top) + 12px); }
 .eyebrow { color:#ffd166; font:600 12px var(--font); letter-spacing:.2em; }
 .panel h2 { font-size:clamp(28px,6vw,52px); font-weight:800; letter-spacing:.04em; text-shadow:0 6px 30px rgba(255,140,60,.35); }
 .lead { max-width:520px; color:rgba(232,236,245,.75); font-size:14px; line-height:1.7; }
