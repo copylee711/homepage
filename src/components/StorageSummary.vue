@@ -18,17 +18,17 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="summary" aria-label="网盘">
+  <section class="summary" aria-label="云盘">
     <header>
-      <div><h3>网盘</h3><p>网页、SFTP 与 WebDAV 访问同一份文件，图床图片也计入总空间。</p></div>
-      <a class="open" :href="driveUrl">打开网盘 <span aria-hidden="true">↗</span></a>
+      <div><h3>云盘</h3><p>网页、SFTP 与 WebDAV 访问同一份文件，图床图片也计入总空间。</p></div>
+      <a class="open" :href="driveUrl">打开云盘 <span aria-hidden="true">↗</span></a>
     </header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <template v-else-if="storage">
       <div class="usage-head"><strong>{{ formatSize(storage.used) }}</strong><span>/ {{ storage.quota ? formatSize(storage.quota) : '不限' }}</span></div>
       <div class="bar" role="progressbar" :aria-valuenow="Math.round(percent)" aria-valuemin="0" aria-valuemax="100"><span :style="{ width: `${percent}%` }" /></div>
       <ul class="split">
-        <li><i class="dot drive" />网盘 {{ formatSize(storage.drive_used) }}</li>
+        <li><i class="dot drive" />云盘 {{ formatSize(storage.drive_used) }}</li>
         <li><i class="dot images" />图床 {{ formatSize(storage.images_used) }}</li>
         <li v-for="mount in separate" :key="mount.id"><i class="dot other" />{{ mount.path }} {{ formatSize(mount.used) }} / {{ formatSize(mount.quota) }}（单独计算）</li>
       </ul>

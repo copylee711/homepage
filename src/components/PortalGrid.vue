@@ -5,7 +5,7 @@ import { vReveal } from '../composables/useReveal'
 import { site } from '../content'
 import PortalCard from './PortalCard.vue'
 
-// 云盘入口只对已开通网盘的用户显示。
+// 云盘入口只对已开通云盘的用户显示。
 const portals = computed(() => (site.value?.portals ?? []).filter(portal => portal.icon !== 'cloud' || features.value.drive))
 </script>
 

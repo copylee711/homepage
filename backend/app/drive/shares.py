@@ -1,4 +1,4 @@
-"""分享链接：把网盘中的文件或目录公开给持有链接的人，可设密码、有效期与次数。
+"""分享链接：把云盘中的文件或目录公开给持有链接的人，可设密码、有效期与次数。
 
 只读分享可以包含多个路径；仅上传分享必须是一个目录，访客只能往里放文件、看不到内容。
 """
@@ -60,7 +60,7 @@ def create(session: Session, drive, body) -> DriveShare:
         raise Invalid("请选择 1–100 个要分享的文件")
     entries = [drive.stat(path) for path in targets]
     if "/" in targets:
-        raise Invalid("不能分享整个网盘")
+        raise Invalid("不能分享整个云盘")
     if body.mode == "upload":
         if len(targets) != 1 or not entries[0].is_dir:
             raise Invalid("仅上传分享只能选择一个目录")
@@ -135,7 +135,7 @@ def single_root(drive, row: DriveShare) -> str | None:
 
 
 def locate(drive, row: DriveShare, inner: str) -> str | None:
-    """把分享内的路径换算成所有者网盘里的路径；inner 为分享根时返回 None。"""
+    """把分享内的路径换算成所有者云盘里的路径；inner 为分享根时返回 None。"""
     inner = paths.clean(inner)
     root = single_root(drive, row)
     if root is not None:

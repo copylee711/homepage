@@ -28,12 +28,27 @@ def user_id(client, headers):
     return client.get("/api/account/me", headers=headers).json()["user"]["id"]
 
 
-def enable(client, uid, enabled=True, quota_mb=200, max_file_mb=5):
+def agree(client, uid):
+    """以当前登录的访客身份同意云盘与图床使用协议（与 uid 不是同一人时跳过）。"""
+    me = client.get("/api/account/me")
+    if me.status_code != 200 or me.json()["user"]["id"] != uid:
+        return
+    terms = client.get("/api/storage/terms")
+    if terms.status_code != 200:
+        return
+    response = client.post("/api/storage/terms", json={"version": terms.json()["version"]},
+                           headers={"Origin": ORIGIN, "X-CSRF-Token": me.json()["csrf"]})
+    assert response.status_code == 200, response.text
+
+
+def enable(client, uid, enabled=True, quota_mb=200, max_file_mb=5, agreed=True):
     admin = login(client)
     response = client.put(f"/api/admin/accounts/users/{uid}/images", headers=admin,
                           json={"enabled": enabled, "quota_mb": quota_mb,
                                 "max_file_mb": max_file_mb})
     assert response.status_code == 200, response.text
+    if agreed:
+        agree(client, uid)
     return admin
 
 

@@ -4,13 +4,13 @@ import { fetchJson } from './content'
 export interface DriveEntry { name: string; path: string; dir: boolean; size: number; mtime: number }
 export interface DriveListing { path: string; read_only: boolean; items: DriveEntry[] }
 export interface DriveMount { id: string; path: string; kind: 'local' | 'oss'; location: string; quota: number; read_only: boolean; used: number; files: number }
-export interface StorageSummary { drive_enabled: boolean; images_enabled: boolean; quota: number | null; max_image: number; used: number; images_used: number; drive_used: number }
+export interface StorageSummary { drive_enabled: boolean; images_enabled: boolean; agreed: boolean; terms_accepted_at: string | null; quota: number | null; max_image: number; used: number; images_used: number; drive_used: number }
 export interface DriveCredential { id: string; kind: 'ssh_key' | 'app_password'; name: string; fingerprint: string; created_at: number; last_used: number | null }
 export interface DriveAccount { login: string; email: string; legacy_password: boolean; credentials: DriveCredential[]; sftp_host: string; sftp_port: number; dav_url: string }
 export interface DriveOverview { enabled: boolean; storage: StorageSummary; mounts?: DriveMount[]; account?: DriveAccount }
 export interface DriveShare { id: string; name: string; paths: string[]; mode: 'read' | 'upload'; has_password: boolean; expires_at: number; max_uses: number; used: number; created_at: number; last_used: number | null; url: string }
 
-/** 网盘接口与账户共用登录会话；写操作附带同一个 CSRF 令牌。 */
+/** 云盘接口与账户共用登录会话；写操作附带同一个 CSRF 令牌。 */
 export async function driveApi<T>(path: string, method = 'GET', data?: unknown): Promise<T> {
   try {
     return await fetchJson<T>(`/api/drive${path}`, {
@@ -145,10 +145,22 @@ export function formatTime(seconds: number | null | undefined) {
   return new Date(seconds * 1000).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
-/** 网盘子域名（cloud.）对应的主站地址；在主站本身时为空串，链接保持相对路径。 */
+/** 云盘子域名（cloud.）对应的主站地址；在主站本身时为空串，链接保持相对路径。 */
 export const mainSite = location.hostname.startsWith('cloud.') ? location.origin.replace('//cloud.', '//') : ''
 
 /** 登录、注册与反馈都在主站完成（Passkey 与 ESA 验证码只对主站有效），完成后回到当前页面。 */
 export const accountUrl = (query = '') => mainSite
   ? `${mainSite}/account?${query ? `${query}&` : ''}next=${encodeURIComponent(location.href)}`
   : `/account?${query ? `${query}&` : ''}next=${encodeURIComponent(location.pathname + location.search)}`
+
+export interface StorageTermsDocument { version: string; title: string; sections: { heading: string; paragraphs: string[] }[]; agreed: boolean; accepted_at: string | null }
+
+/** 云盘与图床使用协议只向已开通的用户提供，同意后才能使用这两项功能。 */
+export const termsApi = {
+  get: () => fetchJson<StorageTermsDocument>('/api/storage/terms', { credentials: 'same-origin' }),
+  accept: (version: string) => fetchJson<{ agreed: true; accepted_at: string }>('/api/storage/terms', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken() },
+    body: JSON.stringify({ version }),
+  }),
+}

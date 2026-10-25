@@ -6,13 +6,13 @@ export interface ImageLimits { enabled: boolean; quota: number | null; max_file:
 export interface ImageToken { id: string; name: string; created_at: string; last_used: string | null }
 export interface HostedImage { id: string; url: string; size: number; width: number; height: number; created_at: string; owner?: string }
 /** 管理员授予的功能；新注册用户默认都没有，前端据此隐藏对应入口。 */
-export interface AccountFeatures { drive: boolean; images: boolean; admin: boolean }
+export interface AccountFeatures { drive: boolean; images: boolean; admin: boolean; terms: boolean }
 export interface FeedbackItem { id: string; category: 'suggestion' | 'bug' | 'other'; content: string; page: string; status: 'new' | 'read' | 'done'; reply: string; created_at: number; replied_at: number | null }
 export interface AccountEntry { kind: 'note' | 'post'; slug: string; title: string; available: boolean; url: string; at: string }
 
 export const account = ref<AccountUser | null>(null)
 export const accountChecked = ref(false)
-export const features = ref<AccountFeatures>({ drive: false, images: false, admin: false })
+export const features = ref<AccountFeatures>({ drive: false, images: false, admin: false, terms: false })
 let csrf = ''
 
 /** 访客账户接口；写操作自动附带 CSRF 令牌。 */
@@ -29,12 +29,12 @@ export async function accountApi<T>(path: string, method = 'GET', data?: unknown
   }
 }
 
-/** 写操作请求的 CSRF 令牌；网盘等其他接口共用同一个登录会话。 */
+/** 写操作请求的 CSRF 令牌；云盘等其他接口共用同一个登录会话。 */
 export const csrfToken = () => csrf
 
 function signedOut() {
   account.value = null; csrf = ''
-  features.value = { drive: false, images: false, admin: false }
+  features.value = { drive: false, images: false, admin: false, terms: false }
 }
 
 export function signedIn(result: { user: AccountUser; csrf: string; features?: AccountFeatures }) {

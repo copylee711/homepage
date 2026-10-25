@@ -7,7 +7,7 @@ import AppIcon from '../AppIcon.vue'
 import LogoMark from '../LogoMark.vue'
 
 const { theme, toggle } = useTheme()
-// 网盘子域名上回到主站；在主站 /drive 下则回到首页。
+// 云盘子域名上回到主站；在主站 /drive 下则回到首页。
 const home = mainSite || '/'
 onMounted(() => { void loadAccount() })
 const loginUrl = accountUrl()

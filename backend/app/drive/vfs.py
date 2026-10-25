@@ -1,4 +1,4 @@
-"""一个用户的网盘视图：把虚拟路径解析到挂载点，检查只读与配额，并记录文件操作。
+"""一个用户的云盘视图：把虚拟路径解析到挂载点，检查只读与配额，并记录文件操作。
 
 Web、SFTP、WebDAV 都通过 Drive 访问文件，因此权限、配额与审计只在这里实现一次。
 """
@@ -13,7 +13,7 @@ from typing import BinaryIO
 from sqlalchemy import text
 from sqlmodel import Session, select
 
-from .. import audit, storage
+from .. import audit, storage, storage_terms
 from ..models import DriveMount, HostedImage
 from . import paths
 from .backends import Backend, Entry, ImagesBackend, LocalBackend, OssBackend
@@ -66,7 +66,7 @@ def make_backend(settings, row: DriveMount) -> Backend:
 
 
 def ensure_root(session: Session, settings, user_id: str) -> DriveMount:
-    """开通网盘时创建本地根目录挂载点；由调用方提交。"""
+    """开通云盘时创建本地根目录挂载点；由调用方提交。"""
     row = session.exec(
         select(DriveMount).where(DriveMount.user_id == user_id, DriveMount.path == "/")
     ).first()
@@ -97,7 +97,9 @@ class Drive:
         with Session(engine) as session:
             plan = storage.plan(session, user_id)
             if not plan.drive_enabled:
-                raise Forbidden("网盘功能尚未为你开启")
+                raise Forbidden("云盘功能尚未为你开启")
+            if not storage.agreed(session, user_id):
+                raise Forbidden(storage_terms.REQUIRED)
             rows = session.exec(select(DriveMount).where(DriveMount.user_id == user_id)).all()
             self.mounts = [Mount(row.id, row.path, row.kind, row.read_only, row.quota_bytes,
                                  make_backend(settings, row)) for row in rows]
@@ -106,7 +108,7 @@ class Drive:
                 self.mounts.append(Mount(None, IMAGES_PATH, "images", True, 0, ImagesBackend(
                     settings.images_dir, images, spool_dir(settings))))
         if not any(mount.path == "/" for mount in self.mounts):
-            raise Forbidden("网盘尚未初始化，请联系管理员")
+            raise Forbidden("云盘尚未初始化，请联系管理员")
         self.mounts.sort(key=lambda mount: len(mount.path), reverse=True)
 
     # —— 解析 ——

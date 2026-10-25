@@ -267,7 +267,7 @@ def issue(request: Request, response: Response, session: Session, user: User) ->
     session.add(user)
     session.commit()
     settings = request.app.state.settings
-    # 设置了 cookie_domain 时主站与网盘子域名共用登录；先清掉旧的仅限当前主机的 Cookie。
+    # 设置了 cookie_domain 时主站与云盘子域名共用登录；先清掉旧的仅限当前主机的 Cookie。
     if settings.cookie_domain:
         response.delete_cookie(USER_COOKIE, path="/api")
     response.set_cookie(USER_COOKIE, token, max_age=SESSION_DAYS * 86400, httponly=True,
@@ -277,7 +277,7 @@ def issue(request: Request, response: Response, session: Session, user: User) ->
 
 
 def share_cookie(request: Request, response: Response, row: UserSession):
-    """把旧的、仅限主站的登录 Cookie 换成全站共用的，网盘子域名也能识别。"""
+    """把旧的、仅限主站的登录 Cookie 换成全站共用的，云盘子域名也能识别。"""
     settings = request.app.state.settings
     if not settings.cookie_domain:
         return

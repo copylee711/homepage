@@ -41,7 +41,7 @@ const navItems: { id: typeof tab.value; name: string; icon: string }[] = [
   { id: 'repos', name: '仓库展示', icon: 'M6 4h10l3 3v13H6Zm4 6h6m-6 4h6m-6 4h3' },
   { id: 'posts', name: '文章管理', icon: 'M5 19h4L19 9l-4-4L5 15Zm8-12 4 4' },
   { id: 'notes', name: '笔记管理', icon: 'M6 4h12v16H6Zm3 4h6m-6 4h6m-6 4h4' },
-  { id: 'storage', name: '网盘与图床', icon: 'M4 7h16v11H4Zm0 0 2-3h12l2 3M8 12h8' },
+  { id: 'storage', name: '云盘与图床', icon: 'M4 7h16v11H4Zm0 0 2-3h12l2 3M8 12h8' },
   { id: 'accounts', name: '用户与邮件', icon: 'M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm-6 9a6 6 0 0 1 12 0m1-9 5-3m-5 6 5 3' },
   { id: 'inbox', name: '收件箱', icon: 'M4 6h16v12H4Zm0 0 8 7 8-7' },
 ]
@@ -474,7 +474,7 @@ runuser -u copylee -- .venv/bin/python -m app.cli reset-security --email you@exa
         <template v-if="tab==='storage'">
           <AdminStorage :api="api" @notify="text => message = text" @fail="text => error = text" />
           <div class="section-head images-head"><div><p class="eyebrow">Image hosting</p><h2 class="images-title">图床图片</h2></div><div class="buttons"><button @click="action(() => loadImages())">刷新</button><label class="upload-button primary">上传图片<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" @change="uploadToHost"></label></div></div>
-          <p class="subtle">文章与笔记编辑器上传的图片存入系统图床：不计配额、不能单独删除，内容不再引用 24 小时后自动清理。管理员用 PicList 等上传的图片计入自己的存储方案。用户的图床与网盘在上方的存储方案中开通。</p>
+          <p class="subtle">文章与笔记编辑器上传的图片存入系统图床：不计配额、不能单独删除，内容不再引用 24 小时后自动清理。管理员用 PicList 等上传的图片计入自己的存储方案。用户的图床与云盘在上方的存储方案中开通。</p>
           <section v-if="imagesState" class="edit-card"><h2>用量</h2>
             <ul class="note-list"><li v-for="row in imagesState.usage" :key="row.owner"><div class="note-info"><strong>{{ row.label }}</strong><span>{{ row.count }} 张 · {{ mib(row.size) }}</span></div><button @click="imageOwner = row.owner">只看此用户</button></li></ul>
             <p v-if="!imagesState.usage.length" class="subtle">还没有图片。</p>

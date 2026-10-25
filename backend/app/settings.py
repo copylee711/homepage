@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     feedback_captcha_scene_id: str = "12wbwicc"
     # 图床公开地址，例如 https://image.copylee.cn；留空时使用 site_url/images（由后端直接提供）。
     image_url: str = ""
-    # 网盘网页地址（例如 https://cloud.copylee.cn），用于分享链接与客户端配置说明。
+    # 云盘网页地址（例如 https://cloud.copylee.cn），用于分享链接与客户端配置说明。
     drive_url: str = ""
     # 网页上展示给用户的 WebDAV 地址与 SFTP 主机，仅用于说明。
     dav_url: str = ""
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     dav_listen: str = "127.0.0.1:10080"
     # 站点登录 Cookie 的 Domain；设为 copylee.cn 时主站与 cloud 子域名共用登录。
     cookie_domain: str = ""
-    # OSS 挂载（RAM 子账号，仅授权网盘 bucket）；未配置时 OSS 挂载点不可用。
+    # OSS 挂载（RAM 子账号，仅授权云盘 bucket）；未配置时 OSS 挂载点不可用。
     oss_access_key_id: str = ""
     oss_access_key_secret: str = ""
     oss_bucket: str = ""

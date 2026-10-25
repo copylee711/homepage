@@ -1,4 +1,4 @@
-"""网盘账户：开通、协议登录名、SSH 公钥与应用密码，以及 SFTP/WebDAV 的登录校验。
+"""云盘账户：开通、协议登录名、SSH 公钥与应用密码，以及 SFTP/WebDAV 的登录校验。
 
 协议登录不接受站点密码：WebDAV 每次请求都携带凭据，客户端常把它明文保存在配置里，
 因此改用可随时撤销的应用密码。从旧系统导入的 bcrypt 密码继续有效，旧客户端无需重新配置。
@@ -49,7 +49,8 @@ def find_user(session: Session, login: str) -> User | None:
 
 
 def usable(session: Session, user: User | None) -> bool:
-    return user is not None and not user.disabled and storage.plan(session, user.id).drive_enabled
+    return (user is not None and not user.disabled and storage.plan(session, user.id).drive_enabled
+            and storage.agreed(session, user.id))
 
 
 # —— 登录限流（与网页登录共用 LoginAttempt 表，键名不同）——
@@ -119,7 +120,7 @@ def check_key(session: Session, login: str, fingerprint: str) -> User | None:
 
 
 def enable(session: Session, settings, user_id: str, enabled: bool):
-    """开关网盘；关闭时保留文件，重新开启后恢复。由调用方提交。"""
+    """开关云盘；关闭时保留文件，重新开启后恢复。由调用方提交。"""
     storage.save(session, user_id, drive_enabled=enabled)
     if enabled:
         ensure_root(session, settings, user_id)
@@ -295,7 +296,7 @@ def account_view(session: Session, settings, user: User) -> dict:
 
 
 def remove_user(session: Session, settings, user_id: str):
-    """删除账户时清理网盘记录、本地文件与 OSS 对象；由调用方提交。"""
+    """删除账户时清理云盘记录、本地文件与 OSS 对象；由调用方提交。"""
     for row in session.exec(select(DriveMount).where(DriveMount.user_id == user_id)).all():
         try:
             if row.kind == "local":

@@ -77,19 +77,19 @@ onMounted(() => work(load))
 
 <template>
   <section class="admin-panel storage">
-    <div class="section-head"><div><p class="eyebrow">Storage</p><h1>网盘与图床</h1></div>
+    <div class="section-head"><div><p class="eyebrow">Storage</p><h1>云盘与图床</h1></div>
       <div class="buttons"><button :class="{ selected: filter === 'enabled' }" @click="filter = 'enabled'">已开通</button><button :class="{ selected: filter === 'all' }" @click="filter = 'all'">全部用户</button><button @click="work(load)">刷新</button></div></div>
-    <p class="subtle">新注册用户默认没有网盘与图床，在这里逐个开通。网盘与图床共用总配额；单独设置配额的挂载点不计入总配额。管理员也按自己的方案计算，避免占满服务器磁盘。</p>
+    <p class="subtle">新注册用户默认没有云盘与图床，在这里逐个开通。云盘与图床共用总配额；单独设置配额的挂载点不计入总配额。管理员也按自己的方案计算，避免占满服务器磁盘。</p>
     <section v-if="server" class="edit-card server">
       <div class="server-head"><h2>服务器存储</h2><span class="field-hint">数据目录所在磁盘</span></div>
       <div class="disk" role="img" :aria-label="`磁盘已用 ${formatSize(server.disk_used)}，共 ${formatSize(server.disk_total)}`">
-        <span class="seg drive" :style="{ width: `${pct(server.drive_local, server.disk_total)}%` }" :title="`网盘 ${formatSize(server.drive_local)}`" />
+        <span class="seg drive" :style="{ width: `${pct(server.drive_local, server.disk_total)}%` }" :title="`云盘 ${formatSize(server.drive_local)}`" />
         <span class="seg images" :style="{ width: `${pct(server.images, server.disk_total)}%` }" :title="`图床 ${formatSize(server.images)}`" />
         <span class="seg other" :style="{ width: `${pct(Math.max(server.disk_used - server.drive_local - server.images, 0), server.disk_total)}%` }" title="系统与其他文件" />
       </div>
       <dl class="figures">
         <div><dt>磁盘</dt><dd>{{ formatSize(server.disk_used) }} / {{ formatSize(server.disk_total) }}</dd><span class="field-hint">剩余 {{ formatSize(server.disk_free) }}</span></div>
-        <div><dt><i class="dot drive" />网盘（本地）</dt><dd>{{ formatSize(server.drive_local) }}</dd></div>
+        <div><dt><i class="dot drive" />云盘（本地）</dt><dd>{{ formatSize(server.drive_local) }}</dd></div>
         <div><dt><i class="dot images" />图床</dt><dd>{{ formatSize(server.images) }}</dd></div>
         <div><dt>已分配总配额</dt><dd :class="{ warn: overcommit }">{{ formatSize(server.allocated) }}</dd><span class="field-hint">{{ overcommit ? '超过可用空间，用户都用满会写满磁盘' : `可再分配约 ${formatSize(Math.max(server.drive_local + server.images + server.disk_free - server.allocated, 0))}` }}</span></div>
         <div v-if="state?.oss_configured"><dt>OSS</dt><dd>{{ formatSize(server.oss_used) }}</dd><span class="field-hint">挂载点配额合计 {{ formatSize(server.oss_allocated) }}</span></div>
@@ -99,11 +99,11 @@ onMounted(() => work(load))
     <p v-if="state && !shown.length" class="subtle">还没有开通存储的用户，切换到“全部用户”为他们开通。</p>
     <article v-for="user in shown" :key="user.id" class="edit-card user" :class="{ muted: user.disabled }">
       <header>
-        <div class="who"><strong>{{ user.name }}</strong><span>{{ user.email }}</span></div>
-        <div class="usage"><strong>{{ formatSize(user.storage.used) }}</strong><span>/ {{ user.storage.quota === null ? '不限' : formatSize(user.storage.quota) }}</span><span class="field-hint">网盘 {{ formatSize(user.storage.drive_used) }} · 图床 {{ formatSize(user.storage.images_used) }}</span></div>
+        <div class="who"><strong>{{ user.name }}<em v-if="(user.storage.drive_enabled || user.storage.images_enabled) && !user.storage.agreed" class="tag">待同意协议</em><em v-else-if="user.storage.terms_accepted_at" class="tag accent" :title="`同意于 ${user.storage.terms_accepted_at}`">已同意协议</em></strong><span>{{ user.email }}</span></div>
+        <div class="usage"><strong>{{ formatSize(user.storage.used) }}</strong><span>/ {{ user.storage.quota === null ? '不限' : formatSize(user.storage.quota) }}</span><span class="field-hint">云盘 {{ formatSize(user.storage.drive_used) }} · 图床 {{ formatSize(user.storage.images_used) }}</span></div>
       </header>
       <form v-if="drafts[user.id]" class="plan" @submit.prevent="savePlan(user)">
-        <label class="switch"><input v-model="drafts[user.id]!.drive_enabled" type="checkbox"><span>网盘</span></label>
+        <label class="switch"><input v-model="drafts[user.id]!.drive_enabled" type="checkbox"><span>云盘</span></label>
         <label class="switch"><input v-model="drafts[user.id]!.images_enabled" type="checkbox"><span>图床</span></label>
         <label class="inline">总配额 MiB<input v-model.number="drafts[user.id]!.quota_mb" type="number" min="1" max="10000000"></label>
         <label class="inline">单张图片 MiB<input v-model.number="drafts[user.id]!.max_image_mb" type="number" min="1" max="20"></label>
@@ -159,6 +159,7 @@ onMounted(() => work(load))
 .who { display:flex; flex-direction:column; }
 .who strong { font-weight:500; }
 .who span { color:var(--muted); font-size:12px; }
+.who em { font-style:normal; }
 .usage { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px; justify-content:flex-end; }
 .usage strong { font-size:18px; }
 .usage > span:not(.field-hint) { color:var(--muted); font-size:13px; }

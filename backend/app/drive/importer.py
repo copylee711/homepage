@@ -1,4 +1,4 @@
-"""从旧网盘（SFTPGo 的 SQLite 数据库）导入账户、挂载点与分享。
+"""从旧云盘（SFTPGo 的 SQLite 数据库）导入账户、挂载点与分享。
 
 只读取数据库中的数据，不依赖旧系统的程序。每个旧用户都要映射到一个已注册的站点用户；
 原登录名、bcrypt 密码与 SSH 公钥原样保留，客户端无需重新配置。
@@ -121,7 +121,7 @@ def import_user(session: Session, settings, item: dict, copy_files: bool,
             _, fingerprint, _ = accounts.parse_key(key)
             if fingerprint in known:
                 continue
-            accounts.add_key(session, target.id, "旧网盘导入", key)
+            accounts.add_key(session, target.id, "旧云盘导入", key)
             known.add(fingerprint)
             log.append(f"导入公钥 {fingerprint}")
         except DriveError as error:

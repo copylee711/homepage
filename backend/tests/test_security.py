@@ -67,7 +67,7 @@ def test_only_flagged_users_can_enter_admin(server):
     assert me.status_code == 401
     headers = account_login(client)
     assert client.get("/api/account/me").json()["features"] == {
-        "drive": True, "images": True, "admin": False}
+        "drive": True, "images": True, "admin": False, "terms": False}
     with Session(app.state.engine) as session:
         set_admin(session, ADMIN_EMAIL)
     assert client.get("/api/account/me").json()["features"]["admin"] is True

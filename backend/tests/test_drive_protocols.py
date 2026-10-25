@@ -16,7 +16,7 @@ from app.drive import accounts, dav, sftp
 from app.drive.serve import Context, start_dav
 from app.models import User
 from app.settings import Settings
-from app.storage import save
+from app.storage import accept_terms, save
 
 LEGACY = "old-sftpgo-password"
 
@@ -39,6 +39,7 @@ def context(tmp_path):
         session.add(User(id="u1", email="reader@qq.com", password_hash="x", name="读者",
                          created_at="2026-01-01T00:00:00+00:00"))
         save(session, "u1", quota_mb=1)
+        accept_terms(session, "u1")
         accounts.enable(session, settings, "u1", True)
         session.commit()
         accounts.set_login(session, "u1", "HK",
@@ -216,6 +217,6 @@ def test_webdav_rejects_disabled_drive(webdav, context):
         save(session, "u1", drive_enabled=False)
         session.commit()
     dav_cache_cleared = client.request("PROPFIND", "/", headers={"Depth": "0"})
-    # 认证缓存仍然有效时，打开网盘会被 Drive 拒绝；缓存过期后则直接拒绝登录。
+    # 认证缓存仍然有效时，打开云盘会被 Drive 拒绝；缓存过期后则直接拒绝登录。
     assert dav_cache_cleared.status_code in {401, 403}
     assert dav.CACHE_SECONDS <= 600

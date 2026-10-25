@@ -106,7 +106,7 @@ image.copylee.cn {
 cloud.copylee.cn {
     import access_log cloud
     encode zstd gzip
-    # 网盘：前端与主站共用同一份构建，接口转发到后端；不经过 ESA，大文件上传不受 CDN 限制。
+    # 云盘：前端与主站共用同一份构建，接口转发到后端；不经过 ESA，大文件上传不受 CDN 限制。
     # 旧 SFTPGo 的分享链接沿用原 id，跳到新的分享页。
     @legacy_share path_regexp legacy ^/web/client/pubshares/([A-Za-z0-9]+)
     redir @legacy_share /s/{re.legacy.1} 302

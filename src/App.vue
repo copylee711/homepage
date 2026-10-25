@@ -15,11 +15,11 @@ import ScutSection from './components/ScutSection.vue'
 import { startScut } from './scut'
 // 小游戏代码较大，只在 /games 页面按需加载
 const GamesPage = defineAsyncComponent(() => import('./games/GamesPage.vue'))
-// 网盘与分享页按需加载；cloud 子域名的根路径就是网盘。
+// 云盘与分享页按需加载；cloud 子域名的根路径就是云盘。
 const DrivePage = defineAsyncComponent(() => import('./components/drive/DrivePage.vue'))
 const SharePage = defineAsyncComponent(() => import('./components/drive/SharePage.vue'))
 const onCloud = location.hostname.startsWith('cloud.')
-// 网盘子域名上的账户页直接回主站（登录 Cookie 两边共用），完成后再跳回来。
+// 云盘子域名上的账户页直接回主站（登录 Cookie 两边共用），完成后再跳回来。
 if (onCloud && /^\/account\/?$/.test(location.pathname)) {
   const params = new URLSearchParams(location.search)
   const back = params.get('next') ?? '/'

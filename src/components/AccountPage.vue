@@ -8,6 +8,7 @@ import PageHeading from './PageHeading.vue'
 import ImageHosting from './ImageHosting.vue'
 import FeedbackPanel from './FeedbackPanel.vue'
 import StorageSummary from './StorageSummary.vue'
+import StorageTerms from './StorageTerms.vue'
 import AccountSecurity from './AccountSecurity.vue'
 import { UNKNOWN_PASSKEY, forgetPasskey, passkeyAvailable, usePasskey } from '../passkeys'
 import { games, loadMine } from '../games/api'
@@ -18,7 +19,8 @@ import type { EmailCaptchaConfig } from '../email-captcha'
 type Mode = 'login' | 'register' | 'reset'
 const mode = ref<Mode>('login')
 const tab = ref<'favorites' | 'history' | 'storage' | 'feedback' | 'settings'>('favorites')
-// 网盘与图床由管理员单独开通；没有权限的用户看不到“存储”标签。
+// 云盘与图床由管理员单独开通；没有权限的用户看不到“存储”标签。
+const termsOpen = ref(false)
 const hasStorage = computed(() => features.value.drive || features.value.images)
 const tabList = computed(() => [['favorites', '收藏'], ['history', '浏览记录'], ...(hasStorage.value ? [['storage', '存储']] : []), ['feedback', '反馈'], ['settings', '账户设置']])
 const busy = ref(false), error = ref(''), message = ref('')
@@ -42,7 +44,7 @@ const domainHint = computed(() => (config.value?.allowedDomains ?? []).slice(0, 
 const next = (() => {
   const value = new URLSearchParams(location.search).get('next') ?? ''
   if (/^\/(?!\/)/.test(value)) return value
-  // 也接受本站子域名（如 cloud.）的地址，用于网盘登录后跳回。
+  // 也接受本站子域名（如 cloud.）的地址，用于云盘登录后跳回。
   try {
     const url = new URL(value)
     const ok = url.protocol === location.protocol && (url.hostname === location.hostname || url.hostname.endsWith(`.${location.hostname}`))
@@ -189,7 +191,7 @@ onMounted(async () => {
   const params = new URLSearchParams(location.search)
   if (params.get('mode') === 'register') mode.value = 'register'
   await loadAccount()
-  // 已登录时直接回到来源页面（例如从网盘跳来登录）。
+  // 已登录时直接回到来源页面（例如从云盘跳来登录）。
   if (account.value && next) { location.href = next; return }
   const wanted = params.get('tab')
   if (wanted && tabList.value.some(([value]) => value === wanted)) tab.value = wanted as typeof tab.value
@@ -262,8 +264,15 @@ onBeforeUnmount(() => { clearInterval(timer); clearTimeout(warmup); captchaLifet
             <button v-for="[value, label] in tabList" :key="value" role="tab" :aria-selected="tab === value" :class="{ active: tab === value }" type="button" @click="tab = value as typeof tab">{{ label }}</button>
           </div>
           <div v-if="tab === 'storage'" class="storage">
-            <StorageSummary v-if="features.drive" />
-            <ImageHosting v-if="features.images" @enabled="value => { if (!value) loadAccount(true) }" />
+            <StorageTerms v-if="!features.terms" class="storage-terms" @agreed="loadAccount(true)" />
+            <template v-else>
+              <StorageSummary v-if="features.drive" />
+              <ImageHosting v-if="features.images" @enabled="value => { if (!value) loadAccount(true) }" />
+              <details class="terms-link" @toggle="termsOpen = ($event.target as HTMLDetailsElement).open">
+                <summary>云盘与图床使用协议</summary>
+                <StorageTerms v-if="termsOpen" view />
+              </details>
+            </template>
           </div>
           <FeedbackPanel v-else-if="tab === 'feedback'" :captcha="config?.captcha && { ...config.captcha, sceneId: config.captcha.feedbackSceneId || config.captcha.sceneId }" />
           <template v-else-if="tab !== 'settings'">
@@ -302,6 +311,10 @@ onBeforeUnmount(() => { clearInterval(timer); clearTimeout(warmup); captchaLifet
 
 <style scoped>
 .account-page { min-height:80vh; padding-bottom:72px; }
+.storage-terms { margin-top:24px; }
+.terms-link { margin-top:24px; padding:16px 24px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); }
+.terms-link summary { color:var(--muted); font-size:13px; cursor:pointer; }
+.terms-link[open] summary { margin-bottom:8px; color:var(--text); }
 fieldset { border:0; margin:0; padding:0; min-width:0; }
 .feedback { padding:12px 16px; margin:0 0 20px; border-radius:var(--radius-sm); font-size:14px; }
 .feedback.error { color:#d15c5c; background:rgba(209,92,92,.08); }

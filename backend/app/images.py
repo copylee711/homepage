@@ -21,12 +21,13 @@ from sqlalchemy import delete, func
 from sqlmodel import Session, select
 from starlette.datastructures import UploadFile
 
+from . import storage_terms
 from .accounts import client_ip, record_failure, throttle
 from .auth import digest
 from .content import bump, timestamp
 from .models import Article, HostedImage, ImageToken, Note, StoragePlan, User
 from .notes import bump_notes
-from .storage import ADMIN, SYSTEM, images_used, plan, shared_used, unlimited
+from .storage import ADMIN, SYSTEM, agreed, images_used, plan, shared_used, unlimited
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 TOKEN_LIMIT = 10
@@ -72,13 +73,13 @@ def view(settings, row: HostedImage) -> dict:
 
 
 def limits(session: Session, owner: str) -> dict:
-    """used 为网盘与图床共用的总用量，images_used 为其中图床部分。"""
+    """used 为云盘与图床共用的总用量，images_used 为其中图床部分。"""
     if unlimited(session, owner):
         used = images_used(session, owner)
-        return {"enabled": True, "quota": None, "max_file": MAX_IMAGE_BYTES, "used": used,
-                "images_used": used}
+        return {"enabled": True, "agreed": True, "quota": None, "max_file": MAX_IMAGE_BYTES,
+                "used": used, "images_used": used}
     row = plan(session, owner)
-    return {"enabled": row.images_enabled, "quota": row.quota_bytes,
+    return {"enabled": row.images_enabled, "agreed": agreed(session, owner), "quota": row.quota_bytes,
             "max_file": min(row.max_image_bytes, MAX_IMAGE_BYTES),
             "used": shared_used(session, owner), "images_used": images_used(session, owner)}
 
@@ -87,6 +88,8 @@ def require_enabled(session: Session, owner: str) -> dict:
     value = limits(session, owner)
     if not value["enabled"]:
         raise HTTPException(403, "图床功能尚未为你开启")
+    if not value["agreed"]:
+        raise HTTPException(403, storage_terms.REQUIRED)
     return value
 
 

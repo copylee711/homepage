@@ -1,14 +1,17 @@
-"""存储方案：网盘与图床共用一个总配额。
+"""存储方案：云盘与图床共用一个总配额。
 
-总用量 = 图床图片 + 未单独设置配额的网盘挂载点。单独设置了配额的挂载点（例如 OSS
+总用量 = 图床图片 + 未单独设置配额的云盘挂载点。单独设置了配额的挂载点（例如 OSS
 归档目录）只受自己的配额限制。管理员同样受自己的存储方案约束（可在后台调整），
 只有旧数据里 owner 为 "admin" 的图片不计配额。
 """
 
+from datetime import datetime, timezone
+
 from sqlalchemy import func
 from sqlmodel import Session, select
 
-from .models import DriveMount, HostedImage, StoragePlan
+from . import storage_terms
+from .models import DriveMount, HostedImage, StoragePlan, User
 
 ADMIN = "admin"
 # 文章与笔记引用的图片：随内容自动增减，不属于任何人，也不计入配额。
@@ -51,11 +54,31 @@ def remaining(session: Session, user_id: str) -> int | None:
     return plan(session, user_id).quota_bytes - shared_used(session, user_id)
 
 
+def agreed(session: Session, user_id: str) -> bool:
+    """是否已同意当前版本的使用协议。管理员是服务运营者，不需要同意。"""
+    if unlimited(session, user_id):
+        return True
+    user = session.get(User, user_id)
+    if user is not None and user.is_admin:
+        return True
+    return plan(session, user_id).terms_version == storage_terms.VERSION
+
+
+def accept_terms(session: Session, user_id: str) -> StoragePlan:
+    """记录同意时间与版本；由调用方提交。"""
+    row = plan(session, user_id)
+    row.terms_version = storage_terms.VERSION
+    row.terms_accepted_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    session.add(row)
+    return row
+
+
 def summary(session: Session, user_id: str) -> dict:
     row = plan(session, user_id)
     images = images_used(session, user_id)
     drive = drive_used(session, user_id)
     return {"drive_enabled": row.drive_enabled, "images_enabled": row.images_enabled,
+            "agreed": agreed(session, user_id), "terms_accepted_at": row.terms_accepted_at,
             "quota": None if unlimited(session, user_id) else row.quota_bytes,
             "max_image": row.max_image_bytes,
             "used": images + drive, "images_used": images, "drive_used": drive}

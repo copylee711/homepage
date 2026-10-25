@@ -8,6 +8,7 @@ import DriveFiles from './DriveFiles.vue'
 import DriveSettings from './DriveSettings.vue'
 import DriveTopBar from './DriveTopBar.vue'
 import DriveShares from './DriveShares.vue'
+import StorageTerms from '../StorageTerms.vue'
 
 type Section = 'files' | 'shares' | 'settings'
 const section = ref<Section>((() => {
@@ -39,7 +40,7 @@ function go(next: Section) {
 onMounted(async () => {
   document.title = 'Cloud · Copy Lee'
   await loadAccount()
-  if (account.value && features.value.drive) await refresh()
+  if (account.value && features.value.drive && features.value.terms) await refresh()
 })
 </script>
 
@@ -50,21 +51,24 @@ onMounted(async () => {
     <main v-if="!accountChecked" class="state"><p class="d-muted">正在读取账户…</p></main>
     <main v-else-if="!account" class="state">
       <div class="state-card">
-        <h1>登录后使用网盘</h1>
-        <p>网盘使用站点账户登录，开通后可在网页、SFTP 与 WebDAV 中访问同一份文件。</p>
+        <h1>登录后使用云盘</h1>
+        <p>云盘使用站点账户登录，开通后可在网页、SFTP 与 WebDAV 中访问同一份文件。</p>
         <a class="d-btn primary" :href="loginUrl">登录</a>
       </div>
     </main>
     <main v-else-if="!features.drive" class="state">
       <div class="state-card">
-        <h1>网盘尚未开通</h1>
-        <p>网盘目前只向受邀用户开放。如需开通，可以在账户页的“反馈”中告诉站长。</p>
+        <h1>云盘尚未开通</h1>
+        <p>云盘目前只向受邀用户开放。如需开通，可以在账户页的“反馈”中告诉站长。</p>
         <a class="d-btn" :href="feedbackUrl">去反馈</a>
       </div>
     </main>
+    <main v-else-if="!features.terms" class="terms-page">
+      <StorageTerms @agreed="async () => { await loadAccount(true); await refresh() }" />
+    </main>
     <div v-else class="layout">
       <aside class="side">
-        <nav aria-label="网盘">
+        <nav aria-label="云盘">
           <button v-for="item in nav" :key="item.id" type="button" :class="{ active: section === item.id }" :aria-current="section === item.id ? 'page' : undefined" @click="go(item.id)"><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="item.icon" /></svg>{{ item.label }}</button>
         </nav>
         <div v-if="storage" class="usage">
@@ -90,6 +94,7 @@ onMounted(async () => {
 .state-card { max-width:440px; padding:36px; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); text-align:center; box-shadow:0 30px 60px -40px rgba(17,24,39,.35); }
 .state-card h1 { font-size:26px; letter-spacing:-.02em; }
 .state-card p { margin:10px 0 22px; color:var(--muted); font-size:14px; line-height:1.7; }
+.terms-page { padding:clamp(24px,5vw,56px) 16px 64px; }
 .layout { display:grid; grid-template-columns:220px minmax(0,1fr); max-width:1440px; margin:0 auto; }
 .side { position:sticky; top:var(--header-h); align-self:start; height:calc(100vh - var(--header-h)); padding:24px 14px; border-right:1px solid var(--line); overflow:auto; }
 .side nav { display:grid; gap:2px; }

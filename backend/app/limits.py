@@ -2,7 +2,7 @@ import re
 
 from starlette.responses import JSONResponse
 
-# 图片与网盘上传接口自行按配额限制读取大小，不经过 2 MiB 的 JSON 限制。
+# 图片与云盘上传接口自行按配额限制读取大小，不经过 2 MiB 的 JSON 限制。
 UPLOAD_PATHS = {"/api/admin/media", "/api/upload", "/api/account/images"}
 UPLOAD_PATTERN = re.compile(r"^/api/(?:drive/uploads/[A-Za-z0-9]+|s/[A-Za-z0-9]+/upload)$")
 

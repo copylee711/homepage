@@ -1,4 +1,4 @@
-"""网盘协议进程：python -m app.drive.serve
+"""云盘协议进程：python -m app.drive.serve
 
 同一进程里运行 SFTP（asyncio）与 WebDAV（cheroot 线程池），共用数据库与存储配置。
 文件操作日志写入审计目录下的 drive.log，与网页后端的 audit.log 分开滚动。
@@ -69,7 +69,7 @@ async def main(settings: Settings, sftp_listen: str, dav_listen: str):
 
 
 def run():
-    parser = argparse.ArgumentParser(description="Copy Lee 网盘 SFTP/WebDAV 服务")
+    parser = argparse.ArgumentParser(description="Copy Lee 云盘 SFTP/WebDAV 服务")
     parser.add_argument("--sftp", help="SFTP 监听地址，默认取 COPYLEE_SFTP_LISTEN")
     parser.add_argument("--dav", help="WebDAV 监听地址，默认取 COPYLEE_DAV_LISTEN")
     args = parser.parse_args()

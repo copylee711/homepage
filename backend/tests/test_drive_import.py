@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 from test_accounts import signup, site  # noqa: F401
 from test_drive import names
 
+from app import storage
 from app.drive import accounts
 from app.drive.importer import run
 from app.models import DriveMount, DriveShare, User
@@ -77,6 +78,10 @@ def test_import_accounts_files_mounts_and_shares(site, tmp_path):  # noqa: F811
         assert mounts["/"].used_bytes == len(b"attachment") + len(b"binary")
         share = session.get(DriveShare, "PQLPhuwVsz5rgZdpYAUXoZ")
         assert share.paths == ["/setup.exe"] and share.used == 2 and share.mode == "read"
+        # 导入的用户同样要先在网页端同意使用协议，之后旧密码与公钥照常可用。
+        assert accounts.check_password(session, "COPY", "old-password") is None
+        storage.accept_terms(session, user.id)
+        session.commit()
         assert accounts.check_password(session, "COPY", "old-password").id == user.id
         fingerprint = asyncssh.import_public_key(key).get_fingerprint("sha256")
         assert accounts.check_key(session, "copy", fingerprint).id == user.id
@@ -87,6 +92,9 @@ def test_import_accounts_files_mounts_and_shares(site, tmp_path):  # noqa: F811
                   create_missing=True)
     assert "新建站点用户 hk@users.copylee.cn" in created
     with Session(app.state.engine) as session:
+        hk = session.exec(select(User).where(User.email == "hk@users.copylee.cn")).one()
+        storage.accept_terms(session, hk.id)
+        session.commit()
         assert accounts.check_password(session, "hk", "old-password") is not None
     info = client.get("/api/s/PQLPhuwVsz5rgZdpYAUXoZ").json()
     assert info["unlocked"] and info["name"] == "setup.exe"

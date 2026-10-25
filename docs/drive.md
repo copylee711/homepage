@@ -1,11 +1,11 @@
-# 网盘（cloud.copylee.cn / dav.copylee.cn）
+# 云盘（cloud.copylee.cn / dav.copylee.cn）
 
-自研网盘，替代原先部署的 SFTPGo。网页、SFTP、WebDAV 访问同一份文件，账户就是站点账户，
+自研云盘，替代原先部署的 SFTPGo。网页、SFTP、WebDAV 访问同一份文件，账户就是站点账户，
 配额与图床共用。代码位于 `backend/app/drive/`，前端位于 `src/components/drive/`。
 
 ## 独立实现说明
 
-本项目以 MIT 协议发布。网盘为从零编写的独立实现：
+本项目以 MIT 协议发布。云盘为从零编写的独立实现：
 
 - 参考的只是 SFTPGo 的**产品功能**（多协议访问、虚拟目录、配额、分享链接等）以及
   `openapi.yaml` 中的字段含义；没有阅读、复制或翻译其 Go 源码、测试或 Web UI。
@@ -30,13 +30,13 @@ SFTP :2022 ───────────────────────
                                           ┘
             两个进程共用 app/drive/vfs.py 与 content.db（SQLite WAL）
 存储：本地 /var/lib/copylee/drive/<user_id>/；OSS 挂载点（bucket copylee-cloud，前缀 users/<名>/）；
-      图床图片以只读的“/图床”目录出现在网盘里，文件仍在 /var/lib/copylee/images。
+      图床图片以只读的“/图床”目录出现在云盘里，文件仍在 /var/lib/copylee/images。
 ```
 
 - `vfs.Drive`：把虚拟路径解析到挂载点，统一做路径校验（拒绝 `..`、符号链接逃逸）、只读、
   配额与审计。网页、SFTP、WebDAV 都只通过它访问文件。
-- 配额：`storage_plan.quota_bytes` 是网盘与图床共用的总额度；单独设置配额的挂载点（如 OSS
-  归档目录）只受自己的配额约束。管理员也按自己的方案计算，可在后台“网盘与图床”中调整。
+- 配额：`storage_plan.quota_bytes` 是云盘与图床共用的总额度；单独设置配额的挂载点（如 OSS
+  归档目录）只受自己的配额约束。管理员也按自己的方案计算，可在后台“云盘与图床”中调整。
 - 登录：网页用站点账户；SFTP/WebDAV 用 SSH 公钥、应用密码（只存 SHA-256）或从旧系统导入的
   bcrypt 密码，不接受站点密码。失败按登录名与 IP 限流（15 分钟内 10/30 次）。
 - 上传：网页端分块（8 MiB）可续传，先写 `drive/.uploads/`，完成后检查配额再放到目标位置；
@@ -46,7 +46,7 @@ SFTP :2022 ───────────────────────
 
 ## 权限
 
-新注册用户默认没有网盘与图床，前台也不显示相应入口。管理员在后台“网盘与图床”中为用户开通、
+新注册用户默认没有云盘与图床，前台也不显示相应入口。管理员在后台“云盘与图床”中为用户开通、
 设置配额、SFTP/WebDAV 登录名与 OSS 挂载点。管理员本人就是带 `is_admin` 标记的站点用户：
 
 ```bash
@@ -57,7 +57,7 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --email you@example.
 
 ## 部署
 
-1. `/etc/copylee/backend.env` 增加 `deploy/backend/.env.example` 中“网盘”一节的变量，
+1. `/etc/copylee/backend.env` 增加 `deploy/backend/.env.example` 中“云盘”一节的变量，
    `COPYLEE_ALLOWED_ORIGINS` 加入 `https://cloud.copylee.cn`。
 2. 主机密钥放在 `/var/lib/copylee/ssh/`（从旧服务复制 `/etc/sftpgo/id_*` 可保持指纹不变），
    属主 `copylee`，权限 0600。

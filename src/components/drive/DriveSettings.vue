@@ -38,7 +38,7 @@ const remove = (item: DriveCredential) => {
   return work(async () => { await driveApi(`/credentials/${item.id}/remove`, 'POST') }, '已删除。')
 }
 const removeLegacy = () => {
-  if (!confirm('停用旧网盘迁移过来的密码？仍在使用旧密码的客户端需要改用应用密码。')) return
+  if (!confirm('停用旧云盘迁移过来的密码？仍在使用旧密码的客户端需要改用应用密码。')) return
   return work(async () => { await driveApi('/legacy-password/remove', 'POST') }, '旧密码已停用。')
 }
 async function copy(text: string) {
@@ -65,7 +65,7 @@ async function copy(text: string) {
           <button class="d-btn" type="submit" :disabled="busy || !login || login === account.login">保存</button>
         </form>
         <div v-if="account.legacy_password" class="legacy">
-          <p>旧网盘的登录密码仍然有效，已迁移的客户端可以继续使用。建议改用应用密码后停用它。</p>
+          <p>旧云盘的登录密码仍然有效，已迁移的客户端可以继续使用。建议改用应用密码后停用它。</p>
           <button class="d-btn danger" type="button" :disabled="busy" @click="removeLegacy">停用旧密码</button>
         </div>
       </article>

@@ -37,7 +37,7 @@ def translate(error: DriveError) -> asyncssh.SFTPError:
 
 
 def virtual(path: bytes) -> str:
-    """客户端路径以网盘根目录为起点；先按 POSIX 规则折叠 .. 再规范化。"""
+    """客户端路径以云盘根目录为起点；先按 POSIX 规则折叠 .. 再规范化。"""
     text = path.decode("utf-8", "replace") or "."
     return paths.clean(posixpath.normpath(posixpath.join("/", text)))
 
@@ -127,7 +127,7 @@ class DriveSFTPServer(asyncssh.SFTPServer):
     # —— 路径与属性 ——
 
     def format_user(self, uid):
-        # ls -l 里显示的属主：网盘没有系统用户的概念，统一显示登录名。
+        # ls -l 里显示的属主：云盘没有系统用户的概念，统一显示登录名。
         return self.channel.get_connection().get_extra_info("drive_login") or "drive"
 
     def format_group(self, gid):

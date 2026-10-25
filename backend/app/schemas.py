@@ -317,7 +317,7 @@ class ScoreWrite(StrictModel):
     floor: int = Field(default=0, ge=0, le=1000)
 
 
-# —— 网盘 ——
+# —— 云盘 ——
 
 
 class DrivePath(StrictModel):
@@ -369,6 +369,10 @@ class ShareCreate(StrictModel):
 
 class ShareUnlock(StrictModel):
     password: str = Field(max_length=128)
+
+
+class TermsAccept(StrictModel):
+    version: str = Field(min_length=1, max_length=32)
 
 
 class StoragePlanWrite(StrictModel):

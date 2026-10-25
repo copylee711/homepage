@@ -1,4 +1,4 @@
-"""网盘操作错误；Web、SFTP、WebDAV 各自把它翻译成协议里的错误码。"""
+"""云盘操作错误；Web、SFTP、WebDAV 各自把它翻译成协议里的错误码。"""
 
 
 class DriveError(Exception):

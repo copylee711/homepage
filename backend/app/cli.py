@@ -205,13 +205,13 @@ def main():
     load.add_argument("--target", type=Path, required=True)
     move = sub.add_parser("images-migrate", help="把文章与手写笔记中的 /media 图片迁移到图床")
     move.add_argument("--apply", action="store_true", help="实际执行；默认只统计")
-    drive = sub.add_parser("drive-import", help="从旧网盘（SFTPGo SQLite）导入账户、挂载点与分享")
+    drive = sub.add_parser("drive-import", help="从旧云盘（SFTPGo SQLite）导入账户、挂载点与分享")
     drive.add_argument("--source-db", type=Path, required=True)
     drive.add_argument("--map", action="append", required=True, metavar="旧用户名=站点邮箱")
     drive.add_argument("--copy-files", action="store_true", help="同时复制旧主目录中的文件")
     drive.add_argument("--create-missing", action="store_true", help="邮箱未注册时新建站点用户")
     drive.add_argument("--apply", action="store_true", help="实际执行；默认只列出计划")
-    scan = sub.add_parser("drive-rescan", help="重新统计网盘用量")
+    scan = sub.add_parser("drive-rescan", help="重新统计云盘用量")
     scan.add_argument("--email", help="只统计这个用户；默认全部")
     args = parser.parse_args()
     settings = Settings()
@@ -229,7 +229,7 @@ def main():
                     print("已取消管理员身份")
                 else:
                     user = set_admin(session, args.email)
-                    # 管理员默认开通网盘与图床；首次设置时给 20 GiB，之后可在后台调整。
+                    # 管理员默认开通云盘与图床；首次设置时给 20 GiB，之后可在后台调整。
                     from .drive.vfs import ensure_root
                     from .models import StoragePlan
                     from .storage import save

@@ -1,4 +1,4 @@
-"""网盘的 Web API：文件管理、可续传上传、打包下载、凭据、分享与后台管理。"""
+"""云盘的 Web API：文件管理、可续传上传、打包下载、凭据、分享与后台管理。"""
 
 import asyncio
 import mimetypes
@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlmodel import Session, select
 
-from .. import audit, storage
+from .. import audit, storage, storage_terms
 from ..accounts import client_ip, current_user, record_failure, throttle
 from ..auth import check_origin, current_session, digest
 from ..images import _Sink
@@ -32,6 +32,7 @@ from ..schemas import (
     ShareCreate,
     ShareUnlock,
     StoragePlanWrite,
+    TermsAccept,
     UploadCreate,
 )
 from . import accounts, paths, shares
@@ -138,7 +139,7 @@ def file_response(drive: Drive, path: str, request: Request, inline: bool = Fals
 
 
 def zip_stream(drive: Drive, items: list[tuple[str, str]]):
-    """边打包边发送；items 为 (网盘路径, 压缩包内名称)。"""
+    """边打包边发送；items 为 (云盘路径, 压缩包内名称)。"""
     sink = _Sink()
     with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED, allowZip64=True) as archive:
         stack = list(reversed(items))
@@ -172,6 +173,8 @@ def overview(request: Request, session: Session = Depends(database)):
     summary = storage.summary(session, user.id)
     if not summary["drive_enabled"]:
         return {"enabled": False, "storage": summary}
+    if not summary["agreed"]:
+        return {"enabled": True, "storage": summary}
     return {"enabled": True, "storage": summary, "mounts": accounts.mounts(session, user.id),
             "account": accounts.account_view(session, settings_of(request), user)}
 
@@ -363,8 +366,39 @@ def upload_cancel(upload_id: str, request: Request, session: Session = Depends(d
 def enabled_user(request: Request, session: Session, write: bool = True) -> User:
     user, _ = current_user(request, session, write=write)
     if not storage.plan(session, user.id).drive_enabled:
-        raise HTTPException(403, "网盘功能尚未为你开启")
+        raise HTTPException(403, "云盘功能尚未为你开启")
+    if not storage.agreed(session, user.id):
+        raise HTTPException(403, storage_terms.REQUIRED)
     return user
+
+
+# —— 使用协议：只向已开通云盘或图床的用户提供 ——
+
+
+def granted_user(request: Request, session: Session, write: bool = False) -> User:
+    user, _ = current_user(request, session, write=write)
+    row = storage.plan(session, user.id)
+    if not (row.drive_enabled or row.images_enabled):
+        raise HTTPException(404, "未开通云盘或图床")
+    return user
+
+
+@router.get("/api/storage/terms")
+def terms(request: Request, session: Session = Depends(database)):
+    user = granted_user(request, session)
+    return {**storage_terms.document(), "agreed": storage.agreed(session, user.id),
+            "accepted_at": storage.plan(session, user.id).terms_accepted_at}
+
+
+@router.post("/api/storage/terms")
+def accept_terms(body: TermsAccept, request: Request, session: Session = Depends(database)):
+    user = granted_user(request, session, write=True)
+    if body.version != storage_terms.VERSION:
+        raise HTTPException(409, "协议已更新，请刷新页面后重新阅读")
+    row = storage.accept_terms(session, user.id)
+    session.commit()
+    audit.record("storage.terms_accept", request, ok=True, user=user.id, version=body.version)
+    return {"agreed": True, "accepted_at": row.terms_accepted_at}
 
 
 @router.put("/api/drive/login")

@@ -231,7 +231,7 @@ class GameScore(SQLModel, table=True):
 
 
 class StoragePlan(SQLModel, table=True):
-    """访客的存储方案：网盘与图床开关，以及两者共用的总配额。
+    """访客的存储方案：云盘与图床开关，以及两者共用的总配额。
 
     管理员不受配额限制，没有对应行。挂载点可以单独设置配额，不计入总配额。
     """
@@ -242,6 +242,9 @@ class StoragePlan(SQLModel, table=True):
     images_enabled: bool = False
     quota_bytes: int = 200 * 1024 * 1024
     max_image_bytes: int = 5 * 1024 * 1024
+    # 用户同意的《云盘与图床使用协议》版本；与当前版本不一致时需要重新同意。
+    terms_version: str = ""
+    terms_accepted_at: str | None = None
 
 
 class ImageToken(SQLModel, table=True):
@@ -268,7 +271,7 @@ class HostedImage(SQLModel, table=True):
     created_at: str = Field(index=True)
 
 
-# —— 网盘 ——
+# —— 云盘 ——
 
 
 class DriveAccount(SQLModel, table=True):
@@ -286,7 +289,7 @@ class DriveAccount(SQLModel, table=True):
 
 
 class DriveMount(SQLModel, table=True):
-    """用户网盘中的一个挂载点；quota_bytes 为 0 时计入存储方案的总配额。"""
+    """用户云盘中的一个挂载点；quota_bytes 为 0 时计入存储方案的总配额。"""
 
     __tablename__ = "drive_mount"
     id: str = Field(primary_key=True)

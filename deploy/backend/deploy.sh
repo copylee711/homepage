@@ -22,7 +22,7 @@ runuser -u copylee -- /usr/local/bin/uv venv --python /usr/bin/python3 .venv
 runuser -u copylee -- env UV_HTTP_TIMEOUT=60 /usr/local/bin/uv pip install --python .venv/bin/python   --require-hashes --index-url "${COPYLEE_PIP_INDEX:-https://mirrors.aliyun.com/pypi/simple/}" -r requirements.lock.txt
 snapshot=$(runuser -u copylee -- "$next/.venv/bin/python" -m app.cli backup)
 printf 'Backup created: %s\n' "$snapshot"
-# 网盘协议进程（SFTP/WebDAV）与后端共用数据库，迁移期间一起停下。
+# 云盘协议进程（SFTP/WebDAV）与后端共用数据库，迁移期间一起停下。
 drive=0
 if systemctl is-enabled --quiet copylee-drive 2>/dev/null; then drive=1; fi
 systemctl stop copylee-backend

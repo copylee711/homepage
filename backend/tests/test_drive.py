@@ -6,7 +6,7 @@ import zipfile
 import pytest
 from test_accounts import PASSWORD, signup, site  # noqa: F401
 from test_content import ORIGIN, login
-from test_images import picture, user_id
+from test_images import agree, picture, user_id
 
 from app.drive import objects
 from app.drive.objects import ObjectInfo
@@ -72,6 +72,7 @@ def enable(client, uid, drive=True, images=False, quota_mb=10, max_image_mb=5):
         "max_image_mb": max_image_mb,
     })
     assert response.status_code == 200, response.text
+    agree(client, uid)
     return admin
 
 
@@ -307,3 +308,33 @@ def test_account_delete_removes_drive(drive):
     response = client.post("/api/account/delete", json={"password": PASSWORD}, headers=headers)
     assert response.status_code == 200, response.text
     assert not (settings.drive_dir / uid).exists()
+
+
+def test_terms_gate_drive_and_images(site):  # noqa: F811
+    client, _, _, sent = site
+    headers = signup(client, sent)
+    uid = user_id(client, headers)
+    # 未开通时协议不可见
+    assert client.get("/api/storage/terms").status_code == 404
+    admin = login(client)
+    response = client.put(f"/api/admin/storage/users/{uid}", headers=admin, json={
+        "drive_enabled": True, "images_enabled": True, "quota_mb": 10, "max_image_mb": 5})
+    assert response.status_code == 200
+    assert response.json()["storage"]["agreed"] is False
+    assert client.get("/api/account/me").json()["features"]["terms"] is False
+    # 同意前云盘与图床都不可用
+    assert "mounts" not in client.get("/api/drive").json()
+    assert client.get("/api/drive/list").status_code == 403
+    assert client.post("/api/account/images", content=picture(), headers=headers).status_code == 403
+    assert client.put("/api/drive/login", headers=headers, json={"login": "reader"}).status_code == 403
+    terms = client.get("/api/storage/terms").json()
+    assert terms["agreed"] is False and terms["sections"]
+    assert client.post("/api/storage/terms", headers=headers,
+                       json={"version": "old"}).status_code == 409
+    response = client.post("/api/storage/terms", headers=headers, json={"version": terms["version"]})
+    assert response.status_code == 200
+    assert client.get("/api/account/me").json()["features"]["terms"] is True
+    assert client.get("/api/drive/list").status_code == 200
+    assert client.post("/api/account/images", content=picture(), headers=headers).status_code == 200
+    row = client.get("/api/admin/storage", headers=admin).json()["users"]
+    assert next(u for u in row if u["id"] == uid)["storage"]["terms_accepted_at"]
