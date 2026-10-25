@@ -289,17 +289,12 @@ onBeforeUnmount(() => cancelAnimationFrame(frame))
   }
 }
 
-/* 窄屏按钮固定纵向排列、等宽。否则是否折行取决于文字实际宽度：
+/* 窄屏按钮固定纵向排列，各自保持内容宽度。否则是否折行取决于文字实际宽度：
    手机 Chrome 会跟随系统字体缩放，微信内置浏览器不会，同一屏宽下一个折行一个并排 */
 @media (max-width: 559px) {
   .actions {
     flex-direction: column;
-    align-items: stretch;
-    max-width: 320px;
-  }
-
-  .btn {
-    justify-content: center;
+    align-items: flex-start;
   }
 }
 
