@@ -34,7 +34,7 @@ onMounted(load)
     <ul>
       <li v-for="share in items" :key="share.id" :class="{ expired: expired(share) }">
         <div class="info">
-          <strong>{{ share.name }}<span class="tag">{{ share.mode === 'upload' ? '仅上传' : '查看下载' }}</span><span v-if="share.has_password" class="tag">有密码</span><span v-if="expired(share)" class="tag warn">已失效</span></strong>
+          <strong>{{ share.name }}<span class="tag">{{ share.mode === 'upload' ? '仅上传' : '查看下载' }}</span><span v-if="share.has_password" class="tag">有提取码</span><span v-if="expired(share)" class="tag warn">已失效</span></strong>
           <span>{{ share.paths.join('、') }}</span>
           <small>创建于 {{ time(share.created_at) }} · {{ share.expires_at ? `有效期至 ${time(share.expires_at)}` : '长期有效' }} · 已使用 {{ share.used }}{{ share.max_uses ? ` / ${share.max_uses}` : '' }} 次{{ share.last_used ? ` · 最近 ${time(share.last_used)}` : '' }}</small>
         </div>

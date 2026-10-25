@@ -27,7 +27,7 @@ async function create() {
 }
 async function copy() {
   if (!result.value) return
-  const text = password.value ? `${result.value.url}\n提取密码：${password.value}` : result.value.url
+  const text = password.value ? `${result.value.url}\n提取码：${password.value}` : result.value.url
   try { await navigator.clipboard.writeText(text); copied.value = true } catch { error.value = '复制失败，请手动复制' }
 }
 </script>
@@ -43,7 +43,7 @@ async function copy() {
         </div>
         <p v-if="mode === 'upload'" class="d-muted">拿到链接的人只能往这个文件夹放文件，看不到其中的内容。</p>
         <label class="d-field">名称<input v-model="name" class="d-input" maxlength="120" placeholder="显示给访客的标题"></label>
-        <label class="d-field">提取密码<span class="hint">留空则无需密码</span><input v-model="password" class="d-input" maxlength="128" autocomplete="off"></label>
+        <label class="d-field">提取码<span class="hint">留空则无需提取码</span><input v-model="password" class="d-input" type="text" name="share-code" maxlength="128" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"></label>
         <div class="d-field">有效期<div class="durations"><button v-for="[value, label] in durations" :key="value" type="button" :class="{ active: days === value }" @click="days = value">{{ label }}</button></div></div>
         <label class="d-field">最多使用次数<span class="hint">下载或上传一次计一次，0 表示不限</span><input v-model.number="maxUses" class="d-input" type="number" min="0" max="1000000"></label>
         <p v-if="error" class="d-note error" role="alert">{{ error }}</p>
@@ -53,9 +53,9 @@ async function copy() {
     <template v-else>
       <p class="d-muted summary">{{ result.mode === 'upload' ? '访客可以通过此链接上传文件。' : '访客可以通过此链接查看与下载。' }}{{ result.expires_at ? `有效期至 ${new Date(result.expires_at * 1000).toLocaleString('zh-CN', { hour12: false })}。` : '长期有效。' }}</p>
       <input class="d-input link" :value="result.url" readonly @focus="($event.target as HTMLInputElement).select()">
-      <p v-if="password" class="d-muted">提取密码：<span class="d-code">{{ password }}</span></p>
+      <p v-if="password" class="d-muted">提取码：<span class="d-code">{{ password }}</span></p>
       <p v-if="error" class="d-note error" role="alert">{{ error }}</p>
-      <div class="d-actions"><a class="d-btn" :href="result.url" target="_blank" rel="noopener">打开</a><button class="d-btn primary" type="button" @click="copy">{{ copied ? '已复制' : password ? '复制链接和密码' : '复制链接' }}</button></div>
+      <div class="d-actions"><a class="d-btn" :href="result.url" target="_blank" rel="noopener">打开</a><button class="d-btn primary" type="button" @click="copy">{{ copied ? '已复制' : password ? '复制链接和提取码' : '复制链接' }}</button></div>
     </template>
   </DriveDialog>
 </template>

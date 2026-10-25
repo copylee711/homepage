@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { fetchJson } from '../../content'
-import { formatSize, formatTime, query } from '../../drive'
+import { formatSize, formatTime, query, viewportWidth } from '../../drive'
 import type { DriveEntry } from '../../drive'
 import '../../styles/drive.css'
 import DriveTopBar from './DriveTopBar.vue'
 import PreviewDialog from './PreviewDialog.vue'
-import { kindIcons, kindOf, previewable } from './fileKinds'
+import { kindIcons, kindOf, middleTrim, previewable } from './fileKinds'
 
 type Info = { id: string; name: string; mode: 'read' | 'upload'; expires_at: number; needs_password: boolean; unlocked: boolean; single_dir?: boolean }
 const shareId = location.pathname.split('/').filter(Boolean)[1] ?? ''
@@ -25,6 +25,12 @@ const crumbs = computed(() => {
 })
 const fileUrl = (target: string, inline = false) => `${base}/download?${query({ path: target, ...(inline ? { inline: '1' } : {}) })}`
 const date = (seconds: number) => formatTime(seconds)
+// 文件名最多两行，超出时从中间省略并保留扩展名；按列宽估算可容纳的半角字符数。
+const nameBudget = computed(() => {
+  const width = Math.min(viewportWidth.value, 1120)
+  const column = width - (width > 600 ? 64 + 230 : 32 + 130)
+  return Math.max(16, Math.floor(column / 8.4) * 2 - 2)
+})
 
 async function loadInfo() {
   info.value = await fetchJson<Info>(base, { credentials: 'same-origin' })
@@ -92,14 +98,14 @@ onMounted(async () => {
 
 <template>
   <DriveTopBar />
-  <section class="share-page">
+  <section class="share-page" :class="{ solo: !info || !info.unlocked || info.mode === 'upload' }">
     <div class="container">
       <p v-if="loading" class="d-muted">正在打开分享…</p>
       <div v-else-if="!info" class="card center"><h1>链接无效</h1><p class="d-muted">{{ error || '分享不存在、已过期或已被取消。' }}</p></div>
       <div v-else-if="!info.unlocked" class="card center narrow">
         <p class="eyebrow">Shared with you</p><h1>{{ info.name }}</h1>
-        <p class="d-muted">这个分享需要提取密码。</p>
-        <form @submit.prevent="unlock"><input v-model="password" class="d-input" type="password" autocomplete="off" required placeholder="提取密码" aria-label="提取密码"><button class="d-btn primary wide" type="submit" :disabled="busy">{{ busy ? '验证中…' : '打开' }}</button></form>
+        <p class="d-muted">这个分享需要提取码。</p>
+        <form autocomplete="off" @submit.prevent="unlock"><input v-model="password" class="d-input code" type="text" name="share-code" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" required placeholder="提取码" aria-label="提取码"><button class="d-btn primary wide" type="submit" :disabled="busy">{{ busy ? '验证中…' : '打开' }}</button></form>
         <p v-if="error" class="d-note error" role="alert">{{ error }}</p>
       </div>
       <div v-else-if="info.mode === 'upload'" class="card center narrow">
@@ -117,11 +123,11 @@ onMounted(async () => {
           <a v-if="path === '/' && items.length === 1 && !items[0]!.dir" class="d-btn primary" :href="fileUrl(items[0]!.path)">下载</a>
           <a v-else class="d-btn primary" :href="`${base}/zip?${query({ path: path })}`">{{ path === '/' ? '全部打包下载' : '打包下载此目录' }}</a>
         </header>
-        <nav class="crumbs" aria-label="当前位置"><template v-for="(crumb, i) in crumbs" :key="crumb.path"><span v-if="i" aria-hidden="true">/</span><button type="button" @click="open(crumb.path)">{{ crumb.name }}</button></template></nav>
+        <nav v-if="path !== '/'" class="crumbs" aria-label="当前位置"><template v-for="(crumb, i) in crumbs" :key="crumb.path"><span v-if="i" aria-hidden="true">/</span><button type="button" @click="open(crumb.path)">{{ crumb.name }}</button></template></nav>
         <p v-if="error" class="d-note error" role="alert">{{ error }}</p>
         <ul class="list">
           <li v-for="item in items" :key="item.path">
-            <button type="button" class="name" @click="activate(item)"><svg class="icon" :class="kindOf(item.name, item.dir)" viewBox="0 0 24 24" aria-hidden="true"><path :d="kindIcons[kindOf(item.name, item.dir)]" /></svg><span>{{ item.name }}</span></button>
+            <button type="button" class="name" @click="activate(item)"><svg class="icon" :class="kindOf(item.name, item.dir)" viewBox="0 0 24 24" aria-hidden="true"><path :d="kindIcons[kindOf(item.name, item.dir)]" /></svg><span class="fname" :title="item.name">{{ middleTrim(item.name, nameBudget) }}</span></button>
             <span class="size">{{ item.dir ? '—' : formatSize(item.size) }}</span>
             <a v-if="!item.dir" class="d-btn" :href="fileUrl(item.path)">下载</a><span v-else />
           </li>
@@ -158,7 +164,11 @@ form { display:grid; gap:12px; margin-top:22px; }
 .list { list-style:none; margin:12px 0 0; padding:0; border-top:1px solid var(--line); }
 .list li { display:grid; grid-template-columns:minmax(0,1fr) 100px 80px; align-items:center; gap:12px; min-height:54px; border-bottom:1px solid var(--line); }
 .name { display:flex; align-items:center; gap:12px; min-width:0; padding:8px 4px; border:0; background:none; color:var(--text); font:14px var(--font); text-align:left; cursor:pointer; }
-.name span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.name .fname { line-height:1.45; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow-wrap:anywhere; }
+/* 单张卡片（提取码、上传、链接无效）在可视区域内垂直居中 */
+.share-page.solo { display:grid; align-items:center; min-height:calc(100vh - var(--header-h) - 80px); min-height:calc(100dvh - var(--header-h) - 80px); padding:24px 0 48px; }
+.code { text-align:center; font:500 16px var(--font-mono); letter-spacing:.12em; }
+.code::placeholder { font-family:var(--font); letter-spacing:normal; }
 .name:hover span { color:var(--accent); }
 .size { text-align:right; color:var(--muted); font:12px var(--font-mono); }
 .icon { flex:none; width:22px; height:22px; fill:none; stroke:var(--muted); stroke-width:1.5; stroke-linejoin:round; stroke-linecap:round; }

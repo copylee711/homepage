@@ -42,7 +42,7 @@ h2 { margin:4px 0 0; font-size:22px; letter-spacing:-.01em; overflow-wrap:anywhe
 /* 手机上改为从底部弹出的面板，便于单手操作。 */
 @media (max-width:760px) {
   .backdrop { place-items:end stretch; padding:0; }
-  .dialog,.dialog.wide { width:100%; max-height:88vh; padding:10px 20px calc(20px + env(safe-area-inset-bottom)); border-bottom:0; border-radius:22px 22px 0 0; animation:sheet .32s var(--ease); }
+  .dialog,.dialog.wide { width:100%; max-height:88vh; overscroll-behavior:contain; padding:10px 20px calc(20px + env(safe-area-inset-bottom)); border-bottom:0; border-radius:22px 22px 0 0; animation:sheet .32s var(--ease); }
   .dialog::before { content:''; display:block; width:36px; height:4px; margin:0 auto 14px; border-radius:2px; background:var(--line-strong); }
   h2 { font-size:19px; }
 }

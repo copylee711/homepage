@@ -526,7 +526,7 @@ def share_drive(request: Request, session: Session, share_id: str, need_unlock: 
     if owner is None or owner.disabled:
         raise NotFound("分享不存在或已被取消")
     if need_unlock and not shares.unlocked(settings_of(request), row, request.cookies):
-        raise HTTPException(401, "请输入分享密码")
+        raise HTTPException(401, "请输入提取码")
     drive = Drive(request.app.state.engine, settings_of(request), row.user_id, protocol="share",
                   ip=client_ip(request), ua=request.headers.get("user-agent", ""))
     return row, drive
@@ -548,11 +548,11 @@ def share_unlock(share_id: str, body: ShareUnlock, request: Request, response: R
                  session: Session = Depends(database)):
     check_origin(request)
     key = f"share:{digest(client_ip(request))}"
-    throttle(session, key, 10, "密码错误次数过多，请 15 分钟后再试")
+    throttle(session, key, 10, "提取码错误次数过多，请 15 分钟后再试")
     row = shares.active(session, share_id)
     if not shares.check_password(row, body.password):
         record_failure(session, key)
-        raise HTTPException(403, "分享密码错误")
+        raise HTTPException(403, "提取码错误")
     response.set_cookie(shares.COOKIE_PREFIX + row.id, shares.unlock_token(settings_of(request), row),
                         max_age=7 * 86400, httponly=True, samesite="lax",
                         secure=settings_of(request).secure_cookie, path=f"/api/s/{row.id}")

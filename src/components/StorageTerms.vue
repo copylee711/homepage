@@ -67,7 +67,7 @@ h2 { margin:8px 0 0; font-size:26px; letter-spacing:-.02em; }
 .notice { margin-top:20px; padding:12px 16px; border-left:3px solid #d15c5c; border-radius:10px; background:rgba(209,92,92,.07); color:var(--text-2); font-size:13px; line-height:1.75; }
 .notice strong { color:#d15c5c; font-weight:600; }
 .body { max-height:min(52vh,520px); margin-top:20px; padding:4px 18px 18px 0; overflow:auto; overscroll-behavior:contain; }
-.view .body { max-height:none; margin-top:0; padding:0; }
+.view .body { max-height:none; margin-top:0; padding:0; overflow:visible; overscroll-behavior:auto; }
 .body:focus-visible { outline:2px solid var(--accent); outline-offset:4px; border-radius:6px; }
 .meta { margin:0 0 4px; color:var(--faint); font-size:12px; }
 h3 { margin:20px 0 6px; font-size:15px; letter-spacing:-.01em; }
