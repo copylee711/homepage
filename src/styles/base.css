@@ -215,3 +215,12 @@ a {
     transform: none;
   }
 }
+
+/* 触屏点按：去掉浏览器默认的蓝色高亮，改为轻微变淡与按下缩小。
+   用 :where() 不增加优先级，组件自定义的按下效果仍然生效。 */
+html { -webkit-tap-highlight-color: transparent; }
+@media (hover: none) {
+  :where(a, button, summary, label, [role=button], [role=tab]):active { opacity: .62; }
+  :where(button, [role=button], [role=tab]):active:not(:disabled) { transform: scale(.97); }
+  :where(button, [role=button], [role=tab]) { transition: opacity .18s, transform .18s; }
+}

@@ -214,3 +214,6 @@
 @media(max-width:760px) { .nav-scroll { gap:20px; } }
 @media(max-width:600px) { .article-heading .page-grid { opacity:.3; } .post-item { grid-template-columns:1fr 20px; gap:10px; } .post-item time { grid-column:1 / -1; padding:0; } .article-pager { grid-template-columns:1fr; } .article-pager .newer { grid-column:auto; } .float-top { right:16px; bottom:16px; } }
 @media(max-width:479px) { .reading-header nav { margin-left:12px; } .reading-header .reading-brand span { display:none; } }
+/* 触屏点按：去掉浏览器默认的蓝色高亮，改为轻微变淡（与站点其他页面一致）。 */
+html { -webkit-tap-highlight-color:transparent; }
+@media (hover:none) { :where(a, button, summary, label, [role=button]):active { opacity:.62; } :where(button, [role=button]):active:not(:disabled) { transform:scale(.97); } }
