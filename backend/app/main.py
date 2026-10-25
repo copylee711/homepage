@@ -179,10 +179,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception:  # noqa: BLE001
             logger.exception("清理系统图片失败")
 
-    def admin_user(request: Request, session: Session) -> str:
-        """当前后台会话对应的管理员用户 id；管理员的图片与令牌都记在该用户名下。"""
-        return current_session(request, session).user_id
-
     @app.middleware("http")
     async def headers(request, call_next):
         response = await call_next(request)
@@ -731,8 +727,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                   "label": "系统（文章与笔记）" if key == images.SYSTEM else
                   "旧管理员" if key == images.ADMIN else
                   users[key].email if key in users else key} for key, count, size in rows]
-        return {**images.listing(session, settings, owner or None, page), "usage": usage,
-                "tokens": images.tokens(session, admin_user(request, session)), "upload_url": settings.upload_url}
+        return {**images.listing(session, settings, owner or None, page), "usage": usage}
 
     @app.post("/api/admin/images/{image_id}/remove")
     def admin_image_remove(image_id: str, request: Request,
@@ -742,19 +737,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(409, "文章与笔记引用的图片会随内容自动清理，不能单独删除")
         audit.record("admin.image_remove", request, ok=True, image=row.id, owner=row.owner)
         images.remove(session, settings, row)
-        return {"ok": True}
-
-    @app.post("/api/admin/images/tokens")
-    def admin_token_create(body: TokenCreate, request: Request,
-                           session: Session = Depends(authorized)):
-        with audit.outcome("admin.image_token_create", request):
-            return images.create_token(session, admin_user(request, session), body.name)
-
-    @app.post("/api/admin/images/tokens/{token_id}/remove")
-    def admin_token_remove(token_id: str, request: Request,
-                           session: Session = Depends(authorized)):
-        images.revoke_token(session, admin_user(request, session), token_id)
-        audit.record("admin.image_token_revoke", request, ok=True, token=token_id)
         return {"ok": True}
 
     @app.put("/api/admin/accounts/users/{user_id}/images")

@@ -8,6 +8,7 @@ from PIL import Image
 from sqlmodel import Session
 from test_accounts import PASSWORD, signup, site  # noqa: F401
 from test_content import ADMIN_EMAIL, ORIGIN, create_post, login
+from test_content import PASSWORD as ADMIN_PASSWORD
 
 from app.cli import backup, restore
 from app.images import migrate_media
@@ -179,7 +180,13 @@ def test_admin_uploads_and_tokens_unlimited(site):  # noqa: F811
     admin = login(client)
     url = client.post("/api/admin/media", content=picture(), headers=admin).json()["url"]
     assert url.startswith(settings.image_base) and client.get(url).content == picture()
-    token = client.post("/api/admin/images/tokens", json={"name": "PicList"}, headers=admin).json()
+    # 管理员的上传令牌和普通用户一样在账户页管理。
+    me = client.post("/api/account/login", headers={"Origin": ORIGIN},
+                     json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
+    assert me.status_code == 200, me.text
+    me = me.json()
+    token = client.post("/api/account/images/tokens", json={"name": "PicList"},
+                        headers={"Origin": ORIGIN, "X-CSRF-Token": me["csrf"]}).json()
     assert upload(client, token["token"], picture(900, noise=True)).status_code == 200
     data = client.get("/api/admin/images", headers=admin).json()
     # 编辑器上传进系统图床，PicList 上传记在管理员自己的账户下。
