@@ -31,7 +31,7 @@ const year = new Date().getFullYear()
 
       <div class="legal">
         <span class="copyright">
-          © {{ year }} {{ site.name }}<a href="/privacy">隐私政策</a><a v-if="features.drive || features.images" :href="termsUrl">云盘与图床协议</a><a v-if="features.admin" class="admin" href="/admin" rel="nofollow">Admin</a>
+          © {{ year }} {{ site.name }}<a href="/privacy">隐私政策</a><a v-if="features.drive || features.images" :href="termsUrl">云盘与图床协议</a>
         </span>
         <span v-if="site.icp || site.police.text" class="beian">
           <a v-if="site.icp" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">
@@ -123,19 +123,6 @@ const year = new Date().getFullYear()
 
 .copyright a {
   margin-left: 14px;
-}
-
-.admin {
-  color: var(--faint);
-  opacity: 0.55;
-  transition:
-    opacity 0.3s ease,
-    color 0.3s ease;
-}
-
-.copyright .admin:hover {
-  opacity: 1;
-  color: var(--accent);
 }
 
 .beian {

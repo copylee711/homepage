@@ -42,6 +42,13 @@
       "hint": "copylee.cn/notes"
     },
     {
+      "title": "Articles",
+      "description": "较完整的长文与随笔。",
+      "href": "/posts",
+      "icon": "article",
+      "hint": "copylee.cn/posts"
+    },
+    {
       "title": "GitHub",
       "description": "开源项目与日常代码。",
       "href": "https://github.com/copylee711",

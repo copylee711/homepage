@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineProps<{ name: 'cloud' | 'note' | 'github' | 'arrow' | 'star' | 'sun' | 'moon' }>()
+defineProps<{ name: 'cloud' | 'note' | 'article' | 'github' | 'arrow' | 'star' | 'sun' | 'moon' }>()
 </script>
 
 <template>
@@ -38,6 +38,10 @@ defineProps<{ name: 'cloud' | 'note' | 'github' | 'arrow' | 'star' | 'sun' | 'mo
     <template v-else-if="name === 'note'">
       <path d="M6.5 3.5h8l4 4v13h-12a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1Z" />
       <path d="M14.5 3.5v4h4M9 12.5h6M9 16h4" />
+    </template>
+    <template v-else-if="name === 'article'">
+      <path d="M4.5 5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v13.5a1.5 1.5 0 0 0 1.5 1.5H6a1.5 1.5 0 0 1-1.5-1.5V5Z" />
+      <path d="M16.5 9h2.5a.5.5 0 0 1 .5.5v9a1.5 1.5 0 0 1-3 0M8 8h5M8 11.5h5M8 15h3" />
     </template>
     <template v-else-if="name === 'sun'">
       <circle cx="12" cy="12" r="4" />

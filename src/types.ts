@@ -17,7 +17,7 @@ export interface SiteContent {
   github: string
   cloud: string
   socials: Social[]
-  portals: { title: string; description: string; href: string; icon: 'cloud' | 'note' | 'github'; hint: string; visible: boolean }[]
+  portals: { title: string; description: string; href: string; icon: 'cloud' | 'note' | 'article' | 'github'; hint: string; visible: boolean }[]
   repoGroups: { title: string; description: string; prefix: string }[]
   hiddenRepos: string[]
   icp: string

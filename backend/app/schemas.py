@@ -25,7 +25,7 @@ class Portal(StrictModel):
     title: str = Field(min_length=1, max_length=80)
     description: str = Field(default="", max_length=500)
     href: str = Field(max_length=2048)
-    icon: Literal["cloud", "note", "github"]
+    icon: Literal["cloud", "note", "article", "github"]
     hint: str = Field(default="", max_length=100)
     visible: bool = True
 

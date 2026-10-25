@@ -1,6 +1,6 @@
 // 仅用于一次性导出初始内容。运行中的网站内容通过 /admin 更新。
 
-export type IconName = 'cloud' | 'note' | 'github'
+export type IconName = 'cloud' | 'note' | 'article' | 'github'
 
 export interface Portal {
   title: string
@@ -44,6 +44,13 @@ export const site = {
       href: '/notes',
       icon: 'note',
       hint: 'copylee.cn/notes',
+    },
+    {
+      title: 'Articles',
+      description: '较完整的长文与随笔。',
+      href: '/posts',
+      icon: 'article',
+      hint: 'copylee.cn/posts',
     },
     {
       title: 'GitHub',

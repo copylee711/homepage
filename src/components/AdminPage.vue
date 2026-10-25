@@ -417,7 +417,7 @@ runuser -u copylee -- .venv/bin/python -m app.cli reset-security --email you@exa
             <p class="subtle">卡片按列表顺序展示。隐藏卡片仍可在这里继续编辑。</p>
             <section v-for="(portal,index) in settings.portals" :key="index" class="edit-card">
               <div class="card-head"><span class="eyebrow">入口 {{ String(index+1).padStart(2,'0') }}</span><div class="buttons"><button @click="move(settings.portals,index,-1)" :disabled="index===0">上移</button><button @click="move(settings.portals,index,1)" :disabled="index===settings.portals.length-1">下移</button><button class="danger" @click="settings.portals.splice(index,1)">移除</button></div></div>
-              <div class="form-grid"><label>名称<input v-model="portal.title" maxlength="80"></label><AnimatedSelect v-model="portal.icon" label="图标" :options="[{value:'cloud',label:'Cloud'},{value:'note',label:'Notes'},{value:'github',label:'GitHub'}]" />
+              <div class="form-grid"><label>名称<input v-model="portal.title" maxlength="80"></label><AnimatedSelect v-model="portal.icon" label="图标" :options="[{value:'cloud',label:'Cloud'},{value:'note',label:'Notes'},{value:'article',label:'Articles'},{value:'github',label:'GitHub'}]" />
                 <label class="wide">描述<input v-model="portal.description" maxlength="500"></label><label>链接<input v-model="portal.href" placeholder="https://… 或 /notes"></label><label>地址提示<input v-model="portal.hint" maxlength="100"></label></div>
               <label class="checkbox"><input type="checkbox" v-model="portal.visible">公开显示</label>
             </section>

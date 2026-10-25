@@ -44,6 +44,17 @@ function onPointerMove(e: PointerEvent) {
         <rect class="node caret" x="60" y="86.5" width="7" height="7" rx="1.5" />
       </template>
 
+      <!-- Articles：两页叠放的文章，前页带标题与段落，悬停时前页抽出 -->
+      <template v-else-if="portal.icon === 'article'">
+        <path class="draw" d="M44 14H104V96" pathLength="1" />
+        <g class="page">
+          <rect class="draw sheet" x="30" y="26" width="62" height="80" rx="3" pathLength="1" style="--d: 1" />
+          <path class="draw" d="M42 44H66" pathLength="1" style="--d: 2" />
+          <path class="draw" d="M42 60H80M42 72H80M42 84H70" pathLength="1" style="--d: 3" />
+          <rect class="node" x="74.5" y="40.5" width="7" height="7" rx="1.5" />
+        </g>
+      </template>
+
       <!-- GitHub：主干与一条分出再合并的分支 -->
       <template v-else>
         <path class="draw" d="M36 8V112" pathLength="1" />
@@ -161,6 +172,14 @@ function onPointerMove(e: PointerEvent) {
   transition: transform 1.2s var(--ease);
 }
 
+.sheet {
+  fill: var(--surface);
+}
+
+.page {
+  transition: transform 0.9s var(--ease);
+}
+
 .icon {
   position: relative;
   width: 24px;
@@ -239,6 +258,10 @@ function onPointerMove(e: PointerEvent) {
 
   .portal:hover .hot {
     stroke-dashoffset: 0;
+  }
+
+  .portal:hover .page {
+    transform: translate(-6px, 6px);
   }
 }
 </style>
