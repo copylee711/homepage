@@ -3,7 +3,9 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { localBest, submitScore } from '../api'
 import { sfx } from '../sound'
 import GameOver from '../GameOver.vue'
-import { FRUITS, sprite } from './fruits'
+import { FRUITS, iconUrl, sprite } from './fruits'
+import bgUrl from './art/bg.webp'
+import bgDarkUrl from './art/bg-dark.webp'
 import { HEIGHT, LINE_Y, MAX_LEVEL, RADII, WIDTH, World, clamp } from './physics'
 
 const emit = defineEmits<{ scored: [] }>()
@@ -29,6 +31,10 @@ let scale = 1
 let dpr = 1
 let popups: { text: string; x: number; y: number; life: number }[] = []
 let observer: ResizeObserver | undefined
+/** 木箱背景（浅色与深色主题各一张） */
+const backgrounds = { light: new Image(), dark: new Image() }
+backgrounds.light.src = bgUrl
+backgrounds.dark.src = bgDarkUrl
 
 /** 前几次只出小水果，之后最多出到第 5 级。 */
 function roll() {
@@ -92,18 +98,24 @@ function render() {
   if (!g) return
   const dark = document.documentElement.dataset.theme === 'dark'
   g.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0)
-  const bg = g.createLinearGradient(0, 0, 0, HEIGHT)
-  bg.addColorStop(0, dark ? '#1d2233' : '#fff6e3')
-  bg.addColorStop(1, dark ? '#2a2620' : '#ffe2b8')
-  g.fillStyle = bg
-  g.fillRect(0, 0, WIDTH, HEIGHT)
-  g.fillStyle = dark ? '#5a4632' : '#e9b77a'
-  g.fillRect(0, HEIGHT - 8, WIDTH, 8)
+  const image = dark ? backgrounds.dark : backgrounds.light
+  if (image.complete && image.naturalWidth) {
+    // 按宽度铺满，底部对齐，让箱底正好在画面最下方
+    const h = WIDTH * image.naturalHeight / image.naturalWidth
+    g.drawImage(image, 0, HEIGHT - h, WIDTH, h)
+    if (h < HEIGHT) { g.fillStyle = dark ? '#151b26' : '#c98d4f'; g.fillRect(0, 0, WIDTH, HEIGHT - h) }
+  } else {
+    const bg = g.createLinearGradient(0, 0, 0, HEIGHT)
+    bg.addColorStop(0, dark ? '#1d2233' : '#fff6e3')
+    bg.addColorStop(1, dark ? '#2a2620' : '#ffe2b8')
+    g.fillStyle = bg
+    g.fillRect(0, 0, WIDTH, HEIGHT)
+  }
 
   // 警戒线：有危险时闪烁变红
   const warn = danger > 0 || world.fruits.some(f => f.age > 1 && f.y - f.r < LINE_Y + 40)
   const flash = danger > 0 ? 0.45 + 0.55 * Math.abs(Math.sin(performance.now() / 120)) : 1
-  g.strokeStyle = warn ? `rgba(232,52,78,${flash})` : dark ? 'rgba(255,255,255,.18)' : 'rgba(150,90,30,.25)'
+  g.strokeStyle = warn ? `rgba(232,52,78,${flash})` : dark ? 'rgba(255,255,255,.3)' : 'rgba(255,240,210,.7)'
   g.lineWidth = 2
   g.setLineDash([10, 8])
   g.beginPath(); g.moveTo(0, LINE_Y); g.lineTo(WIDTH, LINE_Y); g.stroke()
@@ -202,7 +214,7 @@ onBeforeUnmount(() => {
     <div class="hud">
       <div><span>得分</span><strong>{{ score }}</strong></div>
       <div><span>最高</span><strong>{{ best }}</strong></div>
-      <div class="next"><span>下一个</span><i :style="{ background: FRUITS[next].base }" />{{ FRUITS[next].name }}</div>
+      <div class="next"><span>下一个</span><img :src="iconUrl(next)" alt="" />{{ FRUITS[next].name }}</div>
     </div>
     <div class="stage">
       <canvas ref="canvas" aria-label="合成大西瓜游戏区域：拖动选择位置，松开放下水果" @pointerdown="onDown" @pointermove="onMove" @pointerup="onUp" @pointercancel="pressed = false" />
@@ -223,7 +235,7 @@ onBeforeUnmount(() => {
 .hud strong { font:700 20px var(--font-mono); }
 .next { display:flex; flex-wrap:wrap; align-items:center; gap:0 6px; font-size:14px; }
 .next span { width:100%; }
-.next i { width:12px; height:12px; border-radius:50%; }
+.next img { width:20px; height:20px; object-fit:contain; }
 .stage { position:relative; border-radius:20px; overflow:hidden; box-shadow:0 0 0 1px var(--line),0 30px 60px -40px rgba(17,24,39,.45); }
 canvas { display:block; width:100%; aspect-ratio:2/3; touch-action:none; user-select:none; -webkit-user-select:none; cursor:crosshair; }
 .big { font:800 48px var(--font-mono); }

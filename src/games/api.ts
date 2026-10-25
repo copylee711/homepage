@@ -7,9 +7,9 @@ export interface RankRow { rank: number; name: string; avatar: string; best: num
 export interface Board { items: RankRow[]; me: (GameBest & { rank: number }) | null }
 
 export const games: { id: GameId; title: string; name: string; text: string; unit: string }[] = [
+  { id: 'dungeon', title: 'Abyss Knight', name: '深渊骑士', text: '俯视角地牢闯关：三位英雄各有技能，十六种武器、三十件宝物、六位首领，还有金币商店、机关陷阱和隐藏房间。手机横屏、电脑键鼠都能玩。', unit: '分' },
   { id: 'watermelon', title: 'Watermelon', name: '合成大西瓜', text: '拖动落点，让两个相同的水果撞在一起，合成更大的水果，看看最后能不能合出大西瓜。', unit: '分' },
   { id: 'sheep', title: 'Triple', name: '羊了个羊', text: '卡片层层叠放，凑齐 3 张相同的就会消除。槽位只有 7 格，放满就输了。', unit: '关' },
-  { id: 'dungeon', title: 'Abyss Knight', name: '深渊骑士', text: '俯视角地牢闯关：随机房间、十余种武器与宝物、三位首领轮番登场。手机横屏、电脑键鼠都能玩。', unit: '分' },
 ]
 
 const key = (game: GameId) => `copylee-game-${game}`

@@ -23,6 +23,7 @@ export function touchLayout(width: number, height: number) {
     dash: { x: fire.x - unit * 2.05, y: fire.y + unit * 0.45, r: unit * 0.62 },
     swap: { x: fire.x + unit * 0.2, y: fire.y - unit * 1.85, r: unit * 0.5 },
     interact: { x: fire.x - unit * 1.75, y: fire.y - unit * 1.35, r: unit * 0.58 },
+    skill: { x: fire.x - unit * 3.1, y: fire.y - unit * 0.55, r: unit * 0.6 },
   }
 }
 
@@ -35,7 +36,7 @@ export class Controls {
   private stickId: number | null = null
   private fireId: number | null = null
   private fireStart = { x: 0, y: 0 }
-  private queued = { dash: false, swap: false, interact: false }
+  private queued = { dash: false, swap: false, interact: false, skill: false }
   private el?: HTMLElement
   /** 把屏幕坐标（CSS 像素，相对画布）转换为世界坐标 */
   toWorld: (x: number, y: number) => { x: number; y: number } = (x, y) => ({ x, y })
@@ -52,6 +53,7 @@ export class Controls {
     el.addEventListener('pointerup', this.up)
     el.addEventListener('pointercancel', this.up)
     el.addEventListener('contextmenu', this.prevent)
+    el.addEventListener('wheel', this.wheel, { passive: false })
   }
 
   detach() {
@@ -65,9 +67,20 @@ export class Controls {
     el.removeEventListener('pointerup', this.up)
     el.removeEventListener('pointercancel', this.up)
     el.removeEventListener('contextmenu', this.prevent)
+    el.removeEventListener('wheel', this.wheel)
   }
 
   private prevent = (e: Event) => e.preventDefault()
+
+  /** 滚轮切换武器，与 Q 相同；触控板的连续滚动只算一次 */
+  private lastWheel = 0
+  private wheel = (e: WheelEvent) => {
+    e.preventDefault()
+    const now = performance.now()
+    if (Math.abs(e.deltaY) < 4 || now - this.lastWheel < 220) return
+    this.lastWheel = now
+    this.queued.swap = true
+  }
 
   private blur = () => { this.keys.clear(); this.mouse.down = false; this.releaseTouch() }
 
@@ -79,12 +92,13 @@ export class Controls {
   private keydown = (e: KeyboardEvent) => {
     if ((e.target as HTMLElement)?.closest?.('input,textarea,select')) return
     const k = e.key.toLowerCase()
-    if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ', 'w', 'a', 's', 'd', 'shift', 'q', 'e', 'escape', 'p', 'f'].includes(k)) e.preventDefault()
+    if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ', 'w', 'a', 's', 'd', 'shift', 'q', 'e', 'escape', 'p', 'f', 'r'].includes(k)) e.preventDefault()
     if (e.repeat) return
     this.keys.add(k)
     this.touch.active = false
     if (k === ' ' || k === 'shift') this.queued.dash = true
     if (k === 'q') this.queued.swap = true
+    if (k === 'r') this.queued.skill = true
     if (k === 'e' || k === 'f') this.queued.interact = true
     if (k === 'escape' || k === 'p') this.onPause()
   }
@@ -106,6 +120,7 @@ export class Controls {
       this.touch.active = false
       this.mouse = { x, y, down: e.button === 0, last: performance.now() }
       if (e.button === 2) this.queued.dash = true
+      if (e.button === 1) { e.preventDefault(); this.queued.skill = true }
       return
     }
     e.preventDefault()
@@ -113,6 +128,7 @@ export class Controls {
     this.el!.setPointerCapture?.(e.pointerId)
     const L = touchLayout(w, h)
     if (inside(L.dash, x, y)) { this.queued.dash = true; return }
+    if (inside(L.skill, x, y, 1.15)) { this.queued.skill = true; navigator.vibrate?.(12); return }
     if (inside(L.swap, x, y)) { this.queued.swap = true; return }
     if (inside(L.interact, x, y, 1.1)) { this.queued.interact = true; return }
     if (x > w * 0.5) {
@@ -168,7 +184,7 @@ export class Controls {
   }
 
   /** 游戏实际处理过输入后再清除单次按键。 */
-  consume() { this.queued = { dash: false, swap: false, interact: false } }
+  consume() { this.queued = { dash: false, swap: false, interact: false, skill: false } }
 
   read(): Input {
     const k = this.keys

@@ -3,7 +3,7 @@ import { ROOM_H, ROOM_W } from './data'
 
 export const FLOOR = 0, WALL = 1, ROCK = 2, PIT = 3, DOOR = 4
 
-export type RoomType = 'start' | 'normal' | 'treasure' | 'boss' | 'heal'
+export type RoomType = 'start' | 'normal' | 'treasure' | 'boss' | 'heal' | 'shop' | 'altar' | 'secret'
 export type Dir = 'n' | 's' | 'e' | 'w'
 export const DIRS: Record<Dir, [number, number]> = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] }
 export const OPPOSITE: Record<Dir, Dir> = { n: 's', s: 'n', e: 'w', w: 'e' }
@@ -19,6 +19,10 @@ export interface Room {
   visited: boolean
   seed: number
   distance: number
+  /** 尚未炸开的隐藏门（裂缝墙），以及裂缝墙剩余耐久 */
+  hidden: Partial<Record<Dir, number>>
+  /** 地图形状变化时递增，用于重绘缓存的房间背景 */
+  version: number
 }
 
 export interface Floor { rooms: Room[]; start: Room; grid: Map<string, Room> }
@@ -143,10 +147,19 @@ function buildTiles(room: Room, random: () => number) {
     for (const [dx, dy] of [[9, 1], [9, 2], [9, 8], [9, 9], [1, 5], [2, 5], [16, 5], [17, 5]]) tiles[dy * ROOM_W + dx] = FLOOR
   }
   for (const dir of Object.keys(room.doors) as Dir[]) {
+    if (room.hidden[dir] !== undefined) continue
     const [dx, dy] = DOOR_TILE[dir]
     tiles[dy * ROOM_W + dx] = DOOR
   }
   room.tiles = tiles
+}
+
+/** 炸开裂缝墙，露出隐藏房间的门。 */
+export function revealDoor(room: Room, dir: Dir) {
+  delete room.hidden[dir]
+  const [dx, dy] = DOOR_TILE[dir]
+  room.tiles[dy * ROOM_W + dx] = DOOR
+  room.version++
 }
 
 /** 生成一层：从中心向外随机扩展，死胡同放 Boss、宝箱与泉水。 */
@@ -157,7 +170,7 @@ export function generateFloor(level: number, seed = Math.floor(Math.random() * 2
     const grid = new Map<string, Room>()
     const key = (x: number, y: number) => `${x},${y}`
     const make = (gx: number, gy: number, distance: number): Room =>
-      ({ gx, gy, type: 'normal', tiles: new Uint8Array(0), doors: {}, cleared: false, visited: false, seed: Math.floor(random() * 2 ** 31), distance })
+      ({ gx, gy, type: 'normal', tiles: new Uint8Array(0), doors: {}, cleared: false, visited: false, seed: Math.floor(random() * 2 ** 31), distance, hidden: {}, version: 0 })
     const start = make(4, 4, 0)
     start.type = 'start'
     grid.set(key(4, 4), start)
@@ -184,11 +197,33 @@ export function generateFloor(level: number, seed = Math.floor(Math.random() * 2
       }
     }
     const ends = rooms.filter(r => r !== start && Object.keys(r.doors).length === 1).sort((a, b) => b.distance - a.distance)
-    if (ends.length < 2 && attempt < 50) continue
+    if (ends.length < 3 && attempt < 60) continue
     const boss = ends[0] ?? rooms[rooms.length - 1]
     boss.type = 'boss'
-    if (ends[1]) ends[1].type = 'treasure'
-    if (ends[2] && level >= 2) ends[2].type = 'heal'
+    // 其余死胡同依次放宝箱、商店、泉水和祭坛
+    const extras: RoomType[] = ['treasure', 'shop', ...(level >= 2 ? ['heal' as const] : []), 'altar']
+    ends.slice(1).forEach((room, i) => { if (extras[i]) room.type = extras[i] })
+    // 隐藏房间：贴着一个普通房间的空位，入口是一面裂缝墙
+    const spots: [number, number, Room, Dir][] = []
+    for (const room of rooms) {
+      if (room.type !== 'normal') continue
+      for (const [dir, [dx, dy]] of Object.entries(DIRS) as [Dir, [number, number]][]) {
+        const nx = room.gx + dx, ny = room.gy + dy
+        if (nx < 0 || ny < 0 || nx > 8 || ny > 8 || grid.has(key(nx, ny))) continue
+        if (Object.values(DIRS).filter(([ax, ay]) => grid.has(key(nx + ax, ny + ay))).length !== 1) continue
+        spots.push([nx, ny, room, dir])
+      }
+    }
+    if (spots.length) {
+      const [nx, ny, host, dir] = spots[Math.floor(random() * spots.length)]
+      const secret = make(nx, ny, host.distance + 1)
+      secret.type = 'secret'
+      grid.set(key(nx, ny), secret)
+      rooms.push(secret)
+      host.doors[dir] = secret
+      host.hidden[dir] = 14
+      secret.doors[OPPOSITE[dir]] = host
+    }
     start.cleared = true; start.visited = true
     for (const room of rooms) {
       if (room.type !== 'normal' && room.type !== 'boss') room.cleared = true

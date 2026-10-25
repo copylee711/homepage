@@ -3,11 +3,18 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { formatDuration, localBest, submitScore } from '../api'
 import { sfx } from '../sound'
 import GameOver from '../GameOver.vue'
-import { ICONS } from './icons'
+import bgUrl from './art/bg.webp'
+import bgDarkUrl from './art/bg-dark.webp'
+import iconsUrl from './art/icons.webp'
+import uiUrl from './art/ui.webp'
 import { BOARD_H, BOARD_W, PILE_H, generate, isFree, settings, shuffle } from './level'
 import type { Tile } from './level'
 
 const emit = defineEmits<{ scored: [] }>()
+/** 雪碧图中某格的背景定位（cols × rows 网格） */
+const cell = (index: number, cols: number, rows: number) => `${(index % cols) * 100 / (cols - 1)}% ${Math.floor(index / cols) * 100 / (rows - 1)}%`
+const icon = (type: number) => ({ backgroundPosition: cell(type, 4, 4) })
+const art = { '--icons': `url(${iconsUrl})`, '--ui': `url(${uiUrl})`, '--bg': `url(${bgUrl})`, '--bg-dark': `url(${bgDarkUrl})` }
 const SLOTS = 7
 
 const board = ref<HTMLDivElement>()
@@ -130,7 +137,7 @@ onBeforeUnmount(() => { clearInterval(timer); observer?.disconnect() })
 </script>
 
 <template>
-  <div class="game" :style="{ '--u': `${unit}px` }">
+  <div class="game" :style="{ '--u': `${unit}px`, ...art }">
     <div class="hud">
       <div><span>关卡</span><strong>{{ level }}</strong></div>
       <div><span>用时</span><strong>{{ formatDuration(elapsed) }}</strong></div>
@@ -147,23 +154,23 @@ onBeforeUnmount(() => { clearInterval(timer); observer?.disconnect() })
             :aria-label="free.has(tile.id) ? '可点击的卡片' : '被压住的卡片'"
             :tabindex="free.has(tile.id) ? 0 : -1"
             @click="pick(tile, 'board')"
-          ><svg viewBox="0 0 48 48" aria-hidden="true" v-html="ICONS[tile.type]" /></button>
+          ><i class="face" :style="icon(tile.type)" aria-hidden="true" /></button>
         </div>
       </div>
       <div class="outside" :class="{ empty: !outside.length }">
-        <button v-for="tile in outside" :key="tile.id" type="button" class="tile flat" aria-label="移出的卡片" @click="pick(tile, 'outside')"><svg viewBox="0 0 48 48" aria-hidden="true" v-html="ICONS[tile.type]" /></button>
+        <button v-for="tile in outside" :key="tile.id" type="button" class="tile flat" aria-label="移出的卡片" @click="pick(tile, 'outside')"><i class="face" :style="icon(tile.type)" aria-hidden="true" /></button>
       </div>
       <div class="slot" :class="{ full: slot.length >= SLOTS - 1 }">
         <span v-for="i in SLOTS" :key="i" class="cell" />
         <TransitionGroup name="slot" tag="div" class="slot-tiles">
-          <div v-for="tile in slot" :key="tile.id" class="tile flat" :class="{ clearing: clearing.has(tile.id) }"><svg viewBox="0 0 48 48" aria-hidden="true" v-html="ICONS[tile.type]" /></div>
+          <div v-for="tile in slot" :key="tile.id" class="tile flat" :class="{ clearing: clearing.has(tile.id) }"><i class="face" :style="icon(tile.type)" aria-hidden="true" /></div>
         </TransitionGroup>
       </div>
       <div class="tools">
-        <button type="button" :disabled="used.out || !slot.length" @click="moveOut"><b>⇡</b>移出 3 张</button>
-        <button type="button" :disabled="used.undo || !lastMove" @click="undo"><b>↶</b>撤回</button>
-        <button type="button" :disabled="used.shuffle" @click="reshuffle"><b>⟳</b>洗牌</button>
-        <button type="button" @click="restart"><b>⌂</b>重开</button>
+        <button type="button" :disabled="used.out || !slot.length" @click="moveOut"><b :style="{ backgroundPosition: cell(4, 4, 2) }" />移出 3 张</button>
+        <button type="button" :disabled="used.undo || !lastMove" @click="undo"><b :style="{ backgroundPosition: cell(5, 4, 2) }" />撤回</button>
+        <button type="button" :disabled="used.shuffle" @click="reshuffle"><b :style="{ backgroundPosition: cell(6, 4, 2) }" />洗牌</button>
+        <button type="button" @click="restart"><b :style="{ backgroundPosition: cell(7, 4, 2) }" />重开</button>
       </div>
       <GameOver v-if="phase === 'lose'" title="槽位满了" :result="result" @again="start(1)">
         <p class="big">{{ level - 1 }}<small>关</small></p>
@@ -187,21 +194,23 @@ onBeforeUnmount(() => { clearInterval(timer); observer?.disconnect() })
 .hud div { min-width:0; padding:8px 10px; border:1px solid var(--line); border-radius:12px; background:var(--surface); }
 .hud span { display:block; color:var(--muted); font-size:12px; }
 .hud strong { font:700 16px var(--font-mono); white-space:nowrap; }
-.table { position:relative; padding:16px 12px 14px; border-radius:20px; background:linear-gradient(180deg,#d9f2c4,#b8e39b); box-shadow:0 0 0 1px var(--line),0 30px 60px -40px rgba(17,24,39,.45); overflow:hidden; user-select:none; -webkit-user-select:none; }
-:root[data-theme='dark'] .table { background:linear-gradient(180deg,#1f3322,#18281b); }
+.table { position:relative; padding:16px 12px 14px; border-radius:20px; background:var(--bg) center/cover, linear-gradient(180deg,#d9f2c4,#b8e39b); box-shadow:0 0 0 1px var(--line),0 30px 60px -40px rgba(17,24,39,.45); overflow:hidden; user-select:none; -webkit-user-select:none; }
+:root[data-theme='dark'] .table { background:var(--bg-dark) center/cover, linear-gradient(180deg,#1f3322,#18281b); }
 .board-wrap { display:flex; justify-content:center; }
 .board { position:relative; }
-.tile { position:absolute; display:grid; place-items:center; width:calc(var(--u) * .96); height:calc(var(--u) * .96); padding:calc(var(--u) * .12); border:1px solid #c9d9b8; border-radius:calc(var(--u) * .18); background:#fffdf5; box-shadow:0 calc(var(--u) * .07) 0 #a9c48f,0 calc(var(--u) * .1) calc(var(--u) * .14) rgba(0,0,0,.18); cursor:pointer; transition:filter .25s,transform .15s; -webkit-tap-highlight-color:transparent; }
-.tile svg { width:100%; height:100%; }
+/* 卡片底座与图案都来自手绘雪碧图：ui 第 1 格是亮面卡片，第 2 格是被压住时的灰色卡片 */
+.tile { position:absolute; display:grid; place-items:center; width:calc(var(--u) * .98); height:calc(var(--u) * .98); padding:calc(var(--u) * .14) calc(var(--u) * .14) calc(var(--u) * .22); border:0; border-radius:calc(var(--u) * .18); background:var(--ui) 0 0 / 400% 200% no-repeat; filter:drop-shadow(0 calc(var(--u) * .06) calc(var(--u) * .06) rgba(0,0,0,.22)); cursor:pointer; transition:filter .25s,transform .15s; -webkit-tap-highlight-color:transparent; }
+.face { width:100%; height:100%; background:var(--icons) 0 0 / 400% 400% no-repeat; }
 .tile:not(.blocked):hover { transform:translateY(-2px); }
 .tile:not(.blocked):active { transform:scale(.94); }
-.tile.blocked { filter:brightness(.5) saturate(.6); cursor:default; }
+.tile.blocked { background-position:33.333% 0; cursor:default; }
+.tile.blocked .face { filter:brightness(.55) saturate(.5); }
 .tile:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
 .tile.flat { position:relative; }
 .outside { display:flex; justify-content:center; gap:4px; min-height:calc(var(--u) * 1.1); margin-top:10px; }
 .outside.empty { min-height:0; margin-top:0; }
-.slot { position:relative; display:grid; grid-template-columns:repeat(7,var(--u)); gap:0; justify-content:center; width:fit-content; margin:12px auto 0; padding:calc(var(--u) * .14); border-radius:calc(var(--u) * .26); background:#7a5530; box-shadow:inset 0 3px 8px rgba(0,0,0,.35); transition:box-shadow .3s; }
-.slot.full { box-shadow:inset 0 3px 8px rgba(0,0,0,.35),0 0 0 3px #e8344e; }
+.slot { position:relative; display:grid; grid-template-columns:repeat(7,var(--u)); gap:0; justify-content:center; width:fit-content; margin:12px auto 0; padding:calc(var(--u) * .14); border:calc(var(--u) * .1) solid #b9773b; border-radius:calc(var(--u) * .3); background:linear-gradient(180deg,#5a3517,#7a4a22); box-shadow:inset 0 3px 8px rgba(0,0,0,.45),0 0 0 2px #6b3d17,0 6px 14px -6px rgba(0,0,0,.5); transition:box-shadow .3s; }
+.slot.full { box-shadow:inset 0 3px 8px rgba(0,0,0,.45),0 0 0 3px #e8344e; }
 .cell { height:var(--u); margin:0 1px; border-radius:calc(var(--u) * .16); background:rgba(255,255,255,.1); }
 .slot-tiles { position:absolute; inset:calc(var(--u) * .14); display:flex; }
 .slot-tiles .tile { margin:0 calc(var(--u) * .02); cursor:default; }
@@ -210,9 +219,9 @@ onBeforeUnmount(() => { clearInterval(timer); observer?.disconnect() })
 .slot-enter-from { transform:translateY(calc(var(--u) * -.8)) scale(1.15); opacity:0; }
 .slot-move { transition:transform .2s var(--ease); }
 .tools { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:14px; }
-.tools button { display:flex; flex-direction:column; align-items:center; gap:2px; padding:8px 4px; border:0; border-radius:12px; background:rgba(255,255,255,.75); color:#2f4a24; font:500 12px var(--font); cursor:pointer; }
+.tools button { display:flex; flex-direction:column; align-items:center; gap:2px; padding:8px 4px; border:0; border-radius:12px; background:rgba(255,253,240,.85); box-shadow:0 3px 0 rgba(90,130,60,.35); color:#2f4a24; font:500 12px var(--font); cursor:pointer; }
 :root[data-theme='dark'] .tools button { background:rgba(255,255,255,.08); color:#cfe8c0; }
-.tools b { font-size:18px; line-height:1; }
+.tools b { width:30px; height:30px; background:var(--ui) 0 0 / 400% 200% no-repeat; }
 .tools button:disabled { opacity:.4; cursor:default; }
 .big { font:800 48px var(--font-mono); }
 .big small { margin-left:4px; font-size:16px; }

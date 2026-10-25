@@ -53,4 +53,4 @@ uv run uvicorn app.asgi:app --host 127.0.0.1 --port 8000
 
 ## 许可证
 
-[MIT](LICENSE)
+小游戏部分（`src/games/`、`scripts/pack-dungeon-art.py`、`scripts/build-game-font.py`、`backend/app/games.py` 及其测试）采用 [PolyForm Noncommercial 1.0.0](src/games/LICENSE.md)，禁止商用（其中的游戏字体站酷庆科黄油体沿用 SIL OFL 1.1）；其余部分采用 [MIT](LICENSE)。

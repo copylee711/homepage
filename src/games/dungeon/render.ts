@@ -1,14 +1,15 @@
 /** 深渊骑士的全部绘制：房间、角色、子弹、光照与界面。 */
-import { BOSSES, ENEMIES, ROOM_H, ROOM_W, TILE, WEAPONS, WORLD_H, WORLD_W } from './data'
+import { BOSSES, ENEMIES, HEROES, ROOM_H, ROOM_W, TILE, WEAPONS, WORLD_H, WORLD_W } from './data'
 import type { BossKind, EnemyKind } from './data'
-import type { Enemy, Game, Pickup } from './game'
+import { COIN_COLOR, ventState } from './game'
+import type { Enemy, Game, Hazard, Pickup } from './game'
 import { DOOR, DOOR_TILE, PIT, ROCK, WALL, rng, tileAt } from './map'
 import type { Dir, Room } from './map'
 import type { TouchState } from './input'
 import { touchLayout } from './input'
 import {
-  drawBulletsArt, drawCorpses, drawDoorsArt, drawEnemyArt, drawParticleArt, drawPickupArt, drawPlayerArt, drawSwingsArt,
-  drawTorchesArt, itemIcon, paintRoomArt, uiIcon, weaponIcon,
+  drawBulletsArt, drawCorpses, drawDoorsArt, drawEnemyArt, drawHazardArt, drawParticleArt, drawPickupArt, drawPlayerArt, drawPropArt,
+  drawSwingsArt, drawTorchesArt, drawTrapsArt, drawVentFireArt, itemIcon, paintRoomArt, torchSpots, ui2Icon, uiIcon, weaponIcon,
 } from './render-art'
 import { artVersion } from './sprites'
 
@@ -21,7 +22,7 @@ const THEMES: Theme[] = [
   { floor: '#352f25', floor2: '#302a21', grout: '#201c16', wall: '#4b4232', wallTop: '#6f634a', wallDark: '#241f17', rock: '#80745d', moss: 'rgba(230,190,90,.12)', dark: '#0c0a07' },
 ]
 
-const FONT = 'Outfit Variable, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif'
+const FONT = 'Abyss, Outfit Variable, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif'
 const cache = new WeakMap<Room, { canvas: HTMLCanvasElement; scale: number; theme: number; version: number }>()
 let light: HTMLCanvasElement | undefined
 let flashing = false
@@ -50,14 +51,21 @@ export function render(ctx: CanvasRenderingContext2D, game: Game, view: View, to
   drawRoom(ctx, game, theme, dpr * scale)
   drawDoors(ctx, game, theme, time)
   drawTorches(ctx, game, time)
-  for (const p of game.roomPickups) drawPickup(ctx, p, time, game)
+  drawTrapsArt(ctx, game.roomTraps, game.time)
+  for (const h of game.hazards) if (h.kind !== 'beam') drawHazard(ctx, h, time)
+  for (const p of game.roomPickups) if (p.kind !== 'merchant' && p.kind !== 'altar') drawPickup(ctx, p, time, game)
   drawTelegraphs(ctx, game, time)
   drawCorpses(ctx, game)
 
   // 影子先画，角色按 y 排序
   const actors: ({ y: number; draw: () => void })[] = []
+  for (const prop of game.roomProps) {
+    if (!prop.broken) shadow(ctx, prop.x, prop.y + prop.r * 0.8, prop.r, 0)
+    actors.push({ y: prop.broken ? -1e4 + prop.y : prop.y, draw: () => drawProp(ctx, prop) })
+  }
+  for (const p of game.roomPickups) if (p.kind === 'merchant' || p.kind === 'altar') actors.push({ y: p.y, draw: () => drawPickup(ctx, p, time, game) })
   for (const e of game.enemies) {
-    shadow(ctx, e.x, e.y + e.r * 0.85, e.r * (e.boss ? 1.05 : 0.95), e.z)
+    if (e.state !== 'under' && e.kind !== 'ghost') shadow(ctx, e.x, e.y + e.r * 0.85, e.r * (e.boss ? 1.05 : 0.95), e.z)
     actors.push({ y: e.y, draw: () => drawEnemy(ctx, e, game, time) })
   }
   if (game.state !== 'dead' || artVersion) {
@@ -65,6 +73,8 @@ export function render(ctx: CanvasRenderingContext2D, game: Game, view: View, to
     actors.push({ y: game.player.y, draw: () => drawPlayer(ctx, game, time) })
   }
   actors.sort((a, b) => a.y - b.y).forEach(a => a.draw())
+  drawVentFireArt(ctx, game.roomTraps, game.time)
+  for (const h of game.hazards) if (h.kind === 'beam') drawHazard(ctx, h, time)
 
   drawSwings(ctx, game)
   drawBullets(ctx, game)
@@ -108,13 +118,14 @@ export function render(ctx: CanvasRenderingContext2D, game: Game, view: View, to
 function drawRoom(ctx: CanvasRenderingContext2D, game: Game, theme: Theme, pixel: number) {
   const themeIndex = (game.level - 1) % THEMES.length
   let entry = cache.get(game.room)
-  if (!entry || Math.abs(entry.scale - pixel) > 0.01 || entry.theme !== themeIndex || entry.version !== artVersion) {
+  const version = artVersion * 100 + game.room.version
+  if (!entry || Math.abs(entry.scale - pixel) > 0.01 || entry.theme !== themeIndex || entry.version !== version) {
     const canvas = document.createElement('canvas')
     canvas.width = Math.ceil(WORLD_W * pixel); canvas.height = Math.ceil(WORLD_H * pixel)
     const g = canvas.getContext('2d')!
     g.scale(pixel, pixel)
     if (!paintRoomArt(g, game.room, game.level)) paintRoom(g, game.room, theme)
-    entry = { canvas, scale: pixel, theme: themeIndex, version: artVersion }
+    entry = { canvas, scale: pixel, theme: themeIndex, version }
     cache.set(game.room, entry)
   }
   ctx.drawImage(entry.canvas, 0, 0, WORLD_W, WORLD_H)
@@ -233,10 +244,6 @@ function drawDoors(ctx: CanvasRenderingContext2D, game: Game, theme: Theme, time
   }
 }
 
-function torchSpots(room: Room): [number, number][] {
-  return [[4, 0], [14, 0]].filter(([x]) => !room.doors.n || Math.abs(x - 9) > 1).map(([x, y]) => [(x + 0.5) * TILE, (y + 0.75) * TILE])
-}
-
 function drawTorches(ctx: CanvasRenderingContext2D, game: Game, time: number) {
   if (drawTorchesArt(ctx, game, time)) return
   for (const [x, y] of torchSpots(game.room)) {
@@ -263,6 +270,9 @@ function drawPickup(ctx: CanvasRenderingContext2D, p: Pickup, time: number, game
     if (p.kind === 'weapon' && near < 50) label(ctx, WEAPONS[p.weapon!].name, p.x, p.y + 18, WEAPONS[p.weapon!].color, 8)
     if (p.kind === 'item' && near < 60) label(ctx, p.item!.name, p.x, p.y + 24, p.item!.color, 8)
     if (p.kind === 'stairs') label(ctx, '下一层', p.x, p.y - 22, '#8ab4ff', 8)
+    if (p.kind === 'ware') label(ctx, `${p.price} 金币`, p.x, p.y + 20, game.player.coins >= p.price! ? COIN_COLOR : '#ff8a8a', 7.5)
+    if (p.kind === 'ware' && near < 40) label(ctx, p.ware === 'heart' ? '生命' : p.ware === 'key' ? '钥匙' : p.ware === 'weapon' ? WEAPONS[p.weapon!].name : p.item!.name, p.x, p.y - 26, '#ffffff', 8)
+    if (p.kind === 'altar' && !p.used && near < 70) label(ctx, p.altar === 'bless' ? '祝福祭坛' : '诅咒祭坛', p.x, p.y - 30, p.altar === 'bless' ? '#ffd166' : '#c49bff', 8)
     return
   }
   switch (p.kind) {
@@ -317,6 +327,54 @@ function drawPickup(ctx: CanvasRenderingContext2D, p: Pickup, time: number, game
       }
       break
     }
+  }
+}
+
+function drawProp(ctx: CanvasRenderingContext2D, prop: Game['roomProps'][number]) {
+  if (drawPropArt(ctx, prop)) return
+  if (prop.broken) return
+  ctx.fillStyle = prop.kind === 'barrel' ? '#b8402f' : prop.kind === 'pot' ? '#c8a372' : '#8a5a2b'
+  roundRect(ctx, prop.x - prop.r, prop.y - prop.r, prop.r * 2, prop.r * 2, 4); ctx.fill()
+}
+
+function drawHazard(ctx: CanvasRenderingContext2D, h: Hazard, time: number) {
+  const warn = h.warn > 0
+  if (h.kind === 'beam') {
+    const len = h.len!
+    ctx.save(); ctx.translate(h.x, h.y); ctx.rotate(h.angle!)
+    if (warn) {
+      ctx.strokeStyle = `rgba(255,207,92,${0.35 + Math.sin(time * 30) * 0.2})`; ctx.lineWidth = 2; ctx.setLineDash([8, 6])
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(len, 0); ctx.stroke(); ctx.setLineDash([])
+    } else {
+      const a = h.life / h.max
+      ctx.globalCompositeOperation = 'lighter'
+      ctx.fillStyle = `rgba(255,190,70,${0.45 * a})`; ctx.fillRect(0, -h.r * 1.6, len, h.r * 3.2)
+      ctx.fillStyle = `rgba(255,240,190,${0.9 * a})`; ctx.fillRect(0, -h.r * 0.5, len, h.r)
+    }
+    ctx.restore()
+    return
+  }
+  if (warn) {
+    const pulse = 0.4 + Math.sin(time * 18) * 0.15
+    const color = h.kind === 'root' ? '255,90,70' : h.kind === 'spore' ? '140,230,90' : '255,150,60'
+    ctx.strokeStyle = `rgba(${color},${pulse + 0.2})`; ctx.lineWidth = 1.5
+    ctx.fillStyle = `rgba(${color},${pulse * 0.35})`
+    ctx.beginPath(); ctx.ellipse(h.x, h.y, h.r, h.r * 0.6, 0, 0, 7); ctx.fill(); ctx.stroke()
+    return
+  }
+  if (h.kind === 'spore') {
+    const a = Math.max(0, Math.min(1, h.life / 0.6, (h.max - h.life) / 0.25))
+    for (let i = 0; i < 4; i++) {
+      const ang = time * 0.8 + i * 1.6 + h.x
+      const g = ctx.createRadialGradient(h.x + Math.cos(ang) * h.r * 0.3, h.y + Math.sin(ang) * h.r * 0.2, 0, h.x, h.y, h.r * 1.1)
+      g.addColorStop(0, `rgba(170,230,90,${0.32 * a})`); g.addColorStop(1, 'rgba(120,200,60,0)')
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(h.x, h.y, h.r * 1.1, 0, 7); ctx.fill()
+    }
+    return
+  }
+  if (!drawHazardArt(ctx, h, time)) {
+    ctx.fillStyle = h.kind === 'fire' ? 'rgba(255,120,40,.5)' : 'rgba(140,100,60,.8)'
+    ctx.beginPath(); ctx.arc(h.x, h.y, h.r, 0, 7); ctx.fill()
   }
 }
 
@@ -554,6 +612,8 @@ function drawEnemy(ctx: CanvasRenderingContext2D, e: Enemy, game: Game, time: nu
       for (let i = 0; i < 3; i++) { const a = time * 1.5 + i * 2.1; ctx.fillStyle = 'rgba(179,136,255,.7)'; ctx.fillRect(Math.cos(a) * 28 - 2, Math.sin(a) * 12 + 4 - 2, 4, 4) }
       break
     }
+    default:
+      blob(ctx, e.r, 1, ENEMIES[e.kind as EnemyKind]?.color ?? BOSSES[e.kind as BossKind].color, face)
   }
   ctx.restore()
   flashing = false
@@ -598,6 +658,27 @@ function drawTelegraphs(ctx: CanvasRenderingContext2D, game: Game, time: number)
     if (e.kind === 'pumpkin' && e.state === 'fuse') {
       ctx.fillStyle = `rgba(255,120,40,${0.12 + (1 - e.timer / 0.65) * 0.18})`
       ctx.beginPath(); ctx.arc(e.x, e.y, 54, 0, 7); ctx.fill()
+    }
+    if ((e.kind === 'mushroom' && e.state === 'puff') || (e.kind === 'lizard' && e.state === 'wind') || (e.kind === 'dragon' && e.state === 'breathWind')) {
+      ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(e.angle)
+      const reach = e.kind === 'dragon' ? 240 : e.kind === 'lizard' ? 110 : 100
+      const g = ctx.createLinearGradient(0, 0, reach, 0)
+      g.addColorStop(0, e.kind === 'mushroom' ? 'rgba(150,230,90,.3)' : 'rgba(255,120,40,.3)'); g.addColorStop(1, 'rgba(255,120,40,0)')
+      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, reach, e.kind === 'dragon' ? -0.8 : -0.35, e.kind === 'dragon' ? 0.8 : 0.35); ctx.fill()
+      ctx.restore()
+    }
+    if (e.kind === 'dragon' && e.state === 'fly') {
+      const pulse = 0.5 + Math.sin(time * 14) * 0.2
+      ctx.strokeStyle = `rgba(255,110,50,${pulse})`; ctx.lineWidth = 2
+      ctx.beginPath(); ctx.ellipse(e.tx, e.ty + e.r * 0.6, e.r * 1.4, e.r * 0.6, 0, 0, 7); ctx.stroke()
+      ctx.fillStyle = 'rgba(255,110,50,.12)'; ctx.fill()
+    }
+    if (e.kind === 'worm' && e.state === 'under' && e.spawn <= 0) {
+      ctx.fillStyle = 'rgba(120,90,50,.35)'; ctx.beginPath(); ctx.ellipse(e.x, e.y + 6, 14, 6, 0, 0, 7); ctx.fill()
+    }
+    if (e.kind === 'shield' && e.state !== 'slash' && e.state !== 'wind' && e.spawn <= 0) {
+      ctx.strokeStyle = 'rgba(255,233,168,.35)'; ctx.lineWidth = 2
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 6, e.angle - 1.1, e.angle + 1.1); ctx.stroke()
     }
     if (e.kind === 'archer' && e.state === 'aim') {
       ctx.strokeStyle = 'rgba(255,90,90,.35)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4])
@@ -669,6 +750,26 @@ function drawParticles(ctx: CanvasRenderingContext2D, game: Game) {
     } else if (p.kind === 'ghost') {
       ctx.fillStyle = hexA(p.color, a * 0.35)
       ctx.beginPath(); ctx.arc(p.x, p.y - 4, p.size, 0, 7); ctx.fill()
+    } else if (p.kind === 'bolt') {
+      const pts = p.pts!
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+      for (const [w, c] of [[6, hexA(p.color, 0.35 * a)], [2, `rgba(255,255,240,${a})`]] as const) {
+        ctx.strokeStyle = c; ctx.lineWidth = w
+        ctx.beginPath(); ctx.moveTo(pts[0], pts[1])
+        for (let i = 2; i < pts.length; i += 2) {
+          const mx = (pts[i - 2] + pts[i]) / 2 + (Math.random() - 0.5) * 12, my = (pts[i - 1] + pts[i + 1]) / 2 + (Math.random() - 0.5) * 12
+          ctx.lineTo(mx, my); ctx.lineTo(pts[i], pts[i + 1])
+        }
+        ctx.stroke()
+      }
+      ctx.restore()
+    } else if (p.kind === 'leaf' || p.kind === 'frost') {
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.angle ?? 0)
+      ctx.globalAlpha = a
+      ctx.fillStyle = p.color
+      if (p.kind === 'leaf') { ctx.beginPath(); ctx.ellipse(0, 0, p.size, p.size * 0.45, 0, 0, 7); ctx.fill() }
+      else { ctx.beginPath(); ctx.moveTo(p.size * 1.6, 0); ctx.lineTo(0, -p.size * 0.5); ctx.lineTo(-p.size, 0); ctx.lineTo(0, p.size * 0.5); ctx.fill() }
+      ctx.restore()
     } else if (p.kind === 'flash') {
       ctx.globalCompositeOperation = 'lighter'
       ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.angle ?? 0)
@@ -709,6 +810,8 @@ function drawLighting(ctx: CanvasRenderingContext2D, game: Game, view: View, the
   for (const pk of game.roomPickups) if (pk.kind === 'item' || pk.kind === 'fountain' || pk.kind === 'stairs') hole(pk.x, pk.y, 70, 0.6)
   for (const s of game.swings) hole(s.x, s.y, 80, 0.5)
   for (const e of game.enemies) if (e.boss) hole(e.x, e.y, 90, 0.4)
+  for (const h of game.hazards) if (h.warn <= 0 && (h.kind === 'fire' || h.kind === 'beam')) hole(h.x, h.y, h.kind === 'beam' ? 60 : 50, 0.5)
+  for (const t of game.roomTraps) if (t.kind === 'vent' && ventState(game.time, t.offset) === 2) hole(t.x, t.y - 16, 60, 0.6)
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.drawImage(light, 0, 0, width * dpr, height * dpr)
   void theme
@@ -739,6 +842,16 @@ function drawHud(ctx: CanvasRenderingContext2D, game: Game, view: View, touch: T
   ctx.fillStyle = 'rgba(0,0,0,.55)'; roundRect(ctx, pad, by, bw, 9 * s, 4.5 * s); ctx.fill()
   ctx.fillStyle = '#3aa8ff'; roundRect(ctx, pad, by, bw * (p.energy / p.maxEnergy), 9 * s, 4.5 * s); ctx.fill()
   text(ctx, `${Math.floor(p.energy)}/${p.maxEnergy}`, pad + bw + 6 * s, by + 8 * s, '#9fd4ff', 10 * s, 'left')
+  // 金币与钥匙
+  // 与能量条同一行，避开下方的暂停按钮
+  const cy = by + 4.5 * s, cx = pad + bw + 62 * s
+  if (!ui2Icon(ctx, 12, cx, cy, 16 * s)) glowDot(ctx, cx, cy, 4 * s, COIN_COLOR)
+  text(ctx, String(p.coins), cx + 11 * s, cy + 4.5 * s, COIN_COLOR, 12 * s, 'left', 700)
+  if (p.keys) {
+    const kx = cx + 20 * s + ctx.measureText(String(p.coins)).width
+    ui2Icon(ctx, 13, kx + 8 * s, cy, 16 * s)
+    text(ctx, `×${p.keys}`, kx + 18 * s, cy + 4.5 * s, '#ffe7a0', 11 * s, 'left', 700)
+  }
 
   // 楼层与分数
   text(ctx, `第 ${game.level} 层`, width / 2, pad + 12 * s, '#ffd166', 13 * s, 'center', 700)
@@ -758,8 +871,14 @@ function drawHud(ctx: CanvasRenderingContext2D, game: Game, view: View, touch: T
     text(ctx, w.cost ? `${w.cost} 能量/发` : '无消耗', wx + 54 * s, wy + 34 * s, 'rgba(255,255,255,.6)', 10 * s, 'left')
     if (p.weapons.length > 1) {
       const other = WEAPONS[p.weapons[(p.current + 1) % p.weapons.length]]
-      text(ctx, `${touchMode ? '' : 'Q '}⇄ ${other.name}`, wx + 4, wy - 8 * s, 'rgba(255,255,255,.55)', 10 * s, 'left')
+      text(ctx, `${touchMode ? '' : 'Q/滚轮 '}⇄ ${other.name}`, wx + 4, wy - 8 * s, 'rgba(255,255,255,.55)', 10 * s, 'left')
     }
+    // 技能：图标与冷却
+    const hero = HEROES[p.hero]
+    const kx = wx + 150 * s + 30 * s, ky = wy + 22 * s, kr = 20 * s
+    const ready = 1 - p.skillCd / (hero.cooldown * p.stats.skill)
+    skillIcon(ctx, p.hero, kx, ky, kr, Math.max(0, Math.min(1, ready)), time)
+    text(ctx, 'R', kx + kr * 0.75, ky + kr * 0.95, 'rgba(255,255,255,.75)', 10 * s, 'center', 700)
   }
 
   // 首领血条
@@ -786,7 +905,9 @@ function drawHud(ctx: CanvasRenderingContext2D, game: Game, view: View, touch: T
 
 function drawMinimap(ctx: CanvasRenderingContext2D, game: Game, right: number, top: number, s: number) {
   const rooms = game.floor.rooms
-  const known = rooms.filter(r => r.visited || Object.values(r.doors).some(o => o!.visited))
+  // 隐藏房间在裂缝墙被打开前不显示；拾取魔法地图后全部可见
+  const hiddenRoom = (r: Room) => r.type === 'secret' && Object.entries(r.doors).some(([d, o]) => o!.hidden[OPPOSITE_DIR[d as Dir]] !== undefined)
+  const known = rooms.filter(r => (game.mapped || r.visited || Object.values(r.doors).some(o => o!.visited)) && (game.mapped || !hiddenRoom(r)))
   const xs = known.map(r => r.gx), ys = known.map(r => r.gy)
   const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys)
   const cw = 13 * s, ch = 9 * s, gap = 3 * s
@@ -797,8 +918,9 @@ function drawMinimap(ctx: CanvasRenderingContext2D, game: Game, right: number, t
     const x = x0 + gap + (r.gx - minX) * (cw + gap), y = y0 + gap + (r.gy - minY) * (ch + gap)
     ctx.fillStyle = r === game.room ? '#ffffff' : r.visited ? 'rgba(170,180,210,.7)' : 'rgba(120,130,160,.3)'
     roundRect(ctx, x, y, cw, ch, 2); ctx.fill()
-    const icon = r.type === 'boss' ? '#ff4d5e' : r.type === 'treasure' ? '#ffd166' : r.type === 'heal' ? '#5ee7ff' : ''
+    const icon = r.type === 'boss' ? '#ff4d5e' : r.type === 'treasure' ? '#ffd166' : r.type === 'heal' ? '#5ee7ff' : r.type === 'altar' ? '#c49bff' : ''
     if ((r.type === 'boss' || r.type === 'treasure') && uiIcon(ctx, r.type === 'boss' ? 14 : 15, x + cw / 2, y + ch / 2, ch * 1.3)) continue
+    if ((r.type === 'shop' || r.type === 'secret') && ui2Icon(ctx, r.type === 'shop' ? 14 : 15, x + cw / 2, y + ch / 2, ch * 1.3)) continue
     if (icon) { ctx.fillStyle = icon; ctx.beginPath(); ctx.arc(x + cw / 2, y + ch / 2, 2.6 * s, 0, 7); ctx.fill() }
   }
 }
@@ -861,9 +983,31 @@ function drawTouch(ctx: CanvasRenderingContext2D, game: Game, view: View, touch:
   const p = game.player
   button(L.dash, '翻滚', false, '#8ab4ff', p.dashCd > 0 ? 1 - p.dashCd / (0.85 * p.stats.dash) : 1, 11)
   if (p.weapons.length > 1) button(L.swap, '换枪', false, '#ffd166', 1, 12)
+  const hero = HEROES[p.hero]
+  skillIcon(ctx, p.hero, L.skill.x, L.skill.y, L.skill.r, Math.max(0, Math.min(1, 1 - p.skillCd / (hero.cooldown * p.stats.skill))), time)
   const w = game.weapon
   text(ctx, w.cost ? `${w.name} · ${w.cost}能量` : w.name, L.fire.x + L.fire.r * 0.6, L.swap.y - L.swap.r - 10, w.color, Math.max(11, L.fire.r * 0.26), 'right', 700)
   if (game.prompt) button(L.interact, '拾取', false, '#7cffb2', 1, 13)
+}
+
+const OPPOSITE_DIR: Record<Dir, Dir> = { n: 's', s: 'n', e: 'w', w: 'e' }
+
+/** 技能按钮：圆形图标，冷却时显示扇形遮罩，就绪时外圈发光 */
+function skillIcon(ctx: CanvasRenderingContext2D, hero: Game['player']['hero'], x: number, y: number, r: number, ready: number, time: number) {
+  const index = hero === 'knight' ? 8 : hero === 'ranger' ? 9 : 10
+  const color = HEROES[hero].color
+  if (ready >= 1) {
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'
+    halo(ctx, x, y, r * 1.5, color, 0.35 + Math.sin(time * 4) * 0.1)
+    ctx.restore()
+  }
+  if (!ui2Icon(ctx, index, x, y, r * 2, ready >= 1 ? 1 : 0.75)) {
+    ctx.fillStyle = hexA(color, 0.35); ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill()
+  }
+  if (ready < 1) {
+    ctx.fillStyle = 'rgba(0,0,0,.55)'
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.arc(x, y, r * 0.84, -Math.PI / 2 + ready * Math.PI * 2, Math.PI * 1.5); ctx.fill()
+  }
 }
 
 /** 触屏自动瞄准时在目标上显示锁定框。 */

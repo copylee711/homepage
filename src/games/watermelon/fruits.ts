@@ -1,4 +1,11 @@
-/** 程序化绘制 11 种水果，预渲染到离屏画布后按需旋转贴图。 */
+/** 11 种水果：优先用手绘贴图，未加载时程序化绘制；预渲染到离屏画布后按需旋转贴图。 */
+import manifest from './art/manifest.json'
+import fruitsUrl from './art/fruits.webp'
+
+const art = new Image()
+let ready = false
+art.onload = () => { ready = true; cache.clear() }
+art.src = fruitsUrl
 
 interface Style { name: string; base: string; dark: string; light: string }
 
@@ -26,13 +33,29 @@ export function sprite(level: number, radius: number): HTMLCanvasElement {
   if (canvas) return canvas
   canvas = document.createElement('canvas')
   // 预留叶子和果柄伸出的空间
-  const size = Math.ceil(px * 2.6)
+  const size = Math.ceil(px * 3)
   canvas.width = canvas.height = size
   const g = canvas.getContext('2d')!
   g.translate(size / 2, size / 2)
-  draw(g, level, px)
+  if (ready) drawArt(g, level, px)
+  else draw(g, level, px)
   cache.set(key, canvas)
   return canvas
+}
+
+/** 贴图主体（按面积算的等效圆）与物理半径对齐，叶子和果柄可以伸出圆外 */
+function drawArt(g: CanvasRenderingContext2D, level: number, r: number) {
+  const { fw, cols, bodies } = manifest.fruits
+  const [cx, cy, br] = bodies[level]
+  const k = (r * 1.06) / br
+  const sx = (level % cols) * fw, sy = Math.floor(level / cols) * fw
+  g.drawImage(art, sx, sy, fw, fw, -cx * k, -cy * k, fw * k, fw * k)
+}
+
+/** 下一个水果的小图标 */
+export function iconUrl(level: number) {
+  const c = sprite(level, 18)
+  return c.toDataURL()
 }
 
 function body(g: CanvasRenderingContext2D, r: number, s: Style) {

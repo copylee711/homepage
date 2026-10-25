@@ -9,10 +9,13 @@ import HealthNotice from './HealthNotice.vue'
 import Leaderboard from './Leaderboard.vue'
 import { muted, toggleMute } from './sound'
 import Sheep from './sheep/Sheep.vue'
-import { ICONS } from './sheep/icons'
 import Watermelon from './watermelon/Watermelon.vue'
 import Dungeon from './dungeon/Dungeon.vue'
 import { heroUrl } from './dungeon/sprites'
+import sheepCover from './covers/sheep.webp'
+import watermelonCover from './covers/watermelon.webp'
+
+const covers: Record<GameId, string> = { dungeon: heroUrl, watermelon: watermelonCover, sheep: sheepCover }
 
 const id = location.pathname.replace(/\/$/, '').split('/')[2] as GameId | undefined
 const game = games.find(g => g.id === id)
@@ -61,17 +64,9 @@ onMounted(() => {
       </PageHeading>
       <div class="container">
         <div class="cards">
-          <a v-for="(g, i) in games" :key="g.id" v-reveal="i * 90" class="card" :href="`/games/${g.id}`">
+          <a v-for="(g, i) in games" :key="g.id" v-reveal="i * 90" class="card" :class="{ feature: i === 0 }" :href="`/games/${g.id}`">
             <div class="art" :class="g.id" aria-hidden="true">
-              <svg v-if="g.id === 'watermelon'" viewBox="0 0 200 120">
-                <circle cx="100" cy="74" r="44" fill="#3fae49" /><path d="M78 36q-8 38 0 76M100 30v88M122 36q8 38 0 76" stroke="#1d6f2a" stroke-width="8" fill="none" />
-                <circle cx="44" cy="96" r="20" fill="#ff9a1f" /><circle cx="158" cy="100" r="16" fill="#e8344e" /><circle cx="150" cy="62" r="11" fill="#8e5bd6" /><circle cx="52" cy="58" r="13" fill="#ffe14d" />
-                <circle cx="88" cy="70" r="4" fill="#2b1d14" /><circle cx="112" cy="70" r="4" fill="#2b1d14" /><path d="M92 82q8 7 16 0" stroke="#2b1d14" stroke-width="3" fill="none" stroke-linecap="round" />
-              </svg>
-              <img v-else-if="g.id === 'dungeon'" class="cover" :src="heroUrl" alt="" loading="lazy">
-              <div v-else class="stack">
-                <svg v-for="(n, k) in [15, 0, 5, 7, 2]" :key="k" viewBox="0 0 48 48" :style="{ '--k': k }" v-html="ICONS[n]" />
-              </div>
+              <img class="cover" :src="covers[g.id]" alt="" :loading="i ? 'lazy' : 'eager'">
             </div>
             <div class="info">
               <p class="label">{{ g.title }}</p>
@@ -94,23 +89,19 @@ onMounted(() => {
 <style scoped>
 .games-page { min-height:80vh; padding-bottom:72px; }
 .cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; }
-.cards .card:last-child:nth-child(odd) { grid-column:1 / -1; }
-.cards .card:last-child:nth-child(odd) .art { height:240px; }
 .card { display:flex; flex-direction:column; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); overflow:hidden; transition:transform .4s var(--ease),box-shadow .4s,border-color .3s; }
 .card:hover { transform:translateY(-4px); border-color:var(--line-strong); box-shadow:0 30px 60px -40px rgba(17,24,39,.45); }
-.art { position:relative; display:grid; place-items:center; flex:none; height:200px; overflow:hidden; }
-.art.watermelon { background:linear-gradient(180deg,#fff6e3,#ffe2b8); }
-.art.sheep { background:linear-gradient(180deg,#d9f2c4,#b8e39b); }
-.art.dungeon { background:radial-gradient(ellipse at 50% 70%,#24283a,#0b0c12); }
-.art .cover { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; object-position:30% 22%; transition:transform .6s var(--ease); }
+.art { position:relative; flex:none; aspect-ratio:16/9; overflow:hidden; background:#0b0c12; }
+.art .cover { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transition:transform .6s var(--ease); }
+.art.sheep .cover { object-position:50% 30%; }
 .card:hover .art .cover { transform:scale(1.04); }
-:root[data-theme='dark'] .art.watermelon { background:linear-gradient(180deg,#1d2233,#2a2620); }
-:root[data-theme='dark'] .art.sheep { background:linear-gradient(180deg,#1f3322,#18281b); }
-.art > svg { width:min(80%,280px); transition:transform .5s var(--ease); }
-.card:hover .art > svg { transform:scale(1.05) rotate(-2deg); }
-.stack { position:relative; width:220px; height:120px; }
-.stack svg { position:absolute; left:calc(var(--k) * 34px + 8px); top:calc(30px + (var(--k) - 2) * (var(--k) - 2) * 6px); width:56px; height:56px; padding:8px; border-radius:12px; background:#fffdf5; box-shadow:0 5px 0 #a9c48f,0 8px 14px rgba(0,0,0,.15); transform:rotate(calc((var(--k) - 2) * 6deg)); transition:transform .4s var(--ease); }
-.card:hover .stack svg { transform:translateY(-6px) rotate(calc((var(--k) - 2) * 8deg)); }
+/* 首推的深渊骑士：横跨两列，封面完整显示在左侧 */
+.card.feature { grid-column:1 / -1; display:grid; grid-template-columns:minmax(0,1.5fr) minmax(0,1fr); }
+.card.feature .art { aspect-ratio:16/9; height:100%; }
+.card.feature .cover { object-position:30% 40%; }
+.card.feature .info { display:flex; flex-direction:column; justify-content:center; padding:32px 34px; }
+.card.feature h2 { font-size:30px; }
+.card.feature .text { font-size:15px; }
 .info { padding:22px 24px 24px; }
 .info h2 { margin-top:6px; font-size:24px; }
 .text { margin-top:8px; color:var(--muted); font-size:14px; line-height:1.7; }
@@ -131,6 +122,10 @@ onMounted(() => {
   .layout { grid-template-columns:minmax(0,1fr); }
   .stage-col { width:100%; max-width:480px; margin:0 auto; }
   .cards { grid-template-columns:1fr; }
+  .card.feature { display:flex; }
+  .card.feature .art { height:auto; }
+  .card.feature .info { padding:22px 24px 24px; }
+  .card.feature h2 { font-size:24px; }
 }
 @media (max-width: 520px) {
   .play { padding-top:calc(var(--header-h) + 12px); padding-left:12px; padding-right:12px; }

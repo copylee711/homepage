@@ -1,3 +1,21 @@
+Scope / 适用范围
+
+The MIT License below covers this repository EXCEPT the games, which are
+licensed under the PolyForm Noncommercial License 1.0.0 (commercial use is
+not permitted). See src/games/LICENSE.md. The games consist of:
+
+  - src/games/ (code, art, sound and music of all mini games)
+  - scripts/pack-dungeon-art.py and scripts/build-game-font.py
+  - backend/app/games.py and backend/tests/test_games.py
+
+The bundled game font (src/games/dungeon/font/) is ZCOOL QingKe HuangYou,
+licensed under the SIL Open Font License 1.1 (see OFL.txt there).
+
+除上述小游戏部分采用 PolyForm Noncommercial 1.0.0（禁止商用）外，
+本仓库其余部分采用下面的 MIT 许可证。
+
+----------------------------------------------------------------------
+
 MIT License
 
 Copyright (c) 2026 Copy
