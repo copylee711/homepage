@@ -9,6 +9,7 @@ import ImageHosting from './ImageHosting.vue'
 import FeedbackPanel from './FeedbackPanel.vue'
 import StorageSummary from './StorageSummary.vue'
 import StorageTerms from './StorageTerms.vue'
+import DriveDialog from './drive/DriveDialog.vue'
 import AccountSecurity from './AccountSecurity.vue'
 import { UNKNOWN_PASSKEY, forgetPasskey, passkeyAvailable, usePasskey } from '../passkeys'
 import { games, loadMine } from '../games/api'
@@ -20,7 +21,14 @@ type Mode = 'login' | 'register' | 'reset'
 const mode = ref<Mode>('login')
 const tab = ref<'favorites' | 'history' | 'storage' | 'feedback' | 'settings'>('favorites')
 // 云盘与图床由管理员单独开通；没有权限的用户看不到“存储”标签。
-const termsOpen = ref(false)
+// 页脚的“云盘与图床协议”链接打开 /account?view=terms；未同意时转到存储标签里的同意表单。
+const termsView = ref(new URLSearchParams(location.search).get('view') === 'terms')
+function closeTerms() {
+  termsView.value = false
+  const params = new URLSearchParams(location.search)
+  params.delete('view')
+  window.history.replaceState(null, '', `${location.pathname}${params.size ? `?${params}` : ''}`)
+}
 const hasStorage = computed(() => features.value.drive || features.value.images)
 const tabList = computed(() => [['favorites', '收藏'], ['history', '浏览记录'], ...(hasStorage.value ? [['storage', '存储']] : []), ['feedback', '反馈'], ['settings', '账户设置']])
 const busy = ref(false), error = ref(''), message = ref('')
@@ -195,6 +203,7 @@ onMounted(async () => {
   if (account.value && next) { location.href = next; return }
   const wanted = params.get('tab')
   if (wanted && tabList.value.some(([value]) => value === wanted)) tab.value = wanted as typeof tab.value
+  if (termsView.value && hasStorage.value && !features.value.terms) { tab.value = 'storage'; closeTerms() }
   if (account.value) await loadLists().catch(() => {})
 })
 onBeforeUnmount(() => { clearInterval(timer); clearTimeout(warmup); captchaLifetime.abort(); cancelEmailCaptcha() })
@@ -268,10 +277,6 @@ onBeforeUnmount(() => { clearInterval(timer); clearTimeout(warmup); captchaLifet
             <template v-else>
               <StorageSummary v-if="features.drive" />
               <ImageHosting v-if="features.images" @enabled="value => { if (!value) loadAccount(true) }" />
-              <details class="terms-link" @toggle="termsOpen = ($event.target as HTMLDetailsElement).open">
-                <summary>云盘与图床使用协议</summary>
-                <StorageTerms v-if="termsOpen" view />
-              </details>
             </template>
           </div>
           <FeedbackPanel v-else-if="tab === 'feedback'" :captcha="config?.captcha && { ...config.captcha, sceneId: config.captcha.feedbackSceneId || config.captcha.sceneId }" />
@@ -306,15 +311,13 @@ onBeforeUnmount(() => { clearInterval(timer); clearTimeout(warmup); captchaLifet
         </div>
       </div>
     </div>
+    <DriveDialog v-if="termsView && hasStorage && features.terms" title="云盘与图床使用协议" wide @close="closeTerms"><StorageTerms view /></DriveDialog>
   </section>
 </template>
 
 <style scoped>
 .account-page { min-height:80vh; padding-bottom:72px; }
 .storage-terms { margin-top:24px; }
-.terms-link { margin-top:24px; padding:16px 24px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); }
-.terms-link summary { color:var(--muted); font-size:13px; cursor:pointer; }
-.terms-link[open] summary { margin-bottom:8px; color:var(--text); }
 fieldset { border:0; margin:0; padding:0; min-width:0; }
 .feedback { padding:12px 16px; margin:0 0 20px; border-radius:var(--radius-sm); font-size:14px; }
 .feedback.error { color:#d15c5c; background:rgba(209,92,92,.08); }

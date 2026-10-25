@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { features } from '../account'
+
+// 协议在主站账户页查看；在云盘子域名上跳回主站。
+const termsUrl = `${location.hostname.startsWith('cloud.') ? location.origin.replace('//cloud.', '//') : ''}/account?view=terms`
 import { site } from '../content'
 import LogoMark from './LogoMark.vue'
 import SocialLinks from './SocialLinks.vue'
@@ -28,7 +31,7 @@ const year = new Date().getFullYear()
 
       <div class="legal">
         <span class="copyright">
-          © {{ year }} {{ site.name }}<a href="/privacy">隐私政策</a><a v-if="features.admin" class="admin" href="/admin" rel="nofollow">Admin</a>
+          © {{ year }} {{ site.name }}<a href="/privacy">隐私政策</a><a v-if="features.drive || features.images" :href="termsUrl">云盘与图床协议</a><a v-if="features.admin" class="admin" href="/admin" rel="nofollow">Admin</a>
         </span>
         <span v-if="site.icp || site.police.text" class="beian">
           <a v-if="site.icp" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">

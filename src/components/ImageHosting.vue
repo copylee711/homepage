@@ -97,11 +97,13 @@ onMounted(() => { void load().catch(err => { error.value = err instanceof Error 
       <ul v-if="items.length" class="grid">
         <li v-for="item in items" :key="item.id">
           <a :href="item.url" target="_blank" rel="noopener" class="thumb"><img :src="item.url" :alt="`图片 ${item.id}`" loading="lazy"></a>
-          <div class="meta"><span>{{ item.width }}×{{ item.height }} · {{ size(item.size) }}</span><time>{{ item.created_at.slice(0, 10) }}</time></div>
-          <div class="actions">
-            <button type="button" @click="copy(markdown(item))">Markdown</button>
-            <button type="button" @click="copy(item.url)">URL</button>
-            <button type="button" class="del" :aria-label="`删除图片 ${item.id}`" @click="remove(item)">删除</button>
+          <div class="foot">
+            <div class="meta"><span>{{ item.width }}×{{ item.height }} · {{ size(item.size) }}</span><time>{{ item.created_at.slice(0, 10) }}</time></div>
+            <div class="actions">
+              <button type="button" title="复制 Markdown" aria-label="复制 Markdown" @click="copy(markdown(item))"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3ZM6.5 15V9l2.5 3 2.5-3v6M17 9v6m-2-2 2 2 2-2" /></svg></button>
+              <button type="button" title="复制链接" aria-label="复制链接" @click="copy(item.url)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" /></svg></button>
+              <button type="button" class="del" title="删除" :aria-label="`删除图片 ${item.id}`" @click="remove(item)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg></button>
+            </div>
           </div>
         </li>
       </ul>
@@ -177,11 +179,22 @@ button:disabled { opacity:.5; cursor:default; }
 .grid li { border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); overflow:hidden; }
 .thumb { display:block; aspect-ratio:4/3; background:var(--bg-tint); }
 .thumb img { width:100%; height:100%; object-fit:contain; }
-.meta { display:flex; justify-content:space-between; gap:8px; padding:8px 10px 0; color:var(--muted); font:12px var(--font-mono); }
-.actions { display:flex; gap:4px; padding:8px; }
-.actions button { flex:1; padding:6px 4px; border:1px solid var(--line); border-radius:8px; background:none; color:var(--text-2); font-size:12px; transition:border-color .2s,color .2s; }
-.actions button:hover { border-color:var(--accent); color:var(--accent); }
-.del:hover { border-color:rgba(209,92,92,.5) !important; color:#d15c5c !important; }
+.foot { display:flex; align-items:center; justify-content:space-between; gap:6px; padding:8px 8px 8px 12px; border-top:1px solid var(--line); }
+.meta { display:flex; flex-direction:column; gap:2px; min-width:0; color:var(--muted); font-size:12px; line-height:1.4; font-variant-numeric:tabular-nums; }
+.meta span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.meta time { color:var(--faint); }
+.actions { display:flex; flex:none; gap:2px; }
+.actions button { display:grid; place-items:center; width:32px; height:32px; padding:0; border:0; border-radius:8px; background:none; color:var(--muted); cursor:pointer; transition:background .2s,color .2s; }
+.actions button:hover { background:var(--accent-soft); color:var(--accent); }
+.actions svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+.actions .del:hover { background:rgba(209,92,92,.08); color:#d15c5c; }
+/* 手机两列较窄：信息与按钮上下排列，按钮均分整行 */
+@media (max-width:520px) {
+  .foot { flex-direction:column; align-items:stretch; gap:6px; padding:8px 8px 6px; }
+  .meta { padding:0 4px; }
+  .actions { justify-content:space-between; }
+  .actions button { flex:1; height:34px; background:var(--bg-tint); }
+}
 .empty { margin:0; padding:24px 0; color:var(--muted); }
 .pager { display:flex; justify-content:center; align-items:center; gap:14px; color:var(--muted); font-size:13px; }
 .pager button { padding:6px 12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--text); }

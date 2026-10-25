@@ -92,6 +92,7 @@
     // 云盘与后台入口只对已开通的用户显示；新用户默认没有这些功能。
     document.querySelectorAll('[data-cloud]').forEach(el => { el.hidden = !me?.features?.drive; });
     document.querySelectorAll('.reading-admin').forEach(el => { el.hidden = !me?.features?.admin; });
+    document.querySelectorAll('.reading-terms').forEach(el => { el.hidden = !(me?.features?.drive || me?.features?.images); });
     const link = document.getElementById('account-link');
     if (me && link) {
       link.title = me.user.name; link.setAttribute('aria-label', `账户：${me.user.name}`);
