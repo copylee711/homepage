@@ -54,6 +54,12 @@ const allChosen = computed(() => items.value.length > 0 && chosen.value.length =
 const readOnly = computed(() => !!listing.value?.read_only)
 const selecting = computed(() => chosen.value.length > 0)
 // 移动端列表文件名最多两行：按可用宽度估算可容纳的半角字符数，超出时从中间省略并保留扩展名。
+// 桌面表格同样最多两行：名称列宽 ≈ 内容区宽度减去侧栏、内边距与复选框、大小、时间列。
+const tableBudget = computed(() => {
+  const width = Math.min(viewportWidth.value, 1440)
+  const column = width - (width > 860 ? 220 : 0) - 2 * Math.min(40, Math.max(16, width * 0.03)) - 16 - 40 - 110 - 170 - 34
+  return Math.max(20, Math.floor(column / 8.4) * 2 - 2)
+})
 const nameBudget = computed(() => Math.max(16, Math.floor((viewportWidth.value - 140) / 8.4) * 2 - 2))
 const title = computed(() => baseName(path.value) || '全部文件')
 const shareTarget = () => ({ kind: 'share' as const, paths: chosen.value.map(item => item.path), folder: chosen.value.length === 1 && chosen.value[0]!.dir })
@@ -320,7 +326,7 @@ defineExpose({ reload: () => load() })
       </div>
       <div v-for="item in items" :key="item.path" class="row" :class="{ chosen: selected.has(item.path) }" role="row" @dblclick="activate(item)">
         <span><input type="checkbox" :checked="selected.has(item.path)" :aria-label="`选择 ${item.name}`" @click.stop="toggle(item, $event)"></span>
-        <button class="name" type="button" :title="item.name" @click="activate(item)"><svg class="icon" :class="kindOf(item.name, item.dir)" viewBox="0 0 24 24" aria-hidden="true"><path :d="kindIcons[kindOf(item.name, item.dir)]" /></svg><span class="fname"><span class="stem">{{ item.dir ? item.name : splitName(item.name)[0] }}</span><span v-if="!item.dir" class="ext">{{ splitName(item.name)[1] }}</span></span></button>
+        <button class="name" type="button" :title="item.name" @click="activate(item)"><svg class="icon" :class="kindOf(item.name, item.dir)" viewBox="0 0 24 24" aria-hidden="true"><path :d="kindIcons[kindOf(item.name, item.dir)]" /></svg><span class="dname">{{ middleTrim(item.name, tableBudget) }}</span></button>
         <span class="num">{{ item.dir ? '—' : formatSize(item.size) }}</span>
         <span class="time">{{ date(item.mtime) }}</span>
       </div>
@@ -441,6 +447,8 @@ label.d-btn.disabled { opacity:.45; pointer-events:none; }
 .row input[type=checkbox],.grid input[type=checkbox] { width:16px; height:16px; accent-color:var(--accent); cursor:pointer; }
 .name { display:flex; align-items:center; gap:12px; min-width:0; padding:8px 0; border:0; background:none; color:var(--text); font:14px var(--font); text-align:left; cursor:pointer; }
 .name span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.row .name { width:100%; }
+.name .dname { white-space:normal; line-height:1.45; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow-wrap:anywhere; }
 /* 单行显示时文件名主体省略，扩展名始终可见 */
 .fname { display:flex; min-width:0; max-width:100%; }
 .fname .ext { flex:none; overflow:visible; }
