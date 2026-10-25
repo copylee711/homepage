@@ -102,11 +102,12 @@ def test_seed_is_idempotent_and_public_configuration(server):
     headers = login(client)
     value = client.get("/api/admin/site").json()
     value["site"]["intro"] = "changed without rebuild"
+    portal_count = len(value["site"]["portals"])
     value["site"]["portals"][0]["visible"] = False
     assert client.put("/api/admin/site", json=value, headers=headers).status_code == 200
     assert seed(settings) is False
     assert client.get("/api/site").json()["site"]["intro"] == "changed without rebuild"
-    assert len(client.get("/api/site").json()["site"]["portals"]) == 2
+    assert len(client.get("/api/site").json()["site"]["portals"]) == portal_count - 1
     assert client.get("/api/version").json()["site"] == 2
     assert client.put("/api/admin/site", json=value, headers=headers).status_code == 409
     assert client.get("/api/site").headers["cache-control"] == "no-store"
