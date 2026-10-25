@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { confirmDialog } from '../../composables/useConfirm'
 import { driveApi, formatTime } from '../../drive'
 import type { DriveAccount, DriveCredential } from '../../drive'
 
@@ -33,12 +34,12 @@ const addAppPassword = () => work(async () => {
   const result = await driveApi<DriveCredential & { password: string }>('/app-passwords', 'POST', { name: appName.value })
   freshPassword.value = { name: result.name, password: result.password }
 }, '应用密码已生成，请立即复制，它只会显示这一次。')
-const remove = (item: DriveCredential) => {
-  if (!confirm(`删除「${item.name}」？使用它的客户端将无法再登录。`)) return
+const remove = async (item: DriveCredential) => {
+  if (!await confirmDialog({ title: `删除「${item.name}」？`, message: '使用这个应用密码的客户端将无法再登录。', confirmText: '删除', danger: true })) return
   return work(async () => { await driveApi(`/credentials/${item.id}/remove`, 'POST') }, '已删除。')
 }
-const removeLegacy = () => {
-  if (!confirm('停用旧云盘迁移过来的密码？仍在使用旧密码的客户端需要改用应用密码。')) return
+const removeLegacy = async () => {
+  if (!await confirmDialog({ title: '停用旧密码？', message: '旧云盘迁移过来的密码将停用，仍在使用它的客户端需要改用应用密码。', confirmText: '停用', danger: true })) return
   return work(async () => { await driveApi('/legacy-password/remove', 'POST') }, '旧密码已停用。')
 }
 async function copy(text: string) {

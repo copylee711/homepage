@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { confirmDialog } from '../../composables/useConfirm'
 import { baseName, driveApi, joinPath, parentPath } from '../../drive'
 import type { DriveListing } from '../../drive'
 import DriveDialog from './DriveDialog.vue'
@@ -32,7 +33,7 @@ async function submit() {
   try {
     const targets = new Set(folders.value)
     const clash = props.paths.filter(path => targets.has(baseName(path)))
-    const overwrite = clash.length > 0 && confirm(`目标目录中已有 ${clash.map(baseName).join('、')}，要覆盖吗？`)
+    const overwrite = clash.length > 0 && await confirmDialog({ title: '覆盖同名项目？', message: `目标目录中已有 ${clash.map(baseName).join('、')}。`, confirmText: '覆盖', danger: true })
     if (clash.length && !overwrite) return
     await driveApi(`/${props.mode}`, 'POST', { paths: props.paths, target: current.value, overwrite })
     emit('done')

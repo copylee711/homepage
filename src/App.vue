@@ -4,6 +4,7 @@ import { contentStatus, ready, reloadContent, startContent } from './content'
 import AccountPage from './components/AccountPage.vue'
 import AdminPage from './components/AdminPage.vue'
 import BootScreen from './components/BootScreen.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 import HeroSection from './components/HeroSection.vue'
 import PortalGrid from './components/PortalGrid.vue'
 import RepoSection from './components/RepoSection.vue'
@@ -84,6 +85,7 @@ watch(ready, async value => {
   <SiteFooter />
   </template>
   <Transition name="boot"><BootScreen v-if="!isAdmin && !ready" /></Transition>
+  <ConfirmDialog />
 </template>
 
 <style scoped>

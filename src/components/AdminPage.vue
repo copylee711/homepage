@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { confirmDialog } from '../composables/useConfirm'
 import { fetchJson } from '../content'
 import AdminInbox from './AdminInbox.vue'
 import AdminStorage from './AdminStorage.vue'
@@ -110,7 +111,7 @@ async function saveNote() { await action(async () => {
 }) }
 async function deleteNote() { await action(async () => {
   const e = noteEdit.value!
-  if (!confirm('删除后这篇笔记无法恢复，继续吗？')) return
+  if (!await confirmDialog({ title: '删除这篇笔记？', message: '删除后无法恢复。', confirmText: '删除', danger: true })) return
   await api(`/api/admin/notes/${e.id}/remove`, 'POST', {revision:e.revision})
   noteEdit.value = undefined; await loadNotes(); message.value = '笔记已删除。'
 }) }
@@ -133,7 +134,7 @@ watch(tab, () => nextTick(() => document.querySelector('.admin-nav > button.sele
 watch(tab, next => { if (next === 'storage') void loadImages(1).catch(err => { error.value = err instanceof Error ? err.message : '图床加载失败' }) })
 watch(imageOwner, () => { void action(() => loadImages(1)) })
 async function removeImage(item: HostedImage) { await action(async () => {
-  if (!confirm('删除后这张图片的链接将失效，引用它的文章会显示破图。确定删除吗？')) return
+  if (!await confirmDialog({ title: '删除这张图片？', message: '图片链接将失效，引用它的文章会显示破图。', confirmText: '删除', danger: true })) return
   await api(`/api/admin/images/${item.id}/remove`, 'POST'); await loadImages(); message.value = '图片已删除。'
 }) }
 async function copyText(text: string) {
@@ -163,12 +164,12 @@ async function setUserState(user: SiteUser, disabled: boolean) { await action(as
   message.value = disabled ? `已停用 ${user.email}，其登录已失效。` : `已恢复 ${user.email}。`
 }) }
 async function resetUserSecurity(user: SiteUser) { await action(async () => {
-  if (!confirm(`清除 ${user.email} 的两步验证与全部 Passkey，并退出其所有登录？仅在确认是本人丢失设备时操作。`)) return
+  if (!await confirmDialog({ title: `重置 ${user.email} 的登录安全？`, message: '将清除两步验证与全部 Passkey，并退出其所有登录。仅在确认是本人丢失设备时操作。', confirmText: '重置', danger: true })) return
   await api(`/api/admin/accounts/users/${user.id}/reset-security`, 'POST')
   user.totp = false; user.passkeys = 0; message.value = `已重置 ${user.email} 的登录安全设置。`
 }) }
 async function removeUser(user: SiteUser) { await action(async () => {
-  if (!confirm(`永久删除 ${user.email} 及其收藏、浏览记录？`)) return
+  if (!await confirmDialog({ title: `删除 ${user.email}？`, message: '该用户及其收藏、浏览记录将被永久删除，无法恢复。', confirmText: '永久删除', danger: true })) return
   await api(`/api/admin/accounts/users/${user.id}/remove`, 'POST')
   siteUsers.value = siteUsers.value.filter(item => item !== user); message.value = '用户已删除。'
 }) }
@@ -231,7 +232,7 @@ async function loadAll() {
   unread.value = (await api<{unread: number}>('/api/admin/inbox?page=1')).unread
 }
 async function logout() { await action(async () => {
-  if(((dirty.value && draft.value.title) || siteDirty.value) && !confirm('有未保存修改，仍要退出吗？')) return
+  if(((dirty.value && draft.value.title) || siteDirty.value) && !await confirmDialog({ title: '有未保存的修改', message: '退出后这些修改会丢失。', confirmText: '仍要退出', danger: true })) return
   await api('/api/auth/logout', 'POST'); csrf.value = ''; settings.value = undefined
   article.value = undefined; draft.value = emptyDraft(); lastDraft.value = JSON.stringify(draft.value)
   preview.value = ''; articles.value = []; syncState.value = undefined
@@ -243,7 +244,7 @@ async function saveSettings() { await action(async () => {
   siteRevision.value = result.revision; message.value = '设置已保存，主页将在下次刷新或自动检查时更新。'
 }) }
 async function reloadSettings() { await action(async () => {
-  if(!confirm('重新加载会丢弃尚未保存的设置，继续吗？')) return
+  if(siteDirty.value && !await confirmDialog({ title: '重新加载设置？', message: '尚未保存的设置会被丢弃。', confirmText: '重新加载', danger: true })) return
   await loadSettings(); message.value = '已读取最新设置。'
 }) }
 async function syncRepos() { await action(async () => {
@@ -259,7 +260,7 @@ function move<T>(items: T[], index: number, direction: number) {
   items.splice(target, 0, item)
 }
 async function selectArticle(id?: string) {
-  if (dirty.value && draft.value.title && !confirm('文章有未保存修改，仍要切换吗？')) return
+  if (dirty.value && draft.value.title && !await confirmDialog({ title: '文章有未保存的修改', message: '切换后这些修改会丢失。', confirmText: '仍要切换', danger: true })) return
   await action(async () => {
     article.value = id ? await api<Article>(`/api/admin/posts/${id}`) : undefined
     draft.value = article.value ? {...article.value.draft} : emptyDraft()
@@ -286,14 +287,14 @@ async function publish() { await action(async () => {
 }) }
 async function unpublish() { await action(async () => {
   const current = article.value!
-  if(!confirm('撤下后访客将无法读取这篇文章，继续吗？')) return
+  if(!await confirmDialog({ title: '撤下这篇文章？', message: '撤下后访客将无法读取，编辑内容仍会保留。', confirmText: '撤下' })) return
   const result = await api<{revision: number}>(`/api/admin/posts/${current.id}/unpublish`, 'POST', {revision: current.revision})
   current.revision = result.revision; current.published = null
   await listArticles(); message.value = '文章已撤下，编辑内容仍保留。'
 }) }
 async function deleteArticle() { await action(async () => {
   const current = article.value!
-  if(!confirm(`删除「${current.draft.title}」？草稿与固定链接将一并释放，无法恢复。`)) return
+  if(!await confirmDialog({ title: `删除「${current.draft.title}」？`, message: '草稿与固定链接将一并释放，无法恢复。', confirmText: '删除', danger: true })) return
   await api(`/api/admin/posts/${current.id}/delete`, 'POST', {revision: current.revision})
   article.value = undefined; draft.value = emptyDraft(); lastDraft.value = JSON.stringify(draft.value); preview.value = ''
   await listArticles(); message.value = '文章已删除。'
@@ -327,7 +328,7 @@ async function importMarkdown(event: Event, target: 'post' | 'note') {
   const base = file.name.replace(/\.(md|markdown|txt)$/i, '').toLowerCase()
   const slug = noteSlug(base)
   if (target === 'post') {
-    if (dirty.value && draft.value.title && !confirm('当前文章有未保存修改，导入会替换编辑区，继续吗？')) return
+    if (dirty.value && draft.value.title && !await confirmDialog({ title: '当前文章有未保存的修改', message: '导入会替换编辑区的内容。', confirmText: '仍要导入', danger: true })) return
     article.value = undefined
     // 文章地址由标题自动生成（中文转拼音）
     draft.value = { ...emptyDraft(), title, markdown: text }

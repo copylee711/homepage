@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { confirmDialog } from '../composables/useConfirm'
 import { account, accountApi, accountChecked, features, loadAccount, signedIn, signOut } from '../account'
 import type { AccountEntry, AccountUser } from '../account'
 import { fetchJson } from '../content'
@@ -139,7 +140,7 @@ const removeFavorite = (item: AccountEntry) => run(async () => {
   favorites.value = favorites.value.filter(entry => entry !== item)
 })
 const clearHistory = () => run(async () => {
-  if (!confirm('清空全部浏览记录？')) return
+  if (!await confirmDialog({ title: '清空浏览记录？', message: '全部浏览记录将被删除，无法恢复。', confirmText: '清空', danger: true })) return
   await accountApi('/history/clear', 'POST'); history.value = []
 })
 const saveName = () => run(async () => {
@@ -162,7 +163,7 @@ const changePassword = () => run(async () => {
   message.value = '密码已修改，其他设备上的登录已退出。'
 })
 const deleteAccount = () => run(async () => {
-  if (!confirm('删除后账户、收藏与浏览记录都无法恢复，确定删除吗？')) return
+  if (!await confirmDialog({ title: '删除账户？', message: '删除后账户、收藏与浏览记录都无法恢复。', confirmText: '删除账户', danger: true })) return
   await accountApi('/delete', 'POST', { password: deletePassword.value })
   account.value = null; deletePassword.value = ''
   message.value = '账户已删除。'

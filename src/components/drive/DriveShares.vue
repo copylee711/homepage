@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { confirmDialog } from '../../composables/useConfirm'
 import { driveApi, formatTime } from '../../drive'
 import type { DriveShare } from '../../drive'
 
@@ -18,7 +19,7 @@ async function copy(share: DriveShare) {
   try { await navigator.clipboard.writeText(share.url); notice.value = '链接已复制' } catch { error.value = '复制失败，请手动复制' }
 }
 async function remove(share: DriveShare) {
-  if (!confirm(`取消分享「${share.name}」？链接会立即失效。`)) return
+  if (!await confirmDialog({ title: `取消分享「${share.name}」？`, message: '分享链接会立即失效。', confirmText: '取消分享', cancelText: '保留', danger: true })) return
   try { await driveApi(`/shares/${share.id}/remove`, 'POST'); items.value = items.value.filter(item => item !== share); notice.value = '已取消分享' }
   catch (err) { error.value = err instanceof Error ? err.message : '操作失败' }
 }

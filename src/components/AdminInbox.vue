@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { formatTime } from '../drive'
 import { onMounted, ref, watch } from 'vue'
+import { confirmDialog } from '../composables/useConfirm'
 import '../styles/admin-panel.css'
 
 type Item = { id: string; category: 'suggestion' | 'bug' | 'other'; content: string; page: string; status: 'new' | 'read' | 'done'; reply: string; created_at: number; replied_at: number | null; user: { id: string; email: string; name: string } }
@@ -41,7 +42,7 @@ const update = (item: Item, next: Item['status'], reply?: string) => work(async 
   if (reply !== undefined) emit('notify', reply ? '回复已保存，用户会在账户页的反馈记录中看到。' : '回复已清除。')
 })
 const remove = (item: Item) => work(async () => {
-  if (!confirm('删除这条反馈？用户的反馈记录中也会消失。')) return
+  if (!await confirmDialog({ title: '删除这条反馈？', message: '用户的反馈记录中也会消失。', confirmText: '删除', danger: true })) return
   await props.api(`/api/admin/inbox/${item.id}/remove`, 'POST')
   await load(inbox.value?.page ?? 1)
 })

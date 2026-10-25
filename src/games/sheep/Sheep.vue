@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { confirmDialog } from '../../composables/useConfirm'
 import { formatDuration, localBest, submitScore } from '../api'
 import { sfx } from '../sound'
 import GameOver from '../GameOver.vue'
@@ -111,8 +112,8 @@ function reshuffle() {
   used.value.shuffle = true
 }
 
-function restart() {
-  if (phase.value === 'play' && level.value > 1 && !confirm('放弃当前进度并结算成绩？')) return
+async function restart() {
+  if (phase.value === 'play' && level.value > 1 && !await confirmDialog({ title: '重新开始？', message: '将放弃当前进度并结算成绩。', confirmText: '重开' })) return
   if (phase.value === 'play' && level.value > 1) { lose(); return }
   start(1)
 }

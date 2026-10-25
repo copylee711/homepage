@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { confirmDialog } from '../composables/useConfirm'
 import { formatSize } from '../drive'
 import type { DriveMount, StorageSummary } from '../drive'
 import '../styles/admin-panel.css'
@@ -63,7 +64,7 @@ const updateMount = (user: Row, mount: DriveMount, quotaMb: number, readOnly: bo
   emit('notify', `挂载点 ${mount.path} 已更新。`)
 })
 const removeMount = (user: Row, mount: DriveMount) => work(async () => {
-  if (!confirm(`移除挂载点 ${mount.path}？只解除挂载，OSS 上的文件不会删除。`)) return
+  if (!await confirmDialog({ title: `移除挂载点 ${mount.path}？`, message: '只解除挂载，OSS 上的文件不会删除。', confirmText: '移除', danger: true })) return
   replace(await props.api<Row>(`/api/admin/storage/users/${user.id}/mounts/${mount.id}/remove`, 'POST'))
   emit('notify', `挂载点 ${mount.path} 已移除。`)
 })

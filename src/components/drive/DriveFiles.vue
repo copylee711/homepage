@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { confirmDialog } from '../../composables/useConfirm'
 import { baseName, downloadUrl, driveApi, formatSize, isMobile, joinPath, parentPath, upload, viewportWidth, zipUrl } from '../../drive'
 import type { DriveEntry, DriveListing, UploadTask } from '../../drive'
 import DriveDialog from './DriveDialog.vue'
@@ -142,7 +143,7 @@ async function act(work: () => Promise<void>, success?: string) {
 }
 const remove = () => act(async () => {
   const names = chosen.value.map(item => item.name)
-  if (!confirm(`确定删除 ${names.length > 3 ? `${names.slice(0, 3).join('、')} 等 ${names.length} 项` : names.join('、')}？删除后无法恢复。`)) return
+  if (!await confirmDialog({ title: `删除 ${names.length > 3 ? `${names.slice(0, 3).join('、')} 等 ${names.length} 项` : names.join('、')}？`, message: '删除后无法恢复。', confirmText: '删除', danger: true })) return
   await driveApi('/delete', 'POST', { paths: chosen.value.map(item => item.path) })
   await load(); emit('changed')
 }, '已删除')
@@ -167,13 +168,13 @@ async function transferred() { dialog.value = null; await load(); emit('changed'
 
 // —— 上传 ——
 
-function enqueue(files: { file: File; relative: string }[]) {
+async function enqueue(files: { file: File; relative: string }[]) {
   if (readOnly.value) { error.value = '该目录只读，不能上传'; return }
   if (!files.length) return
   const base = path.value
   const existing = new Set((listing.value?.items ?? []).map(item => item.name))
   const clashes = files.filter(item => !item.relative.includes('/') && existing.has(item.relative)).length
-  if (clashes && !confirm(`有 ${clashes} 个文件与当前目录中的同名文件重复，继续上传将覆盖它们。`)) return
+  if (clashes && !await confirmDialog({ title: '覆盖同名文件？', message: `有 ${clashes} 个文件与当前目录中的同名文件重复，继续上传将覆盖它们。`, confirmText: '覆盖并上传', danger: true })) return
   for (const { file, relative } of files) {
     tasks.push({ id: crypto.randomUUID(), name: relative, target: joinPath(base, relative), size: file.size, sent: 0, state: 'waiting', file })
   }

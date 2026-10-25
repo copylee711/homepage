@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { confirmDialog } from '../composables/useConfirm'
 import { accountApi } from '../account'
 import type { HostedImage, ImageLimits, ImageToken } from '../account'
 
@@ -57,7 +58,7 @@ async function copy(text: string, notify = true) {
   catch { if (notify) error.value = '复制失败，请手动选择文本复制' }
 }
 const remove = (item: HostedImage) => run(async () => {
-  if (!confirm('删除后这张图片的链接将失效，引用它的文章会显示破图。确定删除吗？')) return
+  if (!await confirmDialog({ title: '删除这张图片？', message: '图片链接将失效，引用它的文章会显示破图。', confirmText: '删除', danger: true })) return
   await accountApi(`/images/${item.id}/remove`, 'POST')
   await load(items.value.length === 1 && page.value > 1 ? page.value - 1 : page.value)
   message.value = '图片已删除。'
@@ -69,7 +70,7 @@ const createToken = () => run(async () => {
   message.value = '令牌已创建，请立即复制，它只会显示这一次。'
 })
 const revokeToken = (token: ImageToken) => run(async () => {
-  if (!confirm(`撤销「${token.name}」后，使用它的客户端将无法继续上传。确定吗？`)) return
+  if (!await confirmDialog({ title: `撤销「${token.name}」？`, message: '使用这个令牌的客户端将无法继续上传。', confirmText: '撤销', danger: true })) return
   await accountApi(`/images/tokens/${token.id}/remove`, 'POST')
   await load(); message.value = '令牌已撤销。'
 })

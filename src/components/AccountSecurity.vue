@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { confirmDialog } from '../composables/useConfirm'
 import { accountApi } from '../account'
 import { passkeyAvailable, usePasskey } from '../passkeys'
 
@@ -29,7 +30,7 @@ function done(text: string) { otp.value = ''; message.value = text }
 
 const factor = (operation: 'setup' | 'enable' | 'disable' | 'recovery') => run(async () => {
   requirePassword()
-  if (operation === 'disable' && !confirm('关闭后登录只需要密码，确定关闭两步验证吗？')) return
+  if (operation === 'disable' && !await confirmDialog({ title: '关闭两步验证？', message: '关闭后登录只需要密码。', confirmText: '关闭', danger: true })) return
   const result = await accountApi<{ secret?: string; qr?: string; recovery_codes?: string[] }>(`/security/2fa/${operation}`, 'POST', proof())
   if (operation === 'setup') { enrollment.value = { secret: result.secret!, qr: result.qr! }; done('请用验证器 App 扫描二维码，然后输入 6 位验证码确认。'); return }
   enrollment.value = undefined; recoveryCodes.value = result.recovery_codes ?? []
@@ -45,7 +46,7 @@ const addPasskey = () => run(async () => {
 })
 const removePasskey = (id: string, name: string) => run(async () => {
   requirePassword()
-  if (!confirm(`撤销「${name}」后它将不能再登录，确定吗？`)) return
+  if (!await confirmDialog({ title: `撤销「${name}」？`, message: '撤销后这个 Passkey 将不能再登录。', confirmText: '撤销', danger: true })) return
   security.value = await accountApi<SecurityState>(`/security/passkeys/${encodeURIComponent(id)}/remove`, 'POST', proof())
   done('Passkey 已撤销，其他设备上的登录已退出。')
 })
