@@ -1,3 +1,5 @@
+/* 手机上云盘有底部标签栏，不再显示站点页脚。 */
+@media (max-width:760px) { .drive-footer { display:none; } }
 /* 云盘界面共用控件（d- 前缀），弹窗通过 Teleport 渲染到 body 也能使用。 */
 .d-btn { display:inline-flex; align-items:center; justify-content:center; gap:7px; padding:8px 14px; border:1px solid color-mix(in srgb,var(--line-strong) 70%,transparent); border-radius:10px; background:var(--surface); color:var(--text); font:500 13px var(--font); white-space:nowrap; cursor:pointer; text-decoration:none; transition:border-color .2s,color .2s,background .2s,transform .2s var(--ease); }
 .d-btn:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }

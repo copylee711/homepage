@@ -1,3 +1,4 @@
+import { ref } from 'vue'
 import { account, csrfToken, loadAccount } from './account'
 import { fetchJson } from './content'
 
@@ -164,3 +165,12 @@ export const termsApi = {
     body: JSON.stringify({ version }),
   }),
 }
+
+/** 手机宽度（与样式里的 760px 断点一致）：文件管理切换为移动端布局。 */
+const narrow = matchMedia('(max-width: 760px)')
+export const isMobile = ref(narrow.matches)
+narrow.addEventListener('change', event => { isMobile.value = event.matches })
+
+/** 视口宽度：移动端文件名按可用宽度从中间省略。 */
+export const viewportWidth = ref(innerWidth)
+addEventListener('resize', () => { viewportWidth.value = innerWidth }, { passive: true })

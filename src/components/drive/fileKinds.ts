@@ -32,3 +32,28 @@ export const kindIcons: Record<FileKind, string> = {
 }
 
 export const previewable = (kind: FileKind) => ['image', 'video', 'audio', 'pdf', 'text'].includes(kind)
+
+/** 拆出扩展名（不含点），用于截断时保留后缀；以点开头或过长的后缀不算。 */
+export function splitName(name: string): [string, string] {
+  const dot = name.lastIndexOf('.')
+  if (dot <= 0 || name.length - dot > 10) return [name, '']
+  return [name.slice(0, dot), name.slice(dot)]
+}
+
+// 按显示宽度计数：全角字符约占两个半角字符。
+const units = (text: string) => [...text].reduce((sum, char) => sum + (/[⺀-￿]/.test(char) ? 2 : 1), 0)
+
+/** 超出预算时从中间省略，保留开头、结尾几个字与扩展名，例如「2026年全国大学生…初赛通知.pdf」。 */
+export function middleTrim(name: string, budget: number): string {
+  if (units(name) <= budget) return name
+  const [stem, ext] = splitName(name)
+  const chars = [...stem]
+  let tail = ''
+  for (let i = chars.length - 1; i >= 0 && units(tail) < 6; i--) tail = chars[i] + tail
+  let head = ''
+  for (const char of chars) {
+    if (units(head + char) + units(tail) + units(ext) + 2 > budget) break
+    head += char
+  }
+  return `${head}…${tail}${ext}`
+}

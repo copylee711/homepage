@@ -39,6 +39,14 @@ header { display:flex; align-items:flex-start; justify-content:space-between; ga
 h2 { margin:4px 0 0; font-size:22px; letter-spacing:-.01em; overflow-wrap:anywhere; }
 .close { flex:none; width:32px; height:32px; border:0; border-radius:8px; background:none; color:var(--muted); font-size:22px; line-height:1; cursor:pointer; }
 .close:hover { background:var(--bg-tint); color:var(--text); }
+/* 手机上改为从底部弹出的面板，便于单手操作。 */
+@media (max-width:760px) {
+  .backdrop { place-items:end stretch; padding:0; }
+  .dialog,.dialog.wide { width:100%; max-height:88vh; padding:10px 20px calc(20px + env(safe-area-inset-bottom)); border-bottom:0; border-radius:22px 22px 0 0; animation:sheet .32s var(--ease); }
+  .dialog::before { content:''; display:block; width:36px; height:4px; margin:0 auto 14px; border-radius:2px; background:var(--line-strong); }
+  h2 { font-size:19px; }
+}
+@keyframes sheet { from { transform:translateY(100%); } }
 @keyframes fade { from { opacity:0; } }
 @keyframes rise { from { opacity:0; transform:translateY(12px) scale(.98); } }
 @media (prefers-reduced-motion: reduce) { .backdrop,.dialog { animation:none; } }

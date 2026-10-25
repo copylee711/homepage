@@ -338,3 +338,18 @@ def test_terms_gate_drive_and_images(site):  # noqa: F811
     assert client.post("/api/account/images", content=picture(), headers=headers).status_code == 200
     row = client.get("/api/admin/storage", headers=admin).json()["users"]
     assert next(u for u in row if u["id"] == uid)["storage"]["terms_accepted_at"]
+
+
+def test_info_counts_folder_tree(drive):
+    client, headers, _, _ = drive
+    client.post("/api/drive/mkdir", json={"path": "/docs/sub", "parents": True}, headers=headers)
+    put_file(client, headers, "/docs/a.txt", b"12345")
+    put_file(client, headers, "/docs/sub/b.txt", b"123")
+    client.post("/api/drive/shares", headers=headers, json={"paths": ["/docs"], "mode": "read"})
+    data = client.get("/api/drive/info", params={"path": "/docs"}).json()
+    assert data["dir"] and data["parent"] == "/" and data["shares"] == 1
+    assert data["tree"] == {"size": 8, "files": 2, "folders": 1, "partial": False}
+    assert data["mount"]["kind"] == "local" and data["mount"]["read_only"] is False
+    single = client.get("/api/drive/info", params={"path": "/docs/sub/b.txt"}).json()
+    assert single["size"] == 3 and "tree" not in single and single["parent"] == "/docs/sub"
+    assert client.get("/api/drive/info", params={"path": "/nope"}).status_code == 404

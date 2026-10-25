@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { fetchJson } from '../content'
 import AdminInbox from './AdminInbox.vue'
 import AdminStorage from './AdminStorage.vue'
-import type { HostedImage, ImageToken } from '../account'
+import type { HostedImage } from '../account'
 import type { SiteContent } from '../types'
 import { useTheme } from '../composables/useTheme'
 import { UNKNOWN_PASSKEY, forgetPasskey, passkeyAvailable, usePasskey } from '../passkeys'
@@ -122,25 +122,19 @@ type SiteUser = {id:string; email:string; name:string; avatar:string; created_at
 const accountsConfig = ref<AccountsConfig>(), domainsText = ref(''), smtpSecret = ref(''), testTo = ref(''), siteUsers = ref<SiteUser[]>([])
 const MiB = 1024 * 1024
 const mib = (bytes: number) => bytes >= MiB ? `${(bytes / MiB).toFixed(1)} MiB` : `${Math.max(1, Math.round(bytes / 1024))} KiB`
-type ImagesState = {items: HostedImage[]; total: number; page: number; page_size: number; usage: {owner:string; label:string; count:number; size:number}[]; tokens: ImageToken[]; upload_url: string}
-const imagesState = ref<ImagesState>(), imageOwner = ref(''), adminTokenName = ref('PicList'), adminFreshToken = ref('')
+type ImagesState = {items: HostedImage[]; total: number; page: number; page_size: number; usage: {owner:string; label:string; count:number; size:number}[]}
+const imagesState = ref<ImagesState>(), imageOwner = ref('')
 const imagePages = computed(() => Math.max(1, Math.ceil((imagesState.value?.total ?? 0) / (imagesState.value?.page_size ?? 40))))
 async function loadImages(page = imagesState.value?.page ?? 1) {
   imagesState.value = await api<ImagesState>(`/api/admin/images?page=${page}&owner=${encodeURIComponent(imageOwner.value)}`)
 }
+// 手机上导航横排滚动，切换后把当前项滚到可见处。
+watch(tab, () => nextTick(() => document.querySelector('.admin-nav > button.selected')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' })))
 watch(tab, next => { if (next === 'storage') void loadImages(1).catch(err => { error.value = err instanceof Error ? err.message : '图床加载失败' }) })
 watch(imageOwner, () => { void action(() => loadImages(1)) })
 async function removeImage(item: HostedImage) { await action(async () => {
   if (!confirm('删除后这张图片的链接将失效，引用它的文章会显示破图。确定删除吗？')) return
   await api(`/api/admin/images/${item.id}/remove`, 'POST'); await loadImages(); message.value = '图片已删除。'
-}) }
-async function createAdminToken() { await action(async () => {
-  adminFreshToken.value = (await api<{token:string}>('/api/admin/images/tokens', 'POST', {name: adminTokenName.value})).token
-  await loadImages(); message.value = '令牌已创建，请立即复制，它只会显示这一次。'
-}) }
-async function revokeAdminToken(token: ImageToken) { await action(async () => {
-  if (!confirm(`撤销「${token.name}」后，使用它的客户端将无法继续上传。确定吗？`)) return
-  await api(`/api/admin/images/tokens/${token.id}/remove`, 'POST'); await loadImages(); message.value = '令牌已撤销。'
 }) }
 async function copyText(text: string) {
   try { await navigator.clipboard.writeText(text); message.value = '已复制到剪贴板。' } catch { error.value = '复制失败，请手动复制' }
@@ -479,11 +473,6 @@ runuser -u copylee -- .venv/bin/python -m app.cli reset-security --email you@exa
             <ul class="note-list"><li v-for="row in imagesState.usage" :key="row.owner"><div class="note-info"><strong>{{ row.label }}</strong><span>{{ row.count }} 张 · {{ mib(row.size) }}</span></div><button @click="imageOwner = row.owner">只看此用户</button></li></ul>
             <p v-if="!imagesState.usage.length" class="subtle">还没有图片。</p>
           </section>
-          <section v-if="imagesState" class="edit-card"><h2>管理员上传令牌</h2><p class="subtle">用于 PicList / Typora。上传地址 <code>{{ imagesState.upload_url }}</code>，文件字段 <code>file</code>，请求头 <code>Authorization: Bearer 令牌</code>，返回 URL 路径 <code>url</code>。</p>
-            <div class="test-mail"><input v-model="adminTokenName" maxlength="40" aria-label="令牌名称" placeholder="令牌名称"><button @click="createAdminToken">创建令牌</button></div>
-            <div v-if="adminFreshToken" class="key-row"><code class="fresh-token">{{ adminFreshToken }}</code><div class="buttons"><button @click="copyText(adminFreshToken)">复制</button><button @click="adminFreshToken=''">我已保存</button></div></div>
-            <div v-for="token in imagesState.tokens" :key="token.id" class="key-row"><div><strong>{{ token.name }}</strong><p class="field-hint">创建于 {{ token.created_at.slice(0,10) }} · {{ token.last_used ? `最近使用 ${token.last_used.slice(0,10)}` : '尚未使用' }}</p></div><button class="danger" @click="revokeAdminToken(token)">撤销</button></div>
-          </section>
           <section v-if="imagesState" class="edit-card"><h2>全部图片<span class="security-status">{{ imagesState.total }} 张</span></h2>
             <div class="buttons"><AnimatedSelect v-model="imageOwner" label="上传者" :options="[{value:'',label:'全部'}, ...imagesState.usage.map(row => ({value:row.owner,label:row.label}))]" /></div>
             <ul class="image-grid"><li v-for="item in imagesState.items" :key="item.id"><a :href="item.url" target="_blank" rel="noopener"><img :src="item.url" :alt="`图片 ${item.id}`" loading="lazy"></a>
@@ -714,5 +703,5 @@ input:read-only { color:var(--muted); }
 .editor-actions { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:28px 0 14px; }.editor-actions>a { font-size:13px; color:var(--accent); }
 .preview-panel { margin-top:28px; padding:28px; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); }.preview-panel h2 { margin-bottom:24px; }
 @media(max-width:1050px) { .writing-layout { grid-template-columns:1fr; }.article-sidebar { border-right:0; border-bottom:1px solid var(--line); max-height:220px; overflow:auto; }.admin-layout { grid-template-columns:180px 1fr; } }
-@media(max-width:700px) { .admin-top { padding:0 16px; }.admin-brand span { display:none; }.admin-layout { grid-template-columns:1fr; }.admin-nav { padding:16px 20px; border-right:0; display:flex; gap:6px; overflow:auto; }.admin-nav>.eyebrow,.nav-note { display:none; }.admin-nav { position:static; height:auto; }.admin-nav>button { white-space:nowrap; margin:0; width:auto; padding:9px 12px; }.admin-nav>button.selected::before { display:none; }.edit-card,.sync-panel,.note-editor { padding:20px; }.login-panel { margin:6vh 16px; padding:32px 24px; }.admin-main { padding:24px 20px; }.form-grid { grid-template-columns:1fr; }.section-head,.sync-panel { align-items:flex-start; flex-direction:column; }.social-row { grid-template-columns:1fr; }.note-list li { flex-direction:column; align-items:flex-start; }.card-head { flex-wrap:wrap; } }
+@media(max-width:700px) { .admin-top { padding:0 16px; }.admin-brand span { display:none; }.admin-layout { grid-template-columns:1fr; }.admin-nav { padding:16px 20px; border-right:0; display:flex; gap:6px; overflow:auto; }.admin-nav>.eyebrow,.nav-note { display:none; }.admin-nav { position:sticky; top:64px; z-index:15; height:auto; padding:10px 16px; background:var(--header-bg); -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px); border-bottom:1px solid var(--line); scrollbar-width:none; }.admin-nav::-webkit-scrollbar { display:none; }.admin-nav>button { border-radius:999px; }.admin-main h1 { font-size:26px; }.admin-nav>button { white-space:nowrap; margin:0; width:auto; padding:9px 12px; }.admin-nav>button.selected::before { display:none; }.edit-card,.sync-panel,.note-editor { padding:20px; }.login-panel { margin:6vh 16px; padding:32px 24px; }.admin-main { padding:20px 16px 48px; }.form-grid { grid-template-columns:1fr; }.section-head,.sync-panel { align-items:flex-start; flex-direction:column; }.social-row { grid-template-columns:1fr; }.note-list li { flex-direction:column; align-items:flex-start; }.card-head { flex-wrap:wrap; } }
 </style>

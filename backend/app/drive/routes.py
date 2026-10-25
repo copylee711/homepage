@@ -18,7 +18,15 @@ from .. import audit, storage, storage_terms
 from ..accounts import client_ip, current_user, record_failure, throttle
 from ..auth import check_origin, current_session, digest
 from ..images import _Sink
-from ..models import DriveAccount, DriveMount, DriveUpload, HostedImage, StoragePlan, User
+from ..models import (
+    DriveAccount,
+    DriveMount,
+    DriveShare,
+    DriveUpload,
+    HostedImage,
+    StoragePlan,
+    User,
+)
 from ..schemas import (
     AppPasswordCreate,
     DriveLogin,
@@ -177,6 +185,47 @@ def overview(request: Request, session: Session = Depends(database)):
         return {"enabled": True, "storage": summary}
     return {"enabled": True, "storage": summary, "mounts": accounts.mounts(session, user.id),
             "account": accounts.account_view(session, settings_of(request), user)}
+
+
+MOUNT_LABELS = {"local": "本地磁盘", "oss": "阿里云 OSS", "images": "图床"}
+# 统计文件夹时最多遍历的条目数，避免超大目录（尤其是 OSS）拖慢请求。
+INFO_LIMIT = 20000
+
+
+def tree_stats(drive: Drive, path: str) -> dict:
+    size = files = folders = 0
+    stack, seen = [path], 0
+    while stack:
+        current = stack.pop()
+        for entry in drive.list(current):
+            seen += 1
+            if seen > INFO_LIMIT:
+                return {"size": size, "files": files, "folders": folders, "partial": True}
+            if entry.is_dir:
+                folders += 1
+                stack.append(paths.join(current, entry.name))
+            else:
+                size, files = size + entry.size, files + 1
+    return {"size": size, "files": files, "folders": folders, "partial": False}
+
+
+@router.get("/api/drive/info")
+async def info(request: Request, path: str = "/", session: Session = Depends(database)):
+    """文件或文件夹属性：文件夹会递归统计总大小与文件数。"""
+    user, drive = user_drive(request, session)
+    path = paths.clean(path)
+    entry = drive.stat(path)
+    mount, _ = drive.resolve(path)
+    shares = session.exec(select(DriveShare).where(DriveShare.user_id == user.id)).all()
+    result = {**entry_view(entry, path), "name": paths.name(path) or "全部文件",
+              "parent": paths.parent(path) if path != "/" else "",
+              "mount": {"path": mount.path, "kind": mount.kind,
+                        "label": MOUNT_LABELS.get(mount.kind, mount.kind),
+                        "read_only": mount.read_only or mount.backend.read_only},
+              "shares": sum(1 for share in shares if path in share.paths)}
+    if entry.is_dir:
+        result["tree"] = await asyncio.to_thread(tree_stats, drive, path)
+    return result
 
 
 @router.get("/api/drive/list")

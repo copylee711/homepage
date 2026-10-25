@@ -101,5 +101,15 @@ time { color:var(--faint); font:12px var(--font-mono); white-space:nowrap; }
 .reply { margin:16px 22px 0; }
 .actions { margin:14px 22px 20px; }
 .pager { justify-content:center; margin-top:16px; }
-@media (max-width:860px) { .message summary { grid-template-columns:10px 1fr auto; } .preview,.message summary .tag { display:none; } }
+@media (max-width:860px) {
+  .message summary { grid-template-columns:10px minmax(0,1fr) auto; grid-template-areas:'dot who time' '. preview preview'; row-gap:6px; padding:14px 16px; }
+  .dot { grid-area:dot; } .who { grid-area:who; } time { grid-area:time; }
+  .preview { grid-area:preview; }
+  .message summary .tag { display:none; }
+  .body { margin:14px 16px 4px; }
+  .message > .field-hint { margin:0 16px; }
+  .reply { margin:14px 16px 0; }
+  .actions { display:grid; grid-template-columns:1fr 1fr; margin:12px 16px 16px; }
+  .actions .primary { grid-column:1 / -1; }
+}
 </style>

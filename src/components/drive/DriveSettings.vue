@@ -154,4 +154,12 @@ dd { margin:0; min-width:0; overflow-wrap:anywhere; }
 .steps ol { margin:8px 0 0; padding-left:20px; }
 .steps a { color:var(--accent); }
 .steps pre { margin:8px 0 14px; padding:12px 14px; overflow:auto; border:1px solid var(--line); border-radius:10px; background:var(--bg); font:12px/1.7 var(--font-mono); }
+@media (max-width:760px) {
+  header h2 { font-size:22px; }
+  .cards { grid-template-columns:1fr; gap:12px; }
+  .card { padding:18px 16px; border-radius:16px; }
+  .tabs { display:flex; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
+  .tabs button { flex:none; white-space:nowrap; }
+  .creds small { font-family:var(--font); }
+}
 </style>

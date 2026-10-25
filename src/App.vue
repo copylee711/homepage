@@ -63,7 +63,7 @@ watch(ready, async value => {
   <template v-else-if="ready && (isDrive || isShare)">
     <DrivePage v-if="isDrive" />
     <SharePage v-else />
-    <SiteFooter />
+    <SiteFooter :class="{ 'drive-footer': isDrive }" />
   </template>
   <template v-else-if="ready">
   <SiteHeader />

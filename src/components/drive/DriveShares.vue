@@ -59,5 +59,12 @@ li.expired .info { opacity:.55; }
 .tag.warn { border-color:rgba(209,92,92,.4); color:#d15c5c; }
 .buttons { display:flex; flex-wrap:wrap; gap:8px; flex:none; }
 .empty { padding:32px 0; }
-@media (max-width:760px) { li { flex-direction:column; align-items:flex-start; } }
+@media (max-width:760px) {
+  h2 { font-size:22px; }
+  ul { border-top:0; }
+  li { flex-direction:column; align-items:stretch; gap:12px; margin-top:12px; padding:16px; border:1px solid var(--line); border-radius:16px; background:var(--surface); }
+  .info small { font-family:var(--font); line-height:1.6; }
+  .buttons { display:grid; grid-template-columns:repeat(3,1fr); }
+  .buttons .d-btn { padding:9px 4px; }
+}
 </style>

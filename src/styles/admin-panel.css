@@ -29,4 +29,13 @@
 .admin-panel .tag { margin-left:10px; padding:1px 8px; border:1px solid var(--line); border-radius:999px; font-size:11px; font-weight:400; color:var(--muted); }
 .admin-panel .tag.accent { border-color:var(--accent); color:var(--accent); }
 .admin-panel code { font:12px var(--font-mono); overflow-wrap:anywhere; }
-@media (max-width:700px) { .admin-panel .section-head { flex-direction:column; align-items:flex-start; } .admin-panel .edit-card { padding:20px; } }
+@media (max-width:700px) {
+  .admin-panel .section-head { flex-direction:column; align-items:stretch; gap:14px; margin-bottom:18px; }
+  .admin-panel h1 { font-size:26px; }
+  .admin-panel .edit-card { padding:18px 16px; border-radius:16px; }
+  .admin-panel button { padding:8px 13px; }
+  /* 标题旁的筛选与操作按钮保持单行，可横向滑动 */
+  .admin-panel .section-head .buttons { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
+  .admin-panel .section-head .buttons::-webkit-scrollbar { display:none; }
+  .admin-panel .section-head .buttons > * { flex:none; }
+}

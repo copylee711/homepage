@@ -174,5 +174,16 @@ onMounted(() => work(load))
 .mounts td { padding:10px 6px; border-bottom:1px solid var(--line); vertical-align:middle; }
 .mounts td input[type=number] { width:110px; padding:6px 8px; }
 .add { margin-top:14px; }
+@media (max-width:700px) {
+  .figures { grid-template-columns:1fr 1fr; }
+  .user header { flex-direction:column; gap:10px; }
+  .usage { justify-content:flex-start; }
+  .usage .field-hint { text-align:left; }
+  .plan { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .plan .switch { margin:0; }
+  .inline input { width:100%; }
+  .inline.grow { grid-column:1 / -1; min-width:0; }
+  .plan > button:only-of-type { grid-column:1 / -1; }
+}
 @media (max-width:860px) { .mounts thead { display:none; } .mounts tr { display:grid; grid-template-columns:1fr 1fr; padding:8px 0; border-bottom:1px solid var(--line); } .mounts td { border:0; padding:4px 6px; } }
 </style>

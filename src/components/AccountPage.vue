@@ -398,5 +398,21 @@ button:disabled { opacity:.5; cursor:default; }
 .settings .primary { width:auto; padding:11px 22px; }
 .danger-zone { border-color:rgba(209,92,92,.25) !important; }
 @media (max-width: 860px) { .dashboard,.auth-layout { grid-template-columns:1fr; } .perks { margin-top:8px; } .profile { position:static; } }
+/* 手机：资料卡改为横排紧凑布局，标签栏单行可横向滑动。 */
+@media (max-width: 560px) {
+  .profile { display:grid; grid-template-columns:64px minmax(0,1fr); column-gap:16px; align-items:center; padding:20px; text-align:left; }
+  .avatar { grid-row:1 / 4; width:64px; height:64px; margin:0; font-size:26px; box-shadow:0 0 0 4px var(--accent-soft); }
+  .avatar i { display:none; }
+  .name-form { margin:0; }
+  .name-form input { min-height:34px !important; padding:4px 8px !important; margin-left:-8px; text-align:left; }
+  .profile > :not(.avatar,.name-form,.email,.joined) { grid-column:1 / -1; }
+  .stats { margin-top:16px; text-align:center; }
+  .stats div { padding:10px 0; }
+  .stats strong { font-size:19px; }
+  .game-bests { margin-top:10px; }
+  .tabs { overflow-x:auto; scrollbar-width:none; }
+  .tabs::-webkit-scrollbar { display:none; }
+  .tabs button { flex:1 0 auto; white-space:nowrap; padding:9px 14px; }
+}
 @media (max-width: 520px) { .auth-card { padding:24px 20px; } .entries li { grid-template-columns:1fr auto; gap:6px 12px; } .entries time { grid-column:1; } .kind { grid-column:1 / -1; } }
 </style>
