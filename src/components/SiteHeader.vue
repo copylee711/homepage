@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { account, features, loadAccount } from '../account'
 import { site } from '../content'
 import { useTheme } from '../composables/useTheme'
@@ -8,62 +8,90 @@ import LogoMark from './LogoMark.vue'
 
 const { theme, toggle } = useTheme()
 
-const links = [
-  { id: 'top', label: 'Home' },
-  { id: 'projects', label: 'Projects' },
-]
 const path = location.pathname.replace(/\/$/, '')
-const isScut = path === '/scut'
 const isAccount = path === '/account'
-const isGames = path.startsWith('/games')
-const isDocs = path === '/docs'
 // 非首页时，锚点链接回到首页对应区块。
 const onHome = path === ''
-// 入口区没有单独的导航项，滚动到那里时仍高亮 Home
+// 首页上滚动到作品区时高亮 Make；入口区没有单独的导航项，仍算 Home。
 const sections = ['top', 'portals', 'projects']
 
-const scrolled = ref(false)
-const active = ref('top')
-const scroller = ref<HTMLElement>()
-const fadeStart = ref(false)
-const fadeEnd = ref(false)
+interface Item { label: string; href: string; hint: string; external?: boolean; current?: boolean }
+interface Group { id: string; label: string; items: Item[] }
 
-// 窄屏下导航横向滚动：两端渐隐提示，并让当前栏目保持可见。
-function updateEdges() {
-  const el = scroller.value
-  if (!el) return
-  fadeStart.value = el.scrollLeft > 4
-  fadeEnd.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 4
+const scrolled = ref(false)
+const section = ref('top')
+const openGroup = ref('')
+
+// 导航分三组：读的（文章、笔记、SCUT 通知）、做的（作品、小游戏）、登录后的工作区（团队、文档、云盘）。
+const groups = computed<Group[]>(() => {
+  const result: Group[] = [
+    { id: 'read', label: 'Read', items: [
+      { label: 'Articles', href: '/posts', hint: '长文与随笔' },
+      { label: 'Notes', href: '/notes', hint: '学习笔记' },
+      { label: 'SCUT', href: '/scut', hint: '华工通知聚合', current: path === '/scut' },
+    ] },
+    { id: 'make', label: 'Make', items: [
+      { label: 'Projects', href: `${onHome ? '' : '/'}#projects`, hint: '开源作品', current: onHome && section.value === 'projects' },
+      { label: 'Games', href: '/games', hint: '小游戏', current: path.startsWith('/games') },
+    ] },
+  ]
+  if (account.value) {
+    const workspace: Item[] = [
+      { label: 'Teams', href: '/teams', hint: '团队空间与文件', current: path === '/teams' },
+      { label: 'Docs', href: '/docs', hint: '协作文档', current: path === '/docs' },
+    ]
+    if (features.value.drive && site.value) workspace.push({ label: 'Cloud', href: site.value.cloud, hint: '个人云盘', external: true })
+    result.push({ id: 'workspace', label: 'Workspace', items: workspace })
+  }
+  return result
+})
+const homeActive = computed(() => onHome && section.value !== 'projects')
+const groupActive = (group: Group) => group.items.some(item => item.current)
+
+// 桌面端悬停展开，离开稍等再收起；触屏与键盘点按切换。
+let closeTimer = 0
+function enter(id: string, event: PointerEvent) {
+  if (event.pointerType !== 'mouse') return
+  clearTimeout(closeTimer)
+  openGroup.value = id
 }
-function revealActive() {
-  const el = scroller.value
-  const link = el?.querySelector<HTMLElement>('.active')
-  if (!el || !link || el.scrollWidth <= el.clientWidth) return
-  el.scrollTo({ left: link.offsetLeft - (el.clientWidth - link.offsetWidth) / 2, behavior: 'smooth' })
+function leave(event: PointerEvent) {
+  if (event.pointerType !== 'mouse') return
+  clearTimeout(closeTimer)
+  closeTimer = window.setTimeout(() => { openGroup.value = '' }, 160)
 }
-watch(active, () => nextTick(revealActive))
+// 鼠标悬停时已经展开，点击不再收起；触屏与键盘点击切换。
+function flip(id: string, event: MouseEvent) {
+  if ((event as PointerEvent).pointerType === 'mouse') { clearTimeout(closeTimer); openGroup.value = id; return }
+  openGroup.value = openGroup.value === id ? '' : id
+}
+function onDocument(event: Event) {
+  if (!(event.target as HTMLElement).closest?.('.group')) openGroup.value = ''
+}
+function onKey(event: KeyboardEvent) { if (event.key === 'Escape') openGroup.value = '' }
 
 const onScroll = () => {
   scrolled.value = window.scrollY > 8
-
   let current = 'top'
   for (const id of sections) {
     const el = document.getElementById(id)
     if (el && el.getBoundingClientRect().top <= window.innerHeight * 0.35) current = id
   }
-  active.value = current === 'portals' ? 'top' : current
+  section.value = current
 }
 
 onMounted(() => {
   onScroll()
   window.addEventListener('scroll', onScroll, { passive: true })
-  window.addEventListener('resize', updateEdges, { passive: true })
-  nextTick(() => { updateEdges(); revealActive() })
+  document.addEventListener('pointerdown', onDocument)
+  document.addEventListener('keydown', onKey)
   if (!isAccount) loadAccount()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('scroll', onScroll)
-  window.removeEventListener('resize', updateEdges)
+  document.removeEventListener('pointerdown', onDocument)
+  document.removeEventListener('keydown', onKey)
+  clearTimeout(closeTimer)
 })
 </script>
 
@@ -75,22 +103,20 @@ onBeforeUnmount(() => {
         <span>{{ site.name }}</span>
       </a>
       <nav class="nav" aria-label="主导航">
-        <div ref="scroller" class="nav-scroll" :class="{ 'fade-start': fadeStart, 'fade-end': fadeEnd }" @scroll.passive="updateEdges">
-        <a
-          v-for="link in links"
-          :key="link.id"
-          :href="`${onHome ? '' : '/'}#${link.id}`"
-          :class="{ active: onHome && active === link.id }"
-          :aria-current="onHome && active === link.id ? 'true' : undefined"
-        >
-          {{ link.label }}
-        </a>
-        <a href="/scut" :class="{ active: isScut }" :aria-current="isScut ? 'page' : undefined">SCUT</a>
-        <a href="/games" :class="{ active: isGames }" :aria-current="isGames ? 'page' : undefined">Games</a>
-        <a href="/posts">Articles</a>
-        <a href="/notes">Notes</a>
-        <a v-if="account" href="/docs" :class="{ active: isDocs }" :aria-current="isDocs ? 'page' : undefined">Docs</a>
-        <a v-if="features.drive" :href="site.cloud" target="_blank" rel="noopener">Cloud</a>
+        <div class="links">
+          <a :href="onHome ? '#top' : '/#top'" class="top-link home" :class="{ active: homeActive }" :aria-current="homeActive ? 'true' : undefined">Home</a>
+          <div v-for="group in groups" :key="group.id" class="group" :class="{ open: openGroup === group.id }" @pointerenter="enter(group.id, $event)" @pointerleave="leave">
+            <button type="button" class="top-link" :class="{ active: groupActive(group) }" :aria-expanded="openGroup === group.id" aria-haspopup="true" @click="flip(group.id, $event)">
+              {{ group.label }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
+            </button>
+            <Transition name="drop">
+              <div v-if="openGroup === group.id" class="panel" role="menu">
+                <a v-for="item in group.items" :key="item.label" :href="item.href" role="menuitem" :class="{ current: item.current }" :aria-current="item.current ? 'page' : undefined" :target="item.external ? '_blank' : undefined" :rel="item.external ? 'noopener' : undefined" @click="openGroup = ''">
+                  <strong>{{ item.label }}<span v-if="item.external" aria-hidden="true"> ↗</span></strong><small>{{ item.hint }}</small>
+                </a>
+              </div>
+            </Transition>
+          </div>
         </div>
         <a class="account" :class="{ active: isAccount }" href="/account" :aria-label="account ? `账户：${account.name}` : '登录或注册'" :title="account ? account.name : '登录 / 注册'">
           <img v-if="account?.avatar" :src="account.avatar" alt="">
@@ -164,42 +190,49 @@ onBeforeUnmount(() => {
   color: var(--muted);
 }
 
-/* 栏目多于屏宽时横向滑动，滚动条隐藏，两端渐隐 */
-.nav-scroll {
+.links {
   display: flex;
   align-items: stretch;
-  gap: clamp(16px, 4vw, 40px);
-  min-width: 0;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scrollbar-width: none;
+  gap: clamp(14px, 3vw, 34px);
 }
 
-.nav-scroll::-webkit-scrollbar {
-  display: none;
+.group {
+  position: relative;
+  display: flex;
 }
 
-.nav-scroll.fade-end {
-  mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
-}
-
-.nav-scroll.fade-start {
-  mask-image: linear-gradient(90deg, transparent, #000 28px);
-}
-
-.nav-scroll.fade-start.fade-end {
-  mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent);
-}
-
-.nav a {
+.top-link {
   flex: none;
   position: relative;
   display: inline-flex;
   align-items: center;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
   transition: color 0.2s ease;
 }
 
-.nav a::after {
+.top-link svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.6;
+  transition: transform 0.25s var(--ease);
+}
+
+.group.open .top-link svg {
+  transform: rotate(180deg);
+}
+
+.top-link::after {
   content: '';
   position: absolute;
   inset: auto 0 14px;
@@ -210,13 +243,74 @@ onBeforeUnmount(() => {
   transition: transform 0.4s var(--ease);
 }
 
-.nav a:hover,
-.nav a.active {
+.top-link:hover,
+.group.open .top-link,
+.top-link.active {
   color: var(--text);
 }
 
-.nav a.active::after {
+.top-link.active::after {
   transform: scaleX(1);
+}
+
+/* 下拉面板：标题加一行说明，当前页面高亮 */
+.panel {
+  position: absolute;
+  top: calc(100% - 10px);
+  left: 50%;
+  z-index: 20;
+  display: grid;
+  gap: 2px;
+  min-width: 200px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg);
+  box-shadow: 0 22px 44px -18px rgba(17, 24, 39, 0.35);
+  transform: translateX(-50%);
+}
+
+.panel a {
+  display: grid;
+  gap: 1px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  transition: background-color 0.2s ease;
+}
+
+.panel a:hover,
+.panel a:focus-visible {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.panel a.current {
+  background: var(--accent-soft);
+}
+
+.panel strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.panel a.current strong {
+  color: var(--accent);
+}
+
+.panel small {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.drop-enter-active,
+.drop-leave-active {
+  transition: opacity 0.18s ease, transform 0.22s var(--ease);
+}
+
+.drop-enter-from,
+.drop-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -6px);
 }
 
 .account {
@@ -230,15 +324,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
   color: inherit;
   transition: color 0.2s ease, box-shadow 0.3s ease;
-}
-
-/* 提高优先级，覆盖 .nav a 的 inline-flex；网格轨道须撑满圆形，首字母底色才能铺满 */
-.nav .account {
-  display: inline-grid;
-}
-
-.nav .account::after {
-  display: none;
 }
 
 .account:hover,
@@ -303,11 +388,16 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 760px) {
-  .nav-scroll { gap: 20px; }
+  .links { gap: 16px; }
+  .panel { left: auto; right: -40px; transform: none; }
+  .drop-enter-from, .drop-leave-to { transform: translateY(-6px); }
 }
 
 @media (max-width: 479px) {
-  .nav { margin-left: 12px; }
+  .nav { margin-left: 12px; gap: 10px; }
+  .links { gap: 14px; }
+  /* 窄屏上 Logo 本身就回首页，省掉 Home 给三个分组腾位置 */
+  .home { display: none; }
   .brand { font-size: 16px; }
   .brand span { display: none; }
 }
