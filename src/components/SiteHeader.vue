@@ -22,6 +22,9 @@ interface Group { id: string; label: string; items: Item[] }
 const scrolled = ref(false)
 const section = ref('top')
 const openGroup = ref('')
+const mobileOpen = ref(false)
+const mobileToggle = ref<HTMLButtonElement>()
+function closeMenus() { openGroup.value = ''; mobileOpen.value = false }
 
 // 导航分三组：读的（文章、笔记、SCUT 通知）、做的（作品、小游戏）、登录后的工作区（团队、文档、云盘）。
 const groups = computed<Group[]>(() => {
@@ -76,9 +79,17 @@ function flip(id: string, event: MouseEvent) {
   openGroup.value = openGroup.value === id ? '' : id
 }
 function onDocument(event: Event) {
+  if (!(event.target as HTMLElement).closest?.('.nav')) closeMenus()
   if (!(event.target as HTMLElement).closest?.('.group')) openGroup.value = ''
 }
-function onKey(event: KeyboardEvent) { if (event.key === 'Escape') openGroup.value = '' }
+function onKey(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return
+  if (mobileOpen.value) mobileToggle.value?.focus()
+  closeMenus()
+}
+function onFocus(event: FocusEvent) {
+  if (!(event.relatedTarget as HTMLElement | null)?.closest?.('.nav')) closeMenus()
+}
 
 const onScroll = () => {
   scrolled.value = window.scrollY > 8
@@ -113,16 +124,20 @@ onBeforeUnmount(() => {
         <LogoMark class="logo" />
         <span>{{ site.name }}</span>
       </a>
-      <nav class="nav" aria-label="主导航">
-        <div class="links">
-          <a :href="onHome ? '#top' : '/#top'" class="top-link home" :class="{ active: homeActive }" :aria-current="homeActive ? 'true' : undefined">Home</a>
+      <nav class="nav" aria-label="主导航" @focusout="onFocus">
+        <button ref="mobileToggle" type="button" class="mobile-toggle" :aria-expanded="mobileOpen" aria-controls="site-nav-links" :aria-label="mobileOpen ? '收起导航菜单' : '展开导航菜单'" @click="mobileOpen = !mobileOpen; openGroup = ''">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="mobileOpen ? 'm6 6 12 12M6 18 18 6' : 'M4 6h16M4 12h16M4 18h16'" /></svg>
+          <span v-if="unreadCount" class="dot" aria-hidden="true" />
+        </button>
+        <div id="site-nav-links" class="links" :class="{ 'mobile-open': mobileOpen }">
+          <a :href="onHome ? '#top' : '/#top'" class="top-link home" :class="{ active: homeActive }" :aria-current="homeActive ? 'true' : undefined" @click="closeMenus">Home</a>
           <div v-for="group in groups" :key="group.id" class="group" :class="{ open: openGroup === group.id }" @pointerenter="enter(group.id, $event)" @pointerleave="leave">
             <button type="button" class="top-link" :class="{ active: groupActive(group) }" :aria-expanded="openGroup === group.id" aria-haspopup="true" @click="flip(group.id, $event)">
               {{ group.label }}<span v-if="group.items.some(item => item.dot)" class="dot" aria-hidden="true" /><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
             </button>
             <Transition name="drop">
               <div v-if="openGroup === group.id" class="panel" role="menu">
-                <a v-for="item in group.items" :key="item.label" :href="item.href" role="menuitem" :class="{ current: item.current }" :aria-current="item.current ? 'page' : undefined" :target="item.external ? '_blank' : undefined" :rel="item.external ? 'noopener' : undefined" @click="openGroup = ''">
+                <a v-for="item in group.items" :key="item.label" :href="item.href" role="menuitem" :class="{ current: item.current }" :aria-current="item.current ? 'page' : undefined" :target="item.external ? '_blank' : undefined" :rel="item.external ? 'noopener' : undefined" @click="closeMenus">
                   <strong>{{ item.label }}<span v-if="item.external" aria-hidden="true"> ↗</span><span v-if="item.dot" class="dot" aria-hidden="true" /></strong><small>{{ item.hint }}</small>
                 </a>
               </div>
@@ -206,6 +221,8 @@ onBeforeUnmount(() => {
   align-items: stretch;
   gap: clamp(14px, 3vw, 34px);
 }
+
+.mobile-toggle { display: none; }
 
 .group {
   position: relative;
@@ -414,17 +431,44 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 760px) {
-  .links { gap: 16px; }
-  .panel { left: auto; right: -40px; transform: none; }
-  .drop-enter-from, .drop-leave-to { transform: translateY(-6px); }
-}
-
-@media (max-width: 479px) {
   .nav { margin-left: 12px; gap: 10px; }
-  .links { gap: 14px; }
-  /* 窄屏上 Logo 本身就回首页，省掉 Home 给三个分组腾位置 */
-  .home { display: none; }
-  .brand { font-size: 16px; }
-  .brand span { display: none; }
+  .mobile-toggle {
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    align-self: center;
+    width: 44px;
+    height: 44px;
+    padding: 10px;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+  }
+  .mobile-toggle svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+  .mobile-toggle .dot { position: absolute; top: 12px; right: 6px; margin: 0; }
+  .links {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    left: var(--gutter);
+    right: var(--gutter);
+    max-height: calc(100dvh - var(--header-h) - 24px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--bg);
+    box-shadow: 0 22px 44px -18px rgba(17, 24, 39, 0.35);
+  }
+  .links.mobile-open { display: grid; gap: 2px; }
+  .group { display: block; }
+  .top-link { width: 100%; min-height: 44px; justify-content: space-between; padding: 0 12px; }
+  .top-link::after { display: none; }
+  .panel { position: static; min-width: 0; padding: 0 6px 6px; border: 0; box-shadow: none; transform: none; }
+  .panel a { min-height: 48px; }
+  .drop-enter-from, .drop-leave-to { transform: translateY(-6px); }
 }
 </style>

@@ -89,12 +89,24 @@ const fullHref = (url: string) => (/^([a-z][\w+.-]*:|\/|#)/i.test(url) ? url : `
 // \u94FE\u63A5\u6587\u5B57\u4E3A\u7A7A\u65F6\u663E\u793A\u5730\u5740\u672C\u8EAB\u3002
 const linkText = (schema: Schema, text: string, url: string) =>
   schema.text(text || url, [schema.marks.link.create({ href: fullHref(url) })])
-// 标题：# 后接空格（含中文输入法的全角空格）变成标题；与 Tiptap 自带规则不同，只打一个 # 就回车不会变成标题。
+// 标题：兼容标准的「# 标题」和紧贴输入的「#标题」，裸 # 保持文字。
 const MarkdownHeading = Heading.extend({
   addInputRules() {
-    return this.options.levels.map(level => textblockTypeInputRule({
-      find: new RegExp(`^(#{1,${level}})[ \\u3000]$`), type: this.type, getAttributes: { level },
-    }))
+    return [
+      ...this.options.levels.map(level => textblockTypeInputRule({
+        find: new RegExp(`^(#{${level}})[ \\u3000]$`), type: this.type, getAttributes: { level },
+      })),
+      new InputRule({
+        find: /^(#{1,6})([^#\s].*)$/,
+        handler: ({ state, range, match }) => {
+          const level = match[1].length
+          if (!this.options.levels.some(value => value === level)) return null
+          if (state.doc.resolve(range.from).parent.type.name !== 'paragraph') return null
+          state.tr.insertText(match[2], range.from, range.to)
+            .setBlockType(range.from, range.from, this.type, { level })
+        },
+      }),
+    ]
   },
 })
 
