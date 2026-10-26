@@ -44,7 +44,10 @@ const editor = ref<InstanceType<typeof MarkdownEditor>>()
 const title = ref('')
 const listUrl = `${mainSite}/docs`
 
-const editable = computed(() => doc.value?.role === 'owner' || doc.value?.role === 'edit')
+const canEdit = computed(() => doc.value?.role === 'owner' || doc.value?.role === 'edit')
+// 阅读模式只影响当前页面：编辑器变为只读、收起工具栏，不改变权限，也不影响其他协作者。
+const reading = ref(false)
+const editable = computed(() => canEdit.value && !reading.value)
 const me = computed(() => ({ name: account.value?.name ?? '访客', color: colorOf(account.value?.id ?? 'guest') }))
 const collab = computed(() => session.value ? { doc: session.value.doc, provider: session.value.provider, user: me.value } : undefined)
 
@@ -202,13 +205,14 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
           <span v-if="peers.length > 5" class="peer more">+{{ peers.length - 5 }}</span>
         </div>
         <div class="actions">
+          <button v-if="canEdit" class="d-btn mode-toggle" :class="{ on: reading }" type="button" :aria-pressed="reading" :title="reading ? '回到编辑' : '只读预览，避免误修改（只影响当前页面）'" @click="reading = !reading">{{ reading ? '编辑' : '阅读' }}</button>
           <button class="d-btn outline-toggle" :class="{ on: outlineOpen }" type="button" :aria-pressed="outlineOpen" @click="toggleOutline">大纲</button>
-          <button v-if="editable" class="d-btn" type="button" @click="history = true">历史</button>
+          <button v-if="canEdit" class="d-btn" type="button" @click="history = true">历史</button>
           <button v-if="doc.can_copy" class="d-btn" type="button" @click="exportMarkdown">导出</button>
           <button v-if="doc.can_share" class="d-btn primary" type="button" @click="sharing = true">分享</button>
         </div>
       </div>
-      <p v-if="!editable" class="readonly">
+      <p v-if="!canEdit" class="readonly">
         {{ account ? '你只能查看这篇文档。' : '你正在以访客身份查看，访客不能编辑。' }}
         <a v-if="!account" :href="loginUrl">登录</a>
       </p>
@@ -273,7 +277,7 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
 .outline-list button.level-1 { color:var(--text); font-weight:600; }
 .outline-empty { margin:4px 12px; color:var(--faint); font-size:12.5px; line-height:1.7; }
 .outline-count { margin:0; padding:12px 22px 16px; border-top:1px solid var(--line); color:var(--faint); font:12px var(--font-mono); }
-.outline-toggle.on { border-color:var(--accent); color:var(--accent); }
+.outline-toggle.on, .mode-toggle.on { border-color:var(--accent); color:var(--accent); }
 .outline-scrim { display:none; }
 /* 窄屏：大纲作为抽屉盖在正文上，点遮罩收起 */
 @media (max-width:1100px) {
