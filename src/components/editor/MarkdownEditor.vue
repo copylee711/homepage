@@ -15,7 +15,8 @@ import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from '@tiptap/markdown'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { TableKit } from '@tiptap/extension-table'
-import { SizedImage, Video } from './media'
+import { Embed, SizedImage, Video } from './media'
+import { normalizeEmbed, parseVideoInput } from './embeds'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { BlockMath, InlineMath } from '@tiptap/extension-mathematics'
 import { Placeholder } from '@tiptap/extensions'
@@ -61,8 +62,10 @@ const slash = ref<{ query: string; from: number; left: number; top: number; inde
 const LOSSY = /<\/?[a-zA-Z][\w-]*(\s[^>]*)?>|^\[\^?[^\]]+\]:\s|[^\s$][^\S\n]*\$\$[^$\n]+\$\$/m
 function lossy(markdown: string) {
   // <img>、<video>（含 <source>）编辑器能原样保留，不算可能丢失的内容。
-  const media = /<\/?(?:img|video|source)\b[^>]*>/gi
-  return LOSSY.test(markdown.replace(/```[\s\S]*?```|`[^`\n]*`/g, '').replace(media, ''))
+  // 白名单里的视频站 <iframe> 同样能保留，其他 iframe 仍按可能丢失处理。
+  const media = /<\/?(?:img|video|source)\b[^>]*>|<iframe\b[^>]*\ssrc=["']([^"']+)["'][^>]*>\s*<\/iframe>/gi
+  markdown = markdown.replace(media, (tag, src?: string) => (src && !normalizeEmbed(src) ? tag : ''))
+  return LOSSY.test(markdown.replace(/```[\s\S]*?```|`[^`\n]*`/g, ''))
 }
 
 // 贴近 Typora 的输入习惯：$公式$ 即时变成行内公式（首尾不能是空格，避免把“$5 到 $6”当成公式），
@@ -200,6 +203,7 @@ function build() {
       TableKit.configure({ table: { resizable: false } }),
       SizedImage,
       Video,
+      Embed,
       CodeBlockLowlight.extend({ addNodeView: () => VueNodeViewRenderer(CodeBlockView) }).configure({ lowlight, defaultLanguage: null }),
       // 分开配置：Mathematics 会把同一份 katexOptions 给行内与块级，块级公式就不是 displayMode 了。
       InlineMath.configure({ katexOptions: { throwOnError: false }, onClick: (node, pos) => editMath('inline', pos, node.attrs.latex) }),
@@ -345,17 +349,25 @@ const inTable = computed(() => active('table'))
 
 async function setLink() {
   const previous = editor.value?.getAttributes('link').href as string | undefined
-  const url = await promptDialog({ title: previous ? '编辑链接' : '插入链接', message: '留空则移除链接。', value: previous ?? 'https://', confirmText: '确定' })
+  const url = await promptDialog({ title: previous ? '编辑链接' : '插入链接', message: '留空则移除链接。', value: previous ?? '', input: { placeholder: 'https://…' }, confirmText: '确定' })
   if (url === null) return
   if (!url) run().extendMarkRange('link').unsetLink().run()
   else run().extendMarkRange('link').setLink({ href: url }).run()
 }
 
 async function insertVideo() {
-  const url = await promptDialog({ title: '插入视频', message: '填写视频文件的网络地址（如 .mp4、.webm），插入后可拖动边缘调整大小。', value: 'https://', input: { placeholder: 'https://example.com/video.mp4' } })
-  if (!url) return
-  if (!/^https?:\/\//.test(url)) { notice.value = '视频地址需要以 http:// 或 https:// 开头'; return }
-  run().setVideo({ src: url }).run()
+  const input = await promptDialog({
+    title: '插入视频',
+    message: '粘贴视频页面链接或嵌入代码（哔哩哔哩、YouTube、Vimeo、腾讯视频、优酷），也可以是 .mp4、.webm 等视频文件地址。插入后可拖动边缘调整大小。',
+    input: { placeholder: 'https://www.bilibili.com/video/BV… 或 <iframe src="…">', multiline: true },
+    confirmText: '插入',
+  })
+  if (!input) return
+  const target = parseVideoInput(input)
+  if (!target) { notice.value = '没有识别出视频：请粘贴上述视频站的链接或嵌入代码，或以 .mp4、.webm 结尾的视频文件地址。'; return }
+  notice.value = ''
+  if (target.kind === 'embed') run().setEmbed({ src: target.src }).run()
+  else run().setVideo({ src: target.src }).run()
 }
 
 async function insertImage() {
@@ -366,7 +378,7 @@ async function insertImage() {
     input.click()
     return
   }
-  const url = await promptDialog({ title: '插入图片', value: 'https://', input: { placeholder: '图片地址' } })
+  const url = await promptDialog({ title: '插入图片', input: { placeholder: '粘贴图片地址 https://…' }, confirmText: '插入' })
   if (url) run().setImage({ src: url }).run()
 }
 

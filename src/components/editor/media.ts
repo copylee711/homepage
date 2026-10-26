@@ -1,8 +1,9 @@
 import { Node, ResizableNodeView, mergeAttributes } from '@tiptap/core'
 import Image from '@tiptap/extension-image'
+import { normalizeEmbed, providerOf } from './embeds'
 
 /**
- * 可拖动缩放的图片与网络视频。
+ * 可拖动缩放的图片、网络视频与视频站嵌入。
  *
  * 两者都是行内节点：Markdown 里的 <img>、<video> 属于行内 HTML，解析时只保留行内节点。
  * 设置过宽度的图片保存为 <img width>，否则仍是 ![]()；视频始终保存为 <video>。
@@ -33,6 +34,102 @@ declare module '@tiptap/core' {
     video: { setVideo: (options: { src: string; width?: number }) => ReturnType }
   }
 }
+
+declare module '@tiptap/core' {
+  interface Commands<ReturnType> {
+    embed: { setEmbed: (options: { src: string; width?: number }) => ReturnType }
+  }
+}
+
+/**
+ * 视频站播放器（哔哩哔哩、YouTube 等）的 <iframe> 嵌入。默认铺满正文宽度、16:9，可拖动缩放；
+ * 保存为 <iframe src width height>，高度按 16:9 由宽度算出。
+ */
+export const Embed = Node.create({
+  name: 'embed',
+  group: 'inline',
+  inline: true,
+  atom: true,
+  draggable: true,
+
+  addAttributes() {
+    return {
+      src: { default: null },
+      width: { default: null, parseHTML: element => width(element.getAttribute('width')) },
+    }
+  },
+
+  parseHTML() {
+    return [{ tag: 'iframe[src]', getAttrs: element => {
+      const target = normalizeEmbed((element as HTMLElement).getAttribute('src') ?? '')
+      return target ? { src: target.src } : false
+    } }]
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['iframe', mergeAttributes(HTMLAttributes, { frameborder: '0', allowfullscreen: 'true' })]
+  },
+
+  renderMarkdown: node => {
+    const size = width(node.attrs?.width)
+    const dimensions = size ? ` width="${size}" height="${Math.round(size * 9 / 16)}"` : ''
+    return `<iframe src="${escape(node.attrs?.src)}"${dimensions} frameborder="0" allowfullscreen></iframe>`
+  },
+
+  addCommands() {
+    return {
+      setEmbed: options => ({ commands }) => commands.insertContent({ type: this.name, attrs: options }),
+    }
+  },
+
+  addNodeView() {
+    return ({ node, getPos, editor }) => {
+      const box = document.createElement('div')
+      box.className = 'embed-box'
+      const tab = document.createElement('div')
+      tab.className = 'embed-tab'
+      tab.contentEditable = 'false'
+      tab.textContent = providerOf(node.attrs.src ?? '')
+      tab.title = '点这里选中，可拖动或按 Delete 删除'
+      // 播放器里的点击交给视频本身；点标签选中整个嵌入块。
+      tab.addEventListener('mousedown', event => {
+        event.preventDefault()
+        const pos = getPos()
+        if (pos !== undefined) editor.chain().focus().setNodeSelection(pos).run()
+      })
+      const frame = document.createElement('iframe')
+      frame.src = node.attrs.src ?? ''
+      frame.allowFullscreen = true
+      frame.setAttribute('allow', 'fullscreen; picture-in-picture; encrypted-media')
+      frame.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin')
+      frame.setAttribute('loading', 'lazy')
+      box.append(tab, frame)
+      if (node.attrs.width) box.style.width = `${node.attrs.width}px`
+      return new ResizableNodeView({
+        element: box,
+        editor,
+        node,
+        getPos,
+        // 高度由 16:9 的播放器决定；拖动时 ResizableNodeView 会写入高度，这里随时清掉。
+        onResize: w => { box.style.width = `${w}px`; box.style.height = '' },
+        onCommit: w => {
+          box.style.height = ''
+          const pos = getPos()
+          if (pos === undefined) return
+          editor.chain().setNodeSelection(pos).updateAttributes(this.name, { width: Math.round(w) }).run()
+        },
+        onUpdate: updated => {
+          if (updated.type !== node.type) return false
+          if (frame.getAttribute('src') !== updated.attrs.src) frame.src = updated.attrs.src ?? ''
+          box.style.width = updated.attrs.width ? `${updated.attrs.width}px` : ''
+          box.style.height = ''
+          return true
+        },
+        options: { directions: [...RESIZE.directions], min: { width: 200, height: 112 }, preserveAspectRatio: true },
+      })
+    }
+  },
+})
 
 export const Video = Node.create({
   name: 'video',

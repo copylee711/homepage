@@ -74,7 +74,12 @@
 | 引用、有序列表、无序列表、待办 | `Ctrl+Shift+Q`、`Ctrl+Shift+[`、`Ctrl+Shift+]`、`Ctrl+Shift+X` |
 | 链接、行内代码、表格 | `Ctrl+K`、``Ctrl+Shift+` ``、`Ctrl+Alt+T` |
 
-图片与视频（网络地址）可以拖动左右边缘或下角缩放，保持比例。调整过宽度的图片保存为 `<img width>`，
+“插入视频”可以粘贴哔哩哔哩、YouTube、Vimeo、腾讯视频、优酷的页面链接或 `<iframe>` 嵌入代码，
+也可以是 `.mp4`、`.webm` 等视频文件地址。嵌入默认铺满正文宽度、16:9，保存为 `<iframe>`；
+只允许这几家的播放器地址（`src/components/editor/embeds.ts` 与 `backend/app/rendering.py` 的白名单），
+发布页给 iframe 统一加上 `sandbox`，哔哩哔哩默认关闭自动播放。
+
+图片、视频与嵌入都可以拖动左右边缘或下角缩放，保持比例。调整过宽度的图片保存为 `<img width>`，
 视频保存为 `<video controls>`；发布页的渲染白名单允许这些标签与 `width` 属性，不允许 `autoplay`。
 
 文章与笔记也使用这个编辑器。内容含有其他原始 HTML（`<img>`、`<video>` 除外）、脚注、引用式链接或夹在文字中的 `$$行内公式$$` 时，
