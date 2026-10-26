@@ -18,6 +18,10 @@
   --btn-fg: #ffffff;
   --mark: #e2e5ec;
   --grid-line: rgba(59, 110, 245, 0.09);
+  /* 输入框聚焦：不用彩色亮线，边框与内环一起加深，外面一层柔和阴影 */
+  --field-focus-border: rgba(17, 24, 39, 0.3);
+  --field-focus-shadow: inset 0 0 0 1px rgba(17, 24, 39, 0.06), 0 6px 18px -10px rgba(17, 24, 39, 0.3);
+  --check-border: rgba(17, 24, 39, 0.26);
 
   --radius: 16px;
   --radius-sm: 12px;
@@ -57,4 +61,7 @@
   --btn-fg: #111114;
   --mark: #1c1f27;
   --grid-line: rgba(109, 147, 255, 0.1);
+  --field-focus-border: rgba(255, 255, 255, 0.32);
+  --field-focus-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05), 0 6px 18px -8px rgba(0, 0, 0, 0.65);
+  --check-border: rgba(255, 255, 255, 0.3);
 }

@@ -92,7 +92,7 @@ h3 { font-size:16px; }
 .kinds button.active { background:var(--surface); color:var(--text); box-shadow:0 2px 8px -4px rgba(17,24,39,.25); }
 label { display:flex; flex-direction:column; gap:8px; margin-top:16px; font-size:13px; color:var(--text-2); }
 textarea { width:100%; padding:12px 14px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); color:var(--text); font:15px/1.7 var(--font); resize:vertical; transition:border-color .3s,box-shadow .3s; }
-textarea:focus { outline:0; border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); }
+textarea:focus { outline:0; border-color:var(--field-focus-border); box-shadow:var(--field-focus-shadow); }
 .row { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:14px; }
 .count { color:var(--faint); font:12px var(--font-mono); }
 .send { padding:11px 22px; border:0; border-radius:10px; background:var(--btn-bg); color:var(--btn-fg); font:inherit; font-weight:500; cursor:pointer; }

@@ -124,7 +124,7 @@ const time = (value: string | null) => value ? new Date(value).toLocaleString('z
 .search-clear { position:absolute; right:8px; top:5px; width:32px; height:36px; color:var(--muted); font-size:22px; border-radius:8px; }
 .search-clear:hover { background:var(--accent-soft); color:var(--accent); }
 .filters input { display:block; width:100%; margin-top:8px; border:1px solid var(--line); border-radius:var(--radius-sm); color:var(--text); background:var(--surface); padding:13px 16px; font:14px var(--font); transition:border-color .3s,box-shadow .3s; }
-.filters input:focus { border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); outline:0; }
+.filters input:focus { border-color:var(--field-focus-border); box-shadow:var(--field-focus-shadow); outline:0; }
 .filters { position:relative; z-index:2; }
 .list-toolbar { justify-content:flex-start; flex-wrap:wrap; gap:16px; font-size:13px; color:var(--muted); padding-bottom:14px; border-bottom:1px solid var(--line-strong); }
 .checkbox { display:flex; align-items:center; gap:6px; color:var(--text-2); }

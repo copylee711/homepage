@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
-import { account, accountChecked, loadAccount } from '../../account'
+import { account, accountChecked, csrfToken, loadAccount } from '../../account'
 import { accountUrl, mainSite } from '../../drive'
 import { CLOSE_FORBIDDEN, CLOSE_GONE, CLOSE_LOGIN, CLOSE_RECONNECT, colorOf, docsApi, roleName, timeAgo, withLink } from '../../docs'
 import { connect } from '../../docs-live'
@@ -26,6 +26,14 @@ const status = ref<'connecting' | 'connected' | 'disconnected'>('connecting')
 const synced = ref(false)
 const peers = ref<{ id: number; name: string; color: string }[]>([])
 const sharing = ref(false), history = ref(false)
+// 大纲：宽屏默认显示在正文左侧，记住用户的选择。
+const outlineOpen = ref((() => { try { return localStorage.getItem('doc-outline') !== '0' } catch { return true } })())
+function toggleOutline() {
+  outlineOpen.value = !outlineOpen.value
+  try { localStorage.setItem('doc-outline', outlineOpen.value ? '1' : '0') } catch { /* 隐私模式下忽略 */ }
+}
+const headings = computed(() => editor.value?.headings ?? [])
+const words = computed(() => editor.value?.words ?? 0)
 const editor = ref<InstanceType<typeof MarkdownEditor>>()
 const title = ref('')
 const listUrl = `${mainSite}/docs`
@@ -113,6 +121,18 @@ function exportMarkdown() {
   URL.revokeObjectURL(anchor.href)
 }
 
+// 粘贴、拖入或从工具栏选择的图片上传到这篇文档的图片存储，返回插入正文的地址。
+async function uploadImage(file: File) {
+  if (file.size > 10 * 1024 * 1024) throw new Error('图片不能超过 10 MiB')
+  const response = await fetch(`/api/docs${withLink(`/${docId.value}/images`, link)}`, {
+    method: 'POST', body: file, credentials: 'same-origin',
+    headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-CSRF-Token': csrfToken() },
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : '图片上传失败')
+  return data.url as string
+}
+
 function restore(content: object) {
   editor.value?.setJSON(content)
   history.value = false
@@ -169,13 +189,14 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
         <a class="back" :href="listUrl" title="我的文档" aria-label="返回文档列表"><svg viewBox="0 0 24 24"><path d="m14 6-6 6 6 6" /></svg></a>
         <div class="meta">
           <span class="status" :class="status"><i />{{ statusText }}</span>
-          <span class="d-muted">{{ roleName[doc.role] }}<template v-if="doc.updated_by"> · {{ doc.updated_by.name }} {{ timeAgo(doc.updated_at) }}编辑</template></span>
+          <span class="d-muted">{{ roleName[doc.role] }}<template v-if="doc.updated_by"> · {{ doc.updated_by.name }} {{ timeAgo(doc.updated_at) }}编辑</template> · {{ words.toLocaleString() }} 字</span>
         </div>
         <div class="peers" :aria-label="`${peers.length} 人在线`">
           <span v-for="peer in peers.slice(0, 5)" :key="peer.id" class="peer" :style="{ background: peer.color }" :title="peer.name">{{ peer.name.slice(0, 1) }}</span>
           <span v-if="peers.length > 5" class="peer more">+{{ peers.length - 5 }}</span>
         </div>
         <div class="actions">
+          <button class="d-btn outline-toggle" :class="{ on: outlineOpen }" type="button" :aria-pressed="outlineOpen" @click="toggleOutline">大纲</button>
           <button v-if="editable" class="d-btn" type="button" @click="history = true">历史</button>
           <button v-if="doc.can_copy" class="d-btn" type="button" @click="exportMarkdown">导出</button>
           <button v-if="doc.can_share" class="d-btn primary" type="button" @click="sharing = true">分享</button>
@@ -185,9 +206,15 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
         {{ account ? '你只能查看这篇文档。' : '你正在以访客身份查看，访客不能编辑。' }}
         <a v-if="!account" :href="loginUrl">登录</a>
       </p>
+      <nav v-if="outlineOpen" class="outline" aria-label="文档大纲">
+        <p class="outline-title">大纲</p>
+        <p v-if="!headings.length" class="outline-empty">使用标题后，这里会列出文档结构。</p>
+        <button v-for="item in headings" :key="item.pos" type="button" :style="{ paddingLeft: `${(item.level - 1) * 14 + 10}px` }" :class="`level-${item.level}`" @click="editor?.jumpTo(item.pos)">{{ item.text || '（空标题）' }}</button>
+        <p class="outline-count">{{ words.toLocaleString() }} 字</p>
+      </nav>
       <article class="paper" :class="{ 'no-copy': !doc.can_copy }" @copy="guard" @cut="guard" @dragstart="guard" @contextmenu="guard">
         <input v-model="title" class="title" :readonly="!editable" maxlength="200" placeholder="未命名文档" aria-label="标题" @input="onTitle">
-        <MarkdownEditor v-if="collab" :key="`${doc.role}-${session?.doc.guid}`" ref="editor" :collab="collab" :editable="editable" />
+        <MarkdownEditor v-if="collab" :key="`${doc.role}-${session?.doc.guid}`" ref="editor" :collab="collab" :editable="editable" :upload="editable && account ? uploadImage : undefined" />
       </article>
       <DocShare v-if="sharing" :doc="doc" @close="sharing = false" @changed="value => doc = { ...doc!, ...value }" />
       <DocHistory v-if="history" :doc-id="doc.id" :link="link" @close="history = false" @restore="restore" />
@@ -218,6 +245,16 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
 .actions { display:flex; gap:8px; }
 .readonly { max-width:860px; margin:16px auto 0; padding:10px 14px; border-radius:10px; background:var(--accent-soft); color:var(--text-2); font-size:13px; }
 .readonly a { margin-left:8px; color:var(--accent); }
+.outline { position:fixed; top:calc(var(--header-h) + 80px); left:max(16px, calc((100vw - 860px) / 2 - 250px)); z-index:5; display:flex; flex-direction:column; gap:1px; width:220px; max-height:calc(100vh - var(--header-h) - 120px); overflow:auto; scrollbar-width:thin; }
+.outline-title { margin:0 0 8px 10px; color:var(--faint); font-size:12px; font-weight:600; letter-spacing:.12em; }
+.outline button { padding:5px 10px; border:0; border-radius:7px; background:none; color:var(--text-2); font:13px/1.5 var(--font); text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; transition:background .2s,color .2s; }
+.outline button:hover { background:color-mix(in srgb,var(--text) 5%,transparent); color:var(--text); }
+.outline button.level-1 { font-weight:600; color:var(--text); }
+.outline-empty { margin:0 10px; color:var(--faint); font-size:12.5px; line-height:1.6; }
+.outline-count { margin:14px 10px 0; color:var(--faint); font:12px var(--font-mono); }
+.outline-toggle.on { border-color:var(--accent); color:var(--accent); }
+/* 正文两侧放不下大纲时不显示（手机、窄窗口） */
+@media (max-width:1279px) { .outline, .outline-toggle { display:none; } }
 .paper { max-width:860px; margin:0 auto; padding:36px clamp(16px,4vw,24px) 40px; }
 .paper :deep(.md-toolbar:not(.docked)) { top:calc(var(--header-h) + 53px); }
 .title { width:100%; margin:0 0 18px; padding:0; border:0; background:none; color:var(--text); font:800 clamp(1.9rem,4vw,2.6rem)/1.2 var(--font); letter-spacing:-.03em; outline:none; }

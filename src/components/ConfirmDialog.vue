@@ -55,7 +55,7 @@ watch(open, value => value ? addEventListener('keydown', onKey, true) : removeEv
 .confirm-title { margin:0; font-size:19px; font-weight:600; line-height:1.4; letter-spacing:-.01em; overflow-wrap:anywhere; }
 .confirm-message { margin:10px 0 0; color:var(--text-2); font-size:14px; line-height:1.75; overflow-wrap:anywhere; }
 .confirm-input { display:block; width:100%; margin-top:16px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--surface); color:var(--text); font:14px/1.6 var(--font-mono); resize:vertical; outline:none; transition:border-color .2s,box-shadow .2s; }
-.confirm-input:focus { border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); }
+.confirm-input:focus { border-color:var(--field-focus-border); box-shadow:var(--field-focus-shadow); }
 .confirm-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:24px; }
 .confirm-btn { min-width:84px; padding:9px 18px; border:1px solid color-mix(in srgb,var(--line-strong) 55%,transparent); border-radius:10px; background:var(--surface); color:var(--text); font:inherit; font-size:14px; font-weight:500; cursor:pointer; transition:border-color .2s,color .2s,background .2s,filter .2s; }
 .confirm-btn:hover { border-color:var(--accent); color:var(--accent); }

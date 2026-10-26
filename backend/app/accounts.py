@@ -402,7 +402,7 @@ def delete_account(session, user: User, password: str, media_dir):
     session.exec(delete(EmailCode).where(EmailCode.email == user.email))
     from .docs import purge_user
 
-    purge_user(session, user.id)
+    purge_user(session, user.id, media_dir.parent)
     remove_avatar(user, media_dir)
     session.delete(user)
     session.commit()

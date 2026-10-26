@@ -108,7 +108,7 @@ fieldset { border:0; margin:0; padding:0; min-width:0; }
 .confirm { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; }
 label { display:flex; flex-direction:column; gap:8px; margin-top:16px; font-size:13px; color:var(--text-2); }
 input { width:100%; min-height:42px; padding:9px 12px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); color:var(--text); font:14px var(--font); }
-input:focus { outline:0; border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); }
+input:focus { outline:0; border-color:var(--field-focus-border); box-shadow:var(--field-focus-shadow); }
 .block { margin-top:22px; padding-top:18px; border-top:1px solid var(--line); }
 .row { display:flex; align-items:center; gap:10px; }
 .badge { padding:2px 8px; border-radius:99px; background:var(--bg-tint); color:var(--muted); font-size:12px; }

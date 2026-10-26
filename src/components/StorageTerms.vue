@@ -74,7 +74,7 @@ h3 { margin:20px 0 6px; font-size:15px; letter-spacing:-.01em; }
 .body p:not(.meta) { margin:6px 0 0; color:var(--text-2); font-size:13.5px; line-height:1.8; }
 .accept { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:14px 20px; margin-top:20px; padding-top:20px; border-top:1px solid var(--line); }
 .check { display:flex; align-items:flex-start; gap:9px; flex:1 1 320px; color:var(--text-2); font-size:13px; line-height:1.6; cursor:pointer; }
-.check input { flex:none; width:16px; height:16px; margin-top:2px; accent-color:var(--accent); }
+.check input { margin-top:3px; }
 .primary { padding:10px 20px; border:1px solid var(--btn-bg); border-radius:10px; background:var(--btn-bg); color:var(--btn-fg); font:500 14px var(--font); cursor:pointer; transition:opacity .2s,box-shadow .2s; }
 .primary:hover:not(:disabled) { box-shadow:0 8px 20px -10px color-mix(in srgb,var(--btn-bg) 70%,transparent); }
 .primary:disabled { opacity:.45; cursor:default; }

@@ -445,7 +445,7 @@ label.d-btn.disabled { opacity:.45; pointer-events:none; }
 .row.head button { justify-self:start; padding:0; border:0; background:none; color:inherit; font:inherit; cursor:pointer; }
 .row.head button.num { justify-self:end; }
 .row.head i { margin-left:4px; font-style:normal; color:var(--accent); }
-.row input[type=checkbox],.grid input[type=checkbox] { width:16px; height:16px; accent-color:var(--accent); cursor:pointer; }
+
 .name { display:flex; align-items:center; gap:12px; min-width:0; padding:8px 0; border:0; background:none; color:var(--text); font:14px var(--font); text-align:left; cursor:pointer; }
 .name span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .row .name { width:100%; }

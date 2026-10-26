@@ -224,3 +224,18 @@ html { -webkit-tap-highlight-color: transparent; }
   :where(button, [role=button], [role=tab]):active:not(:disabled) { transform: scale(.97); }
   :where(button, [role=button], [role=tab]) { transition: opacity .18s, transform .18s; }
 }
+
+/* 输入框聚焦的默认样式（组件里没有单独定义时）：加深边框与内环，不出现浏览器的亮色描边 */
+:where(input:not([type=checkbox], [type=radio], [type=range], [type=file]), textarea, select) { transition:border-color .2s ease, box-shadow .25s ease; }
+:where(input:not([type=checkbox], [type=radio], [type=range], [type=file]), textarea, select):focus { outline:none; border-color:var(--field-focus-border); box-shadow:var(--field-focus-shadow); }
+
+/* 复选框：统一的圆角方框，选中后填充主题色并显示白色对勾 */
+:where(input[type=checkbox]) { -webkit-appearance:none; appearance:none; flex:none; display:inline-grid; place-items:center; width:17px; height:17px; margin:0; border:1.5px solid var(--check-border); border-radius:5px; background:var(--surface); vertical-align:-3px; cursor:pointer; transition:background-color .18s ease, border-color .18s ease, box-shadow .18s ease; }
+:where(input[type=checkbox])::after { content:''; width:10px; height:10px; background:#fff; -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.3 5 8.7l4.6-5.2' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat; mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.3 5 8.7l4.6-5.2' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat; transform:scale(.4); opacity:0; transition:transform .2s var(--ease), opacity .15s ease; }
+:where(input[type=checkbox]):hover:not(:disabled) { border-color:var(--field-focus-border); }
+:where(input[type=checkbox]):checked { border-color:var(--accent); background:var(--accent); }
+:where(input[type=checkbox]):checked::after { transform:scale(1); opacity:1; }
+:where(input[type=checkbox]):focus-visible { outline:none; box-shadow:0 0 0 3px var(--accent-soft); }
+:where(input[type=checkbox]):disabled { opacity:.45; cursor:default; }
+:where(input[type=checkbox]):indeterminate { border-color:var(--accent); background:var(--accent); }
+:where(input[type=checkbox]):indeterminate::after { height:2px; border-radius:1px; -webkit-mask:none; mask:none; transform:scale(1); opacity:1; }

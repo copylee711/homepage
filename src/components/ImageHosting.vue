@@ -204,7 +204,7 @@ button:disabled { opacity:.5; cursor:default; }
 .card p { margin-top:6px; color:var(--muted); font-size:13px; line-height:1.7; }
 .token-form { display:flex; gap:10px; margin-top:16px; }
 .token-form input { flex:1; min-width:0; min-height:42px; padding:9px 12px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); color:var(--text); font:14px var(--font); }
-.token-form input:focus { outline:0; border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); }
+.token-form input:focus { outline:0; border-color:var(--field-focus-border); box-shadow:var(--field-focus-shadow); }
 .fresh { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:12px; padding:12px; border-radius:var(--radius-sm); background:var(--accent-soft); }
 .fresh code { flex:1 1 240px; overflow-wrap:anywhere; font:13px var(--font-mono); color:var(--text); }
 .tokens { list-style:none; margin:12px 0 0; padding:0; }

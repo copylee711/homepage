@@ -15,7 +15,7 @@
 .d-field { display:flex; flex-direction:column; gap:7px; margin-top:16px; font-size:13px; font-weight:500; color:var(--text-2); }
 .d-field .hint { color:var(--muted); font-size:12px; font-weight:400; line-height:1.6; }
 .d-input { width:100%; min-height:42px; padding:9px 12px; border:1px solid color-mix(in srgb,var(--line-strong) 60%,transparent); border-radius:10px; background:var(--surface); color:var(--text); font:400 14px var(--font); transition:border-color .2s,box-shadow .2s; }
-.d-input:focus { outline:0; border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); }
+.d-input:focus { outline:0; border-color:var(--field-focus-border); box-shadow:var(--field-focus-shadow); }
 textarea.d-input { resize:vertical; line-height:1.6; }
 .d-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; margin-top:24px; }
 .d-note { margin-top:14px; padding:10px 14px; border-radius:10px; font-size:13px; line-height:1.6; }
@@ -24,4 +24,4 @@ textarea.d-input { resize:vertical; line-height:1.6; }
 .d-muted { color:var(--muted); font-size:13px; }
 .d-code { padding:2px 6px; border-radius:6px; background:var(--bg-tint); font:12px var(--font-mono); overflow-wrap:anywhere; }
 .d-check { display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; color:var(--text-2); cursor:pointer; }
-.d-check input { width:16px; height:16px; accent-color:var(--accent); }
+

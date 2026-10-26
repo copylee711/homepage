@@ -11,19 +11,23 @@
 import asyncio
 import hashlib
 import hmac
+import re
 import secrets
+import shutil
 import string
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import anyio.from_thread
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket
+from fastapi.responses import FileResponse
 from pycrdt import Doc as YDoc
 from pycrdt import YMessageType, YSyncMessageType, create_sync_message, handle_sync_message
 from sqlalchemy import delete, func
 from sqlmodel import Session, select
 
-from . import audit, storage
+from . import audit, images, storage
 from .accounts import (
     USER_COOKIE,
     client_ip,
@@ -40,6 +44,7 @@ from .schemas import DocCreate, DocLinkWrite, DocMemberWrite, DocUnlock, DocUpda
 
 router = APIRouter()
 ID_ALPHABET = string.ascii_letters + string.digits
+ID_PATTERN = re.compile(r"^[A-Za-z0-9]{16}$")
 DOC_LIMIT = 500
 MEMBER_LIMIT = 100
 MAX_STATE = 8 * 1024 * 1024
@@ -285,24 +290,27 @@ def delete_doc(doc_id: str, request: Request, session: Session = Depends(databas
     doc, access, user = require(request, session, doc_id, write=True)
     if access.role != "owner":
         raise HTTPException(403, "只有所有者可以删除文档")
-    purge(session, [doc.id])
+    purge(session, [doc.id], request.app.state.settings.data_dir)
     session.commit()
     anyio.from_thread.run(rooms_of(request).close, doc_id, CLOSE_GONE)
     audit.record("doc.delete", request, ok=True, user=user.id, doc=doc_id)
     return {"ok": True}
 
 
-def purge(session: Session, doc_ids: list[str]):
+def purge(session: Session, doc_ids: list[str], data_dir: Path | None = None):
     if not doc_ids:
         return
     session.exec(delete(DocMember).where(DocMember.doc_id.in_(doc_ids)))
     session.exec(delete(DocVersion).where(DocVersion.doc_id.in_(doc_ids)))
     session.exec(delete(Doc).where(Doc.id.in_(doc_ids)))
+    if data_dir:
+        for doc_id in doc_ids:
+            shutil.rmtree(data_dir / "doc-images" / doc_id, ignore_errors=True)
 
 
-def purge_user(session: Session, user_id: str):
+def purge_user(session: Session, user_id: str, data_dir: Path | None = None):
     """注销账户时删除其文档与参与记录；调用方负责提交。"""
-    purge(session, list(session.exec(select(Doc.id).where(Doc.user_id == user_id)).all()))
+    purge(session, list(session.exec(select(Doc.id).where(Doc.user_id == user_id)).all()), data_dir)
     session.exec(delete(DocMember).where(DocMember.user_id == user_id))
 
 
@@ -452,6 +460,56 @@ def version_state(doc_id: str, version_id: str, request: Request,
         raise HTTPException(404, "版本不存在")
     return Response(row.state, media_type="application/octet-stream",
                     headers={"Cache-Control": "private, max-age=86400"})
+
+
+# —— 图片 ——
+# 粘贴或拖入文档的图片存在 data_dir/doc-images/<文档>/ 下，随文档一起删除。
+# 地址含 22 位随机名，打开图片不再校验文档权限（与常见文档产品的图片链接一样），
+# 这样只读链接与导出的 Markdown 里的图片也能正常显示。
+
+IMAGE_MAX = 10 * 1024 * 1024
+IMAGE_DOC_LIMIT = 200 * 1024 * 1024
+IMAGE_NAME = re.compile(r"^[A-Za-z0-9]{22}\.(?:jpg|png|webp|gif)$")
+IMAGE_TYPES = {"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp", "gif": "image/gif"}
+
+
+def image_dir(settings, doc_id: str) -> Path:
+    return settings.data_dir / "doc-images" / doc_id
+
+
+@router.post("/api/docs/{doc_id}/images", status_code=201)
+async def upload_image(doc_id: str, request: Request, link: str = Query(default="", max_length=64)):
+    settings = request.app.state.settings
+    with Session(request.app.state.engine) as session:
+        require_editor(request, session, doc_id, link, write=True)
+    payload = await images.read_upload(request, IMAGE_MAX)
+    extension, _, _ = await asyncio.to_thread(images.inspect, payload)
+    folder = image_dir(settings, doc_id)
+
+    def save() -> str:
+        folder.mkdir(parents=True, exist_ok=True)
+        used = sum(item.stat().st_size for item in folder.iterdir() if item.is_file())
+        if used + len(payload) > IMAGE_DOC_LIMIT:
+            raise HTTPException(413, "这篇文档的图片已达 200 MiB 上限")
+        name = f"{new_id(22)}.{extension}"
+        temporary = folder / f".{name}.tmp"
+        temporary.write_bytes(payload)
+        temporary.replace(folder / name)
+        return name
+
+    name = await asyncio.to_thread(save)
+    return {"url": f"/api/docs/{doc_id}/images/{name}"}
+
+
+@router.get("/api/docs/{doc_id}/images/{name}")
+def get_image(doc_id: str, name: str, request: Request):
+    if not IMAGE_NAME.match(name) or not ID_PATTERN.match(doc_id):
+        raise HTTPException(404, "图片不存在")
+    path = image_dir(request.app.state.settings, doc_id) / name
+    if not path.is_file():
+        raise HTTPException(404, "图片不存在")
+    return FileResponse(path, media_type=IMAGE_TYPES[name.rsplit(".", 1)[1]], headers={
+        "Cache-Control": "public, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"})
 
 
 # —— 实时协作 ——

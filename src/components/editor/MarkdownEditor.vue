@@ -7,7 +7,9 @@
  * - 协作模式：传入 collab（Yjs 文档与 y-websocket 连接），内容由 Yjs 同步，显示其他人的光标。
  */
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
-import { Editor, EditorContent, Extension, InputRule } from '@tiptap/vue-3'
+import { Editor, EditorContent, Extension, InputRule, VueNodeViewRenderer } from '@tiptap/vue-3'
+import { Plugin } from '@tiptap/pm/state'
+import { ySyncPluginKey } from '@tiptap/y-tiptap'
 import { BubbleMenu } from '@tiptap/vue-3/menus'
 import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from '@tiptap/markdown'
@@ -15,7 +17,7 @@ import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { TableKit } from '@tiptap/extension-table'
 import Image from '@tiptap/extension-image'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
-import Mathematics from '@tiptap/extension-mathematics'
+import { BlockMath, InlineMath } from '@tiptap/extension-mathematics'
 import { Placeholder } from '@tiptap/extensions'
 import Collaboration from '@tiptap/extension-collaboration'
 import CollaborationCaret from '@tiptap/extension-collaboration-caret'
@@ -25,6 +27,7 @@ import { confirmDialog, promptDialog } from '../../composables/useConfirm'
 import type * as Y from 'yjs'
 import type { WebsocketProvider } from 'y-websocket'
 import 'katex/dist/katex.min.css'
+import CodeBlockView from './CodeBlockView.vue'
 import './editor.css'
 
 /** 协作模式的参数；不带 provider 时只显示这份 Yjs 文档（如查看历史版本）。 */
@@ -56,6 +59,10 @@ function lossy(markdown: string) {
 // 贴近 Typora 的输入习惯：$公式$ 即时变成行内公式（首尾不能是空格，避免把“$5 到 $6”当成公式），
 // 一行只写 ```语言 后按回车开始代码块；常用格式都有与 Typora 相同的快捷键。
 // 浏览器占用的组合键（Ctrl+T、Ctrl+1–6 等）改用 Tiptap 自带的 Ctrl+Alt 版本。
+// 行内公式 $…$：左右的 $ 紧挨内容（不能是空格），前面不是 $、反斜杠或字母数字。
+const INLINE_MATH = /(?:^|[^$\\\w])\$([^\s$￼](?:[^$\n￼]*[^\s$￼])?)\$(?!\$)/g
+// 行内代码 `…`：前后不是反引号（避免误伤 ``` 代码块围栏）。
+const INLINE_CODE = /(?:^|[^`])`([^`\n\uFFFC]+)`(?!`)/g
 const TypingHabits = Extension.create({
   name: 'typingHabits',
   addInputRules() {
@@ -89,6 +96,65 @@ const TypingHabits = Extension.create({
         return current.chain().deleteRange({ from: $from.start(), to: $from.end() }).setCodeBlock({ language: fence[1] || null } as never).run()
       },
     }
+  },
+  // 输入规则只在敲下最后一个字符时触发。两处补救：
+  // 1. 中文输入法（即使在英文模式）的字符经 composition 上屏，Tiptap 在 compositionend 后立即重跑规则，
+  //    这时 ProseMirror 可能还没把文字读进文档；稍后再把最后一个字符当作刚输入的，重跑一次。
+  // 2. 先打一对符号再回去填、粘贴等情况，像 Typora 一样：光标离开一段完整的 $公式$ 或 `代码` 后转换。
+  addProseMirrorPlugins() {
+    return [new Plugin({
+      props: {
+        handleDOMEvents: {
+          compositionend: view => {
+            setTimeout(() => {
+              const { $head, empty } = view.state.selection
+              if (!empty || view.composing || !$head.parent.isTextblock || $head.parentOffset < 1) return
+              const text = $head.parent.textBetween($head.parentOffset - 1, $head.parentOffset, undefined, '￼')
+              if (!text || text === '￼') return
+              view.dispatch(view.state.tr.setMeta('applyInputRules', { from: $head.pos - 1, text }))
+            }, 40)
+            return false
+          },
+        },
+      },
+      appendTransaction: (transactions, previous, state) => {
+        if (!transactions.some(tr => tr.docChanged || tr.selectionSet)) return null
+        // 其他协作者同步过来的改动由对方自己转换，这里只处理本地操作，避免两边重复转换。
+        if (transactions.some(tr => tr.getMeta(ySyncPluginKey)?.isChangeOrigin)) return null
+        const head = state.selection.head
+        const blocks = new Set<number>()
+        for (const pos of [previous.selection.head, head]) {
+          if (pos > state.doc.content.size) continue
+          const $pos = state.doc.resolve(pos)
+          if ($pos.parent.isTextblock && !$pos.parent.type.spec.code) blocks.add($pos.before())
+        }
+        const code = state.schema.marks.code
+        const found: { from: number; to: number; node: ReturnType<typeof state.schema.text> }[] = []
+        const overlaps = (from: number, to: number) => found.some(item => from < item.to && to > item.from)
+        for (const before of blocks) {
+          const block = state.doc.nodeAt(before)
+          if (!block?.isTextblock) continue
+          const text = block.textBetween(0, block.content.size, undefined, '￼')
+          // 先找行内代码：反引号里的 $ 不算公式。
+          for (const [pattern, mark, make] of [
+            [INLINE_CODE, '`', (inner: string) => state.schema.text(inner, [code.create()])],
+            [INLINE_MATH, '$', (inner: string) => state.schema.nodes.inlineMath.create({ latex: inner })],
+          ] as const) {
+            for (const match of text.matchAll(pattern)) {
+              const from = before + 1 + match.index + match[0].indexOf(mark)
+              const to = before + 1 + match.index + match[0].length
+              if ((head >= from && head <= to) || overlaps(from, to)) continue
+              if (state.doc.rangeHasMark(from, to, code)) continue
+              found.push({ from, to, node: make(match[1]) as ReturnType<typeof state.schema.text> })
+            }
+          }
+        }
+        if (!found.length) return null
+        const tr = state.tr
+        for (const item of found.sort((a, b) => b.from - a.from)) tr.replaceWith(item.from, item.to, item.node)
+        return tr
+      },
+    })]
   },
 })
 
@@ -124,12 +190,10 @@ function build() {
       TaskItem.configure({ nested: true }),
       TableKit.configure({ table: { resizable: false } }),
       Image,
-      CodeBlockLowlight.configure({ lowlight, defaultLanguage: null }),
-      Mathematics.configure({
-        katexOptions: { throwOnError: false },
-        inlineOptions: { onClick: (node, pos) => editMath('inline', pos, node.attrs.latex) },
-        blockOptions: { onClick: (node, pos) => editMath('block', pos, node.attrs.latex) },
-      }),
+      CodeBlockLowlight.extend({ addNodeView: () => VueNodeViewRenderer(CodeBlockView) }).configure({ lowlight, defaultLanguage: null }),
+      // 分开配置：Mathematics 会把同一份 katexOptions 给行内与块级，块级公式就不是 displayMode 了。
+      InlineMath.configure({ katexOptions: { throwOnError: false }, onClick: (node, pos) => editMath('inline', pos, node.attrs.latex) }),
+      BlockMath.configure({ katexOptions: { throwOnError: false, displayMode: true }, onClick: (node, pos) => editMath('block', pos, node.attrs.latex) }),
       Placeholder.configure({ placeholder: props.placeholder }),
       TypingHabits,
       ...(collab ? [
@@ -142,9 +206,19 @@ function build() {
       handleKeyDown: (_, event) => slashKey(event),
       handlePaste: (_, event) => pasteImages(event.clipboardData?.files),
       handleDrop: (_, event) => pasteImages((event as DragEvent).dataTransfer?.files),
+      // 与 Typora 一样：编辑时 Ctrl/⌘+点击打开链接，只读时直接点击打开。
+      handleClick: (view, _, event) => {
+        const anchor = (event.target as HTMLElement).closest('a[href]') as HTMLAnchorElement | null
+        if (!anchor || !(event.ctrlKey || event.metaKey || !view.editable)) return false
+        window.open(anchor.href, '_blank', 'noopener')
+        return true
+      },
     },
+    onCreate: () => measure(),
     onUpdate: ({ editor: current }) => {
       updateSlash()
+      clearTimeout(measureTimer)
+      measureTimer = window.setTimeout(measure, 200)
       if (props.collab) return
       clearTimeout(emitTimer)
       emitTimer = window.setTimeout(() => emit('update:modelValue', current.getMarkdown()), 120)
@@ -154,6 +228,33 @@ function build() {
     // 点工具栏时编辑区会短暂失焦，稍等再收起停靠的工具栏。
     onBlur: () => { blurTimer = window.setTimeout(() => { focused.value = false }, 150) },
   })
+}
+
+// 大纲与字数：中日韩文字每个算一字，其余按空白分隔的词计数（与 Typora 的统计方式接近）。
+export interface Heading { level: number; text: string; pos: number }
+const headings = ref<Heading[]>([])
+const words = ref(0)
+let measureTimer = 0
+function measure() {
+  const current = editor.value
+  if (!current) return
+  const list: Heading[] = []
+  current.state.doc.descendants((node, pos) => {
+    if (node.type.name === 'heading') list.push({ level: node.attrs.level, text: node.textContent, pos })
+    return node.isBlock
+  })
+  headings.value = list
+  const text = current.state.doc.textBetween(0, current.state.doc.content.size, ' ', ' ')
+  const cjk = text.match(/[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]/g)?.length ?? 0
+  const latin = text.replace(/[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]/g, ' ').match(/[A-Za-z0-9_'’.-]+/g)?.length ?? 0
+  words.value = cjk + latin
+}
+
+function jumpTo(pos: number) {
+  const current = editor.value
+  if (!current) return
+  current.chain().focus().setTextSelection(pos + 1).run()
+  ;(current.view.nodeDOM(pos) as HTMLElement | null)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 build()
@@ -175,7 +276,7 @@ watch(() => props.modelValue, value => {
 watch(() => props.editable, value => editor.value?.setEditable(value))
 
 onBeforeUnmount(() => {
-  clearTimeout(emitTimer); clearTimeout(blurTimer); editor.value?.destroy()
+  clearTimeout(emitTimer); clearTimeout(blurTimer); clearTimeout(measureTimer); editor.value?.destroy()
   narrow.removeEventListener('change', onNarrow)
   window.visualViewport?.removeEventListener('resize', onViewport)
   window.visualViewport?.removeEventListener('scroll', onViewport)
@@ -207,6 +308,9 @@ defineExpose({
     if (source.value) { sourceText.value += markdown; onSource(); return }
     editor.value?.chain().focus().insertContent(markdown, { contentType: 'markdown' }).run()
   },
+  headings,
+  words,
+  jumpTo,
   editor,
 })
 
@@ -240,9 +344,15 @@ function pasteImages(files?: FileList | null) {
   const images = [...(files ?? [])].filter(file => file.type.startsWith('image/'))
   if (!images.length || !props.upload || !editor.value?.isEditable) return false
   void (async () => {
-    for (const file of images) {
-      try { run().setImage({ src: await props.upload!(file), alt: file.name.replace(/\.[^.]+$/, '') }).run() }
-      catch (err) { alert(err instanceof Error ? err.message : '图片上传失败') }
+    for (const [i, file] of images.entries()) {
+      notice.value = images.length > 1 ? `正在上传图片（${i + 1}/${images.length}）…` : '正在上传图片…'
+      try {
+        run().setImage({ src: await props.upload!(file), alt: file.name.replace(/\.[^.]+$/, '') }).run()
+        notice.value = ''
+      } catch (err) {
+        notice.value = `图片上传失败：${err instanceof Error ? err.message : '请稍后再试'}`
+        return
+      }
     }
   })()
   return true
@@ -337,6 +447,8 @@ const slashItems = computed(() => {
   return commands.filter(item => !query || item.label.includes(query) || item.keys.includes(query))
 })
 
+const SLASH_HEIGHT = 320
+
 function updateSlash() {
   const current = editor.value
   if (!current || !current.isEditable) { slash.value = null; return }
@@ -346,7 +458,13 @@ function updateSlash() {
   if (!match) { slash.value = null; return }
   const coords = current.view.coordsAtPos($from.pos)
   const box = current.view.dom.closest('.md-editor')!.getBoundingClientRect()
-  slash.value = { query: match[1], from: $from.pos - text.length, left: coords.left - box.left, top: coords.bottom - box.top + 6,
+  // 下方放不下时（光标靠近屏幕底部或贴着软键盘），菜单改到光标上方。
+  const height = Math.min(SLASH_HEIGHT, slashItems.value.length * 42 + 12)
+  const bottom = (window.visualViewport?.height ?? innerHeight) - keyboard.value
+  const above = coords.bottom + 6 + height > bottom && coords.top - 6 - height > 0
+  slash.value = { query: match[1], from: $from.pos - text.length,
+                  left: Math.max(0, Math.min(coords.left - box.left, box.width - 230)),
+                  top: above ? coords.top - box.top - 6 - height : coords.bottom - box.top + 6,
                   index: slash.value?.query === match[1] ? slash.value.index : 0 }
 }
 
@@ -364,6 +482,7 @@ function slashKey(event: KeyboardEvent) {
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     const count = slashItems.value.length
     state.index = (state.index + (event.key === 'ArrowDown' ? 1 : count - 1)) % count
+    void nextTick(() => document.querySelector('.md-slash button.on')?.scrollIntoView({ block: 'nearest' }))
     return true
   }
   if (event.key === 'Enter' || event.key === 'Tab') { pick(slashItems.value[state.index]); return true }

@@ -257,3 +257,37 @@ def test_manual_version_and_delete(people):
     assert owner.delete(url, headers=owner_headers).status_code == 200
     assert owner.get(url).status_code == 404
     assert owner.get("/api/docs").json()["owned"] == []
+
+
+def png_bytes():
+    from io import BytesIO
+
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.new("RGB", (4, 4), "red").save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+def test_pasted_images(people, tmp_path):
+    app, (owner, owner_headers), (other, other_headers), stranger = people
+    doc = create(owner, owner_headers)
+    url = f"/api/docs/{doc['id']}"
+    owner.post(f"{url}/members", headers=owner_headers, json={"email": OTHER, "role": "view"})
+    upload = {**owner_headers, "Content-Type": "image/png"}
+    saved = owner.post(f"{url}/images", headers=upload, content=png_bytes())
+    assert saved.status_code == 201, saved.text
+    image = saved.json()["url"]
+    served = stranger.get(image)
+    assert served.status_code == 200 and served.headers["content-type"] == "image/png"
+    assert served.headers["x-content-type-options"] == "nosniff"
+    # 只读成员不能上传，非图片内容被拒绝。
+    assert other.post(f"{url}/images", headers={**other_headers, "Content-Type": "image/png"},
+                      content=png_bytes()).status_code == 403
+    assert owner.post(f"{url}/images", headers=upload, content=b"<svg></svg>").status_code == 415
+    assert stranger.get(f"{url}/images/../../content.db").status_code == 404
+    # 删除文档时图片一起删除。
+    folder = app.state.settings.data_dir / "doc-images" / doc["id"]
+    assert any(folder.iterdir())
+    owner.delete(url, headers=owner_headers)
+    assert not folder.exists() and stranger.get(image).status_code == 404

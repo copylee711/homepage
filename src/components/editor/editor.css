@@ -26,8 +26,7 @@
 /* 待办清单 */
 .md-content ul[data-type=taskList] { padding-left:4px; list-style:none; }
 .md-content ul[data-type=taskList] li { display:flex; align-items:flex-start; gap:10px; }
-.md-content ul[data-type=taskList] li > label { flex:none; margin-top:.42em; user-select:none; }
-.md-content ul[data-type=taskList] li > label input { width:16px; height:16px; margin:0; accent-color:var(--accent); cursor:pointer; }
+.md-content ul[data-type=taskList] li > label { flex:none; display:flex; align-items:center; height:1.95em; height:1lh; user-select:none; }
 .md-content ul[data-type=taskList] li > div { flex:1; min-width:0; }
 .md-content ul[data-type=taskList] li > div > p { margin:0; }
 .md-content ul[data-type=taskList] li[data-checked=true] > div { color:var(--faint); text-decoration:line-through; }
@@ -41,7 +40,19 @@
 .md-content .selectedCell::after { content:''; position:absolute; inset:0; background:var(--accent-soft); pointer-events:none; }
 
 /* 代码块与语法高亮 */
-.md-content pre { padding:16px 18px; border-radius:10px; background:color-mix(in srgb,var(--text) 4%,var(--surface)); border:1px solid var(--line); font:14px/1.7 var(--font-mono); overflow-x:auto; }
+.md-content .code-block { margin:0 0 1.5em; border:1px solid var(--line); border-radius:10px; background:color-mix(in srgb,var(--text) 4%,var(--surface)); overflow:hidden; }
+.md-content .code-block.selected { border-color:var(--field-focus-border); }
+.md-content .code-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px 0 12px; user-select:none; }
+.md-content .code-lang { padding:3px 22px 3px 6px; border:0; border-radius:6px; background:transparent; color:var(--muted); font:12px var(--font-mono); cursor:pointer; }
+.md-content span.code-lang { padding-right:6px; cursor:default; }
+.md-content select.code-lang { -webkit-appearance:none; appearance:none; background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%23888' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") right 4px center/12px no-repeat; }
+.md-content select.code-lang:hover, .md-content select.code-lang:focus { background-color:color-mix(in srgb,var(--text) 6%,transparent); color:var(--text); box-shadow:none; }
+.md-content .code-copy { display:inline-flex; align-items:center; gap:5px; padding:4px 8px; border:0; border-radius:6px; background:none; color:var(--muted); font:12px var(--font); cursor:pointer; opacity:.7; transition:opacity .2s,background .2s,color .2s; }
+.md-content .code-block:hover .code-copy, .md-content .code-copy:focus-visible { opacity:1; }
+.md-content .code-copy:hover { background:color-mix(in srgb,var(--text) 6%,transparent); color:var(--text); }
+.md-content .code-copy.done { color:#2f9e6e; opacity:1; }
+.md-content .code-copy svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.md-content pre { margin:0; padding:8px 18px 16px; border:0; border-radius:0; background:none; font:14px/1.7 var(--font-mono); overflow-x:auto; }
 .md-content pre code { padding:0; background:none; font:inherit; }
 .md-content .hljs-comment,.md-content .hljs-quote { color:var(--faint); font-style:italic; }
 .md-content .hljs-keyword,.md-content .hljs-selector-tag,.md-content .hljs-built_in { color:#a65ad9; }
@@ -54,7 +65,8 @@
 /* 公式 */
 .md-content .tiptap-mathematics-render { cursor:pointer; border-radius:4px; transition:background .15s; }
 .md-content .tiptap-mathematics-render:hover { background:var(--accent-soft); }
-.md-content [data-type=block-math] { margin:0 0 1.5em; text-align:center; overflow-x:auto; }
+.md-content [data-type=block-math] { margin:0 0 1.5em; padding:.3em 0; text-align:center; overflow:auto hidden; }
+.md-content [data-type=block-math] .katex-display { margin:0; }
 
 /* 协作者光标 */
 .collaboration-carets__caret { position:relative; margin:0 -1px; border-left:1px solid; border-right:1px solid; word-break:normal; pointer-events:none; }
@@ -76,7 +88,7 @@
 
 /* 源码模式 */
 .md-source { flex:1; min-height:min(60vh,520px); margin-top:12px; padding:18px 20px; border:1px solid var(--line); border-radius:12px; background:var(--surface); color:var(--text); font:14.5px/1.8 var(--font-mono); resize:vertical; outline:none; tab-size:2; }
-.md-source:focus { border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); }
+.md-source:focus { border-color:var(--field-focus-border); box-shadow:var(--field-focus-shadow); }
 
 @media (max-width:760px) {
   .md-content { padding:20px 0 64px; font-size:16px; }
@@ -88,7 +100,7 @@
 .md-content [data-type=inline-math][data-latex=""]::after { content:'公式'; padding:0 4px; color:var(--faint); font-size:.85em; }
 .md-math { position:absolute; z-index:25; width:min(340px,100%); padding:10px; border:1px solid var(--line); border-radius:12px; background:var(--surface); box-shadow:0 18px 40px -14px rgba(17,24,39,.35); }
 .md-math textarea { display:block; width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); font:14px/1.6 var(--font-mono); resize:vertical; outline:none; }
-.md-math textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+.md-math textarea:focus { border-color:var(--field-focus-border); box-shadow:var(--field-focus-shadow); }
 .md-math .preview { max-height:160px; margin-top:8px; padding:8px; overflow:auto; border-radius:8px; background:color-mix(in srgb,var(--text) 3%,transparent); text-align:center; }
 .md-math p { margin:6px 2px 0; color:var(--faint); font-size:11.5px; }
 
