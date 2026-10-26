@@ -147,6 +147,13 @@ const TypingHabits = Extension.create({
           const block = state.doc.nodeAt(before)
           if (!block?.isTextblock) continue
           const text = block.textBetween(0, block.content.size, undefined, '￼')
+          // 整段只有一段 <iframe>/<video>/<img> 代码（手打或早先粘贴的）时，光标离开后变成对应的媒体。
+          const media = block.type.name === 'paragraph' && !(head > before && head < before + block.nodeSize)
+            ? mediaFromHtml(text) : null
+          if (media) {
+            found.push({ from: before + 1, to: before + block.nodeSize - 1, node: state.schema.nodeFromJSON(media) as ReturnType<typeof state.schema.text> })
+            continue
+          }
           // 先找行内代码：反引号里的 $ 不算公式。
           for (const [pattern, mark, make] of [
             [INLINE_CODE, '`', (inner: string) => state.schema.text(inner, [code.create()])],
@@ -218,7 +225,7 @@ function build() {
     editorProps: {
       attributes: { class: 'prose md-content', spellcheck: 'false' },
       handleKeyDown: (_, event) => slashKey(event),
-      handlePaste: (_, event) => pasteImages(event.clipboardData?.files),
+      handlePaste: (_, event) => pasteImages(event.clipboardData?.files) || pasteMedia(event.clipboardData?.getData('text/plain')),
       handleDrop: (_, event) => pasteImages((event as DragEvent).dataTransfer?.files),
       // 与 Typora 一样：编辑时 Ctrl/⌘+点击打开链接，只读时直接点击打开。
       handleClick: (view, _, event) => {
@@ -380,6 +387,36 @@ async function insertImage() {
   }
   const url = await promptDialog({ title: '插入图片', input: { placeholder: '粘贴图片地址 https://…' }, confirmText: '插入' })
   if (url) run().setImage({ src: url }).run()
+}
+
+// 粘贴（或整段写成）一段 <iframe>、<video>、<img> 代码时，按 Typora 的做法直接显示为对应的媒体。
+const htmlAttr = (attrs: string, name: string) => new RegExp(`\\s${name}\\s*=\\s*["']([^"']*)["']`, 'i').exec(attrs)?.[1] ?? ''
+function mediaFromHtml(raw: string): Record<string, unknown> | null {
+  const text = raw.trim()
+  if (/^<iframe\b[\s\S]*<\/iframe>$/i.test(text)) {
+    const target = parseVideoInput(text)
+    return target?.kind === 'embed' ? { type: 'embed', attrs: { src: target.src } } : null
+  }
+  const video = /^<video\b([^>]*)>([\s\S]*?)<\/video>$/i.exec(text)
+  if (video) {
+    const src = htmlAttr(video[1], 'src') || htmlAttr(/<source\b([^>]*)>/i.exec(video[2])?.[1] ?? '', 'src')
+    if (!/^https?:\/\//.test(src)) return null
+    return { type: 'video', attrs: { src, width: Number.parseInt(htmlAttr(video[1], 'width'), 10) || null } }
+  }
+  const image = /^<img\b([^>]*?)\/?>$/i.exec(text)
+  if (image) {
+    const src = htmlAttr(image[1], 'src')
+    if (!src || /^javascript:/i.test(src)) return null
+    return { type: 'image', attrs: { src, alt: htmlAttr(image[1], 'alt') || null, width: Number.parseInt(htmlAttr(image[1], 'width'), 10) || null } }
+  }
+  return null
+}
+
+function pasteMedia(text?: string) {
+  const media = text ? mediaFromHtml(text) : null
+  if (!media || !editor.value?.isEditable) return false
+  run().insertContent(media).run()
+  return true
 }
 
 function pasteImages(files?: FileList | null) {
