@@ -27,10 +27,16 @@ const synced = ref(false)
 const peers = ref<{ id: number; name: string; color: string }[]>([])
 const sharing = ref(false), history = ref(false)
 // 大纲：宽屏默认显示在正文左侧，记住用户的选择。
-const outlineOpen = ref((() => { try { return localStorage.getItem('doc-outline') !== '0' } catch { return true } })())
+// 宽屏记住用户的选择（默认展开）；窄屏是盖在正文上的抽屉，默认收起。
+const wide = () => matchMedia('(min-width: 1101px)').matches
+const outlineOpen = ref(wide() && (() => { try { return localStorage.getItem('doc-outline') !== '0' } catch { return true } })())
 function toggleOutline() {
   outlineOpen.value = !outlineOpen.value
-  try { localStorage.setItem('doc-outline', outlineOpen.value ? '1' : '0') } catch { /* 隐私模式下忽略 */ }
+  if (wide()) try { localStorage.setItem('doc-outline', outlineOpen.value ? '1' : '0') } catch { /* 隐私模式下忽略 */ }
+}
+function jump(pos: number) {
+  editor.value?.jumpTo(pos)
+  if (!wide()) outlineOpen.value = false
 }
 const headings = computed(() => editor.value?.headings ?? [])
 const words = computed(() => editor.value?.words ?? 0)
@@ -206,16 +212,24 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
         {{ account ? '你只能查看这篇文档。' : '你正在以访客身份查看，访客不能编辑。' }}
         <a v-if="!account" :href="loginUrl">登录</a>
       </p>
-      <nav v-if="outlineOpen" class="outline" aria-label="文档大纲">
-        <p class="outline-title">大纲</p>
-        <p v-if="!headings.length" class="outline-empty">使用标题后，这里会列出文档结构。</p>
-        <button v-for="item in headings" :key="item.pos" type="button" :style="{ paddingLeft: `${(item.level - 1) * 14 + 10}px` }" :class="`level-${item.level}`" @click="editor?.jumpTo(item.pos)">{{ item.text || '（空标题）' }}</button>
-        <p class="outline-count">{{ words.toLocaleString() }} 字</p>
-      </nav>
-      <article class="paper" :class="{ 'no-copy': !doc.can_copy }" @copy="guard" @cut="guard" @dragstart="guard" @contextmenu="guard">
-        <input v-model="title" class="title" :readonly="!editable" maxlength="200" placeholder="未命名文档" aria-label="标题" @input="onTitle">
-        <MarkdownEditor v-if="collab" :key="`${doc.role}-${session?.doc.guid}`" ref="editor" :collab="collab" :editable="editable" :upload="editable && account ? uploadImage : undefined" />
-      </article>
+      <div class="doc-body" :class="{ 'with-outline': outlineOpen }">
+        <aside class="outline" :class="{ open: outlineOpen }" aria-label="文档大纲" :aria-hidden="!outlineOpen" :inert="!outlineOpen">
+          <div class="outline-head">
+            <span>大纲</span>
+            <button type="button" class="outline-close" aria-label="收起大纲" title="收起大纲" @click="toggleOutline"><svg viewBox="0 0 24 24"><path d="m14 6-6 6 6 6" /></svg></button>
+          </div>
+          <nav class="outline-list">
+            <p v-if="!headings.length" class="outline-empty">使用标题后，这里会列出文档结构。</p>
+            <button v-for="item in headings" :key="item.pos" type="button" :style="{ paddingLeft: `${(item.level - 1) * 14 + 12}px` }" :class="`level-${item.level}`" @click="jump(item.pos)">{{ item.text || '（空标题）' }}</button>
+          </nav>
+          <p class="outline-count">{{ words.toLocaleString() }} 字 · {{ headings.length }} 个标题</p>
+        </aside>
+        <div v-if="outlineOpen" class="outline-scrim" @click="toggleOutline" />
+        <article class="paper" :class="{ 'no-copy': !doc.can_copy }" @copy="guard" @cut="guard" @dragstart="guard" @contextmenu="guard">
+          <input v-model="title" class="title" :readonly="!editable" maxlength="200" placeholder="未命名文档" aria-label="标题" @input="onTitle">
+          <MarkdownEditor v-if="collab" :key="`${doc.role}-${session?.doc.guid}`" ref="editor" :collab="collab" :editable="editable" :upload="editable && account ? uploadImage : undefined" />
+        </article>
+      </div>
       <DocShare v-if="sharing" :doc="doc" @close="sharing = false" @changed="value => doc = { ...doc!, ...value }" />
       <DocHistory v-if="history" :doc-id="doc.id" :link="link" @close="history = false" @restore="restore" />
     </template>
@@ -245,17 +259,31 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
 .actions { display:flex; gap:8px; }
 .readonly { max-width:860px; margin:16px auto 0; padding:10px 14px; border-radius:10px; background:var(--accent-soft); color:var(--text-2); font-size:13px; }
 .readonly a { margin-left:8px; color:var(--accent); }
-.outline { position:fixed; top:calc(var(--header-h) + 80px); left:max(16px, calc((100vw - 860px) / 2 - 250px)); z-index:5; display:flex; flex-direction:column; gap:1px; width:220px; max-height:calc(100vh - var(--header-h) - 120px); overflow:auto; scrollbar-width:thin; }
-.outline-title { margin:0 0 8px 10px; color:var(--faint); font-size:12px; font-weight:600; letter-spacing:.12em; }
-.outline button { padding:5px 10px; border:0; border-radius:7px; background:none; color:var(--text-2); font:13px/1.5 var(--font); text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; transition:background .2s,color .2s; }
-.outline button:hover { background:color-mix(in srgb,var(--text) 5%,transparent); color:var(--text); }
-.outline button.level-1 { font-weight:600; color:var(--text); }
-.outline-empty { margin:0 10px; color:var(--faint); font-size:12.5px; line-height:1.6; }
-.outline-count { margin:14px 10px 0; color:var(--faint); font:12px var(--font-mono); }
+.doc-body { display:grid; grid-template-columns:0 minmax(0,1fr); }
+.doc-body.with-outline { grid-template-columns:268px minmax(0,1fr); }
+.outline { position:sticky; top:calc(var(--header-h) + 53px); align-self:start; display:flex; flex-direction:column; width:268px; height:calc(100vh - var(--header-h) - 53px); border-right:1px solid var(--line); background:var(--bg); overflow:hidden; opacity:0; visibility:hidden; transform:translateX(-12px); transition:opacity .25s ease,transform .3s var(--ease),visibility .3s; }
+.outline.open { opacity:1; visibility:visible; transform:none; }
+.outline-head { display:flex; align-items:center; justify-content:space-between; padding:18px 12px 10px 22px; color:var(--faint); font-size:12px; font-weight:600; letter-spacing:.12em; }
+.outline-close { display:grid; place-items:center; width:28px; height:28px; border:0; border-radius:7px; background:none; color:var(--muted); cursor:pointer; transition:background .2s,color .2s; }
+.outline-close:hover { background:color-mix(in srgb,var(--text) 6%,transparent); color:var(--text); }
+.outline-close svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.outline-list { flex:1; display:flex; flex-direction:column; gap:1px; padding:0 10px; overflow:auto; scrollbar-width:thin; }
+.outline-list button { flex:none; padding:6px 12px; border:0; border-radius:8px; background:none; color:var(--text-2); font:13.5px/1.5 var(--font); text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; transition:background .2s,color .2s; }
+.outline-list button:hover { background:color-mix(in srgb,var(--text) 5%,transparent); color:var(--text); }
+.outline-list button.level-1 { color:var(--text); font-weight:600; }
+.outline-empty { margin:4px 12px; color:var(--faint); font-size:12.5px; line-height:1.7; }
+.outline-count { margin:0; padding:12px 22px 16px; border-top:1px solid var(--line); color:var(--faint); font:12px var(--font-mono); }
 .outline-toggle.on { border-color:var(--accent); color:var(--accent); }
-/* 正文两侧放不下大纲时不显示（手机、窄窗口） */
-@media (max-width:1279px) { .outline, .outline-toggle { display:none; } }
-.paper { max-width:860px; margin:0 auto; padding:36px clamp(16px,4vw,24px) 40px; }
+.outline-scrim { display:none; }
+/* 窄屏：大纲作为抽屉盖在正文上，点遮罩收起 */
+@media (max-width:1100px) {
+  .doc-body, .doc-body.with-outline { grid-template-columns:minmax(0,1fr); }
+  .outline { position:fixed; top:0; left:0; z-index:70; height:100vh; height:100dvh; width:min(300px,84vw); box-shadow:12px 0 40px -20px rgba(17,24,39,.4); transform:translateX(-100%); }
+  .outline.open { transform:none; }
+  .outline-scrim { display:block; position:fixed; inset:0; z-index:69; background:rgba(12,13,16,.35); }
+  .paper { grid-column:1; }
+}
+.paper { box-sizing:border-box; width:100%; max-width:860px; margin:0 auto; padding:36px clamp(16px,4vw,24px) 40px; }
 .paper :deep(.md-toolbar:not(.docked)) { top:calc(var(--header-h) + 53px); }
 .title { width:100%; margin:0 0 18px; padding:0; border:0; background:none; color:var(--text); font:800 clamp(1.9rem,4vw,2.6rem)/1.2 var(--font); letter-spacing:-.03em; outline:none; }
 .title::placeholder { color:var(--faint); }

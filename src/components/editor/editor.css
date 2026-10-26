@@ -40,13 +40,24 @@
 .md-content .selectedCell::after { content:''; position:absolute; inset:0; background:var(--accent-soft); pointer-events:none; }
 
 /* 代码块与语法高亮 */
-.md-content .code-block { margin:0 0 1.5em; border:1px solid var(--line); border-radius:10px; background:color-mix(in srgb,var(--text) 4%,var(--surface)); overflow:hidden; }
+.md-content .code-block { margin:0 0 1.5em; border:1px solid var(--line); border-radius:10px; background:color-mix(in srgb,var(--text) 4%,var(--surface)); }
 .md-content .code-block.selected { border-color:var(--field-focus-border); }
 .md-content .code-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px 0 12px; user-select:none; }
-.md-content .code-lang { padding:3px 22px 3px 6px; border:0; border-radius:6px; background:transparent; color:var(--muted); font:12px var(--font-mono); cursor:pointer; }
-.md-content span.code-lang { padding-right:6px; cursor:default; }
-.md-content select.code-lang { -webkit-appearance:none; appearance:none; background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%23888' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") right 4px center/12px no-repeat; }
-.md-content select.code-lang:hover, .md-content select.code-lang:focus { background-color:color-mix(in srgb,var(--text) 6%,transparent); color:var(--text); box-shadow:none; }
+.md-content .lang { position:relative; }
+.md-content .lang-button, .md-content .lang-static { display:inline-flex; align-items:center; gap:4px; padding:3px 6px 3px 8px; border:0; border-radius:6px; background:none; color:var(--muted); font:12px var(--font-mono); }
+.md-content .lang-button { cursor:pointer; transition:background .15s,color .15s; }
+.md-content .lang-button:hover, .md-content .lang-button.open { background:color-mix(in srgb,var(--text) 6%,transparent); color:var(--text); }
+.md-content .lang-button svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; transition:transform .25s var(--ease); }
+.md-content .lang-button.open svg { transform:rotate(180deg); }
+.md-content .lang-menu { position:absolute; top:calc(100% + 6px); left:0; z-index:30; width:220px; padding:6px; border:1px solid var(--line); border-radius:12px; background:var(--surface); box-shadow:0 16px 40px -12px rgba(17,24,39,.3); animation:menu-select-in .2s var(--ease); }
+.md-content .lang-search { display:block; width:100%; margin:0 0 4px; padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); font:13px var(--font-mono); }
+.md-content .lang-list { display:grid; max-height:260px; overflow:auto; scrollbar-width:thin; }
+.md-content .lang-option { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:7px 10px; border:0; border-radius:7px; background:none; color:var(--text-2); font:13px var(--font-mono); text-align:left; cursor:pointer; }
+.md-content .lang-option.on { background:var(--accent-soft); color:var(--accent); }
+.md-content .lang-option.current { color:var(--accent); }
+.md-content .lang-option svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.md-content .lang-empty { margin:6px 10px; color:var(--faint); font-size:12.5px; }
+@keyframes menu-select-in { from { opacity:0; transform:translateY(-4px) scale(.97); } }
 .md-content .code-copy { display:inline-flex; align-items:center; gap:5px; padding:4px 8px; border:0; border-radius:6px; background:none; color:var(--muted); font:12px var(--font); cursor:pointer; opacity:.7; transition:opacity .2s,background .2s,color .2s; }
 .md-content .code-block:hover .code-copy, .md-content .code-copy:focus-visible { opacity:1; }
 .md-content .code-copy:hover { background:color-mix(in srgb,var(--text) 6%,transparent); color:var(--text); }
@@ -116,3 +127,6 @@
   .md-math { left:0 !important; width:100%; }
   .md-source { font-size:14px; }
 }
+
+/* 从大纲跳转时，标题停在顶栏与工具栏下方，不被遮住 */
+.md-content :is(h1,h2,h3,h4,h5,h6) { scroll-margin-top:calc(var(--header-h) + 130px); }

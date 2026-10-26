@@ -4,6 +4,7 @@ import { DialogClose, DialogContent, DialogDescription, DialogOverlay, DialogPor
 import { confirmDialog } from '../../composables/useConfirm'
 import { docsApi, roleName } from '../../docs'
 import type { DocItem, DocLink, DocMember, Person } from '../../docs'
+import MenuSelect from '../MenuSelect.vue'
 
 const props = defineProps<{ doc: DocItem }>()
 const emit = defineEmits<{ close: []; changed: [doc: Partial<DocItem>] }>()
@@ -16,6 +17,7 @@ const error = ref(''), notice = ref(''), busy = ref(false)
 const isOwner = computed(() => props.doc.role === 'owner')
 // 非所有者只能授予不超过自己的权限。
 const grantable = computed(() => props.doc.role === 'view' ? ['view'] as const : ['view', 'edit'] as const)
+const roleOptions = computed(() => grantable.value.map(value => ({ value, label: roleName[value] })))
 
 const link = ref<DocLink | undefined>(props.doc.link)
 const password = ref('')
@@ -98,9 +100,7 @@ onMounted(load)
 
         <form class="invite" @submit.prevent="invite">
           <input v-model="email" class="d-input" type="email" placeholder="对方的注册邮箱" autocomplete="off" required>
-          <select v-model="role" class="d-input">
-            <option v-for="value in grantable" :key="value" :value="value">{{ roleName[value] }}</option>
-          </select>
+          <MenuSelect v-model="role" :options="roleOptions" label="邀请的权限" />
           <button class="d-btn primary" type="submit" :disabled="busy">邀请</button>
         </form>
         <label class="d-check small"><input v-model="canShare" type="checkbox">允许对方再分享给其他人</label>
@@ -118,9 +118,7 @@ onMounted(load)
             <span class="avatar"><img v-if="member.avatar" :src="member.avatar" alt=""><template v-else>{{ member.name.slice(0, 1) }}</template></span>
             <span class="who"><strong>{{ member.name }}</strong><small>{{ member.email }}</small></span>
             <span class="controls">
-              <select class="d-input" :value="member.role" :disabled="busy || (!isOwner && member.role === 'edit' && doc.role !== 'edit')" @change="update(member, { role: ($event.target as HTMLSelectElement).value as 'view' | 'edit' })">
-                <option v-for="value in grantable" :key="value" :value="value">{{ roleName[value] }}</option>
-              </select>
+              <MenuSelect :model-value="member.role" :options="roleOptions" :label="`${member.name} 的权限`" :disabled="busy || (!isOwner && member.role === 'edit' && doc.role !== 'edit')" @update:model-value="value => update(member, { role: value as 'view' | 'edit' })" />
               <label class="d-check small" title="允许再分享"><input type="checkbox" :checked="member.can_share" :disabled="busy" @change="update(member, { can_share: ($event.target as HTMLInputElement).checked })">可分享</label>
               <button class="d-btn danger small" type="button" :disabled="busy" @click="remove(member)">移除</button>
             </span>
@@ -140,9 +138,7 @@ onMounted(load)
             <p class="d-muted small">{{ link.role === 'edit' ? '登录用户打开链接即可编辑，未登录访客只能查看。' : '持有链接的人都可以查看，包括未登录的访客。' }} {{ expiresText }}{{ link.has_password ? ' · 已设密码' : '' }}</p>
             <div class="row">
               <input v-model="password" class="d-input" type="text" :placeholder="link.has_password ? '输入新密码以更换' : '设置访问密码（可选）'" autocomplete="off" maxlength="128">
-              <select v-model="expiry" class="d-input">
-                <option v-for="option in expiryOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-              </select>
+              <MenuSelect v-model="expiry" :options="expiryOptions" label="链接有效期" />
               <button class="d-btn" type="button" :disabled="busy || (!password && expiry === 'keep')" @click="saveLink()">保存</button>
             </div>
             <div class="row end">
@@ -165,7 +161,7 @@ onMounted(load)
 .share-dialog > .d-muted { margin:6px 0 16px; font-size:13px; }
 .share-dialog .invite, .share-dialog .row, .share-dialog .url { display:flex; gap:8px; }
 .share-dialog .invite input, .share-dialog .row input, .share-dialog .url input { flex:1; min-width:0; }
-.share-dialog select.d-input { width:auto; flex:none; }
+.share-dialog .menu-select { flex:none; }
 .share-dialog .small { font-size:12.5px; }
 .share-dialog .d-check.small { margin-top:8px; }
 .share-dialog .d-note { margin-top:12px; }

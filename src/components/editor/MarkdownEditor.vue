@@ -23,6 +23,11 @@ import Collaboration from '@tiptap/extension-collaboration'
 import CollaborationCaret from '@tiptap/extension-collaboration-caret'
 import { common, createLowlight } from 'lowlight'
 import katex from 'katex'
+import dockerfile from 'highlight.js/lib/languages/dockerfile'
+import latex from 'highlight.js/lib/languages/latex'
+import matlab from 'highlight.js/lib/languages/matlab'
+import nginx from 'highlight.js/lib/languages/nginx'
+import powershell from 'highlight.js/lib/languages/powershell'
 import { confirmDialog, promptDialog } from '../../composables/useConfirm'
 import type * as Y from 'yjs'
 import type { WebsocketProvider } from 'y-websocket'
@@ -44,6 +49,8 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 
 const lowlight = createLowlight(common)
+// 语言选择里有、但 lowlight 常用集没有的语法，单独注册。
+lowlight.register({ dockerfile, latex, matlab, nginx, powershell })
 const source = ref(false)
 const sourceText = ref('')
 const notice = ref('')

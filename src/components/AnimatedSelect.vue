@@ -44,7 +44,7 @@ label { display:block; font-size:12px; color:var(--muted); margin-bottom:8px; }
 .select-trigger { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; min-height:48px; padding:13px 16px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); color:var(--text); font:14px var(--font); text-align:left; cursor:pointer; transition:border-color .3s,box-shadow .3s,background .3s; }
 .select-trigger :deep([data-slot="value"]),.select-trigger>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .select-trigger:hover { border-color:var(--line-strong); }
-.select-trigger[data-state="open"] { border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); }
+.select-trigger[data-state="open"] { border-color:var(--field-focus-border); box-shadow:var(--field-focus-shadow); }
 svg { width:18px; height:18px; flex:none; fill:none; stroke:var(--muted); stroke-width:1.5; transition:transform .35s var(--ease),stroke .3s; }
 [data-state="open"] svg { transform:rotate(180deg); stroke:var(--accent); }
 :global(.select-menu) { z-index:9; width:var(--reka-select-trigger-width); max-height:min(320px,var(--reka-select-content-available-height)); overflow:hidden; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); color:var(--text); box-shadow:0 16px 40px -12px #0003; transform-origin:var(--reka-select-content-transform-origin); }
