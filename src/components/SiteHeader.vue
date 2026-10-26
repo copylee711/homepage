@@ -16,6 +16,7 @@ const path = location.pathname.replace(/\/$/, '')
 const isScut = path === '/scut'
 const isAccount = path === '/account'
 const isGames = path.startsWith('/games')
+const isDocs = path === '/docs'
 // 非首页时，锚点链接回到首页对应区块。
 const onHome = path === ''
 // 入口区没有单独的导航项，滚动到那里时仍高亮 Home
@@ -88,6 +89,7 @@ onBeforeUnmount(() => {
         <a href="/games" :class="{ active: isGames }" :aria-current="isGames ? 'page' : undefined">Games</a>
         <a href="/posts">Articles</a>
         <a href="/notes">Notes</a>
+        <a v-if="account" href="/docs" :class="{ active: isDocs }" :aria-current="isDocs ? 'page' : undefined">Docs</a>
         <a v-if="features.drive" :href="site.cloud" target="_blank" rel="noopener">Cloud</a>
         </div>
         <a class="account" :class="{ active: isAccount }" href="/account" :aria-label="account ? `账户：${account.name}` : '登录或注册'" :title="account ? account.name : '登录 / 注册'">

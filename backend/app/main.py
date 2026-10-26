@@ -52,6 +52,7 @@ from .content import (
     versions,
 )
 from .database import make_engine
+from .docs import router as docs_router
 from .drive import accounts as drive_accounts
 from .drive.errors import DriveError
 from .drive.routes import drive_error
@@ -216,6 +217,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.include_router(drive_router)
+    app.include_router(docs_router)
 
     @app.get("/api/health")
     def health(session: Session = Depends(database)):

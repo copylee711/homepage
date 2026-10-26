@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import { AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogOverlay, AlertDialogPortal, AlertDialogRoot, AlertDialogTitle } from 'reka-ui'
-import { confirmRequest, type ConfirmRequest } from '../composables/useConfirm'
+import { confirmRequest, promptValue, type ConfirmRequest } from '../composables/useConfirm'
 
 // 全局唯一的确认框，配合 confirmDialog() 使用。关闭动画期间保留上一次的文案。
 const open = ref(false)
 const shown = ref<ConfirmRequest>()
-watch(confirmRequest, request => { if (request) { shown.value = request; open.value = true } })
+const field = ref<HTMLInputElement | HTMLTextAreaElement>()
+watch(confirmRequest, async request => {
+  if (!request) return
+  shown.value = request; open.value = true
+  if (request.input) { await nextTick(); field.value?.focus(); field.value?.select() }
+})
 
 function decide(ok: boolean) {
   const request = confirmRequest.value
@@ -31,6 +36,10 @@ watch(open, value => value ? addEventListener('keydown', onKey, true) : removeEv
       <AlertDialogContent class="confirm-dialog">
         <AlertDialogTitle class="confirm-title">{{ shown?.title }}</AlertDialogTitle>
         <AlertDialogDescription v-if="shown?.message" class="confirm-message">{{ shown.message }}</AlertDialogDescription>
+        <template v-if="shown?.input">
+          <textarea v-if="shown.input.multiline" ref="field" v-model="promptValue" class="confirm-input" rows="4" :placeholder="shown.input.placeholder" spellcheck="false" @keydown.ctrl.enter="decide(true)" @keydown.meta.enter="decide(true)" />
+          <input v-else ref="field" v-model="promptValue" class="confirm-input" :placeholder="shown.input.placeholder" spellcheck="false" @keydown.enter.prevent="decide(true)">
+        </template>
         <div class="confirm-actions">
           <AlertDialogCancel class="confirm-btn">{{ shown?.cancelText ?? '取消' }}</AlertDialogCancel>
           <button type="button" class="confirm-btn" :class="shown?.danger ? 'danger' : 'primary'" @click="decide(true)">{{ shown?.confirmText ?? '确定' }}</button>
@@ -45,6 +54,8 @@ watch(open, value => value ? addEventListener('keydown', onKey, true) : removeEv
 .confirm-dialog { position:fixed; z-index:81; left:50%; top:50%; transform:translate(-50%,-50%); width:min(420px,calc(100vw - 40px)); max-height:calc(100vh - 40px); overflow:auto; padding:26px 28px 24px; border:1px solid var(--line); border-radius:var(--radius); background:var(--bg); color:var(--text); font-family:var(--font); box-shadow:0 30px 60px -20px rgba(0,0,0,.35); outline:none; }
 .confirm-title { margin:0; font-size:19px; font-weight:600; line-height:1.4; letter-spacing:-.01em; overflow-wrap:anywhere; }
 .confirm-message { margin:10px 0 0; color:var(--text-2); font-size:14px; line-height:1.75; overflow-wrap:anywhere; }
+.confirm-input { display:block; width:100%; margin-top:16px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--surface); color:var(--text); font:14px/1.6 var(--font-mono); resize:vertical; outline:none; transition:border-color .2s,box-shadow .2s; }
+.confirm-input:focus { border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); }
 .confirm-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:24px; }
 .confirm-btn { min-width:84px; padding:9px 18px; border:1px solid color-mix(in srgb,var(--line-strong) 55%,transparent); border-radius:10px; background:var(--surface); color:var(--text); font:inherit; font-size:14px; font-weight:500; cursor:pointer; transition:border-color .2s,color .2s,background .2s,filter .2s; }
 .confirm-btn:hover { border-color:var(--accent); color:var(--accent); }

@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, Column
+from sqlalchemy import JSON, Column, LargeBinary
 from sqlmodel import Field, SQLModel
 
 
@@ -363,3 +363,52 @@ class Feedback(SQLModel, table=True):
     ip_hash: str = Field(default="", index=True)
     created_at: float = Field(index=True)
     replied_at: float | None = None
+
+
+# —— 协作文档 ——
+
+
+class Doc(SQLModel, table=True):
+    """协作文档。正文是 Yjs 文档的完整状态（state），由 docs 模块在内存中合并后定期写回。
+
+    链接分享用 link_token 识别，重新生成即可让旧链接失效；link_role 为 none 时不开放链接。
+    """
+
+    __tablename__ = "doc"
+    id: str = Field(primary_key=True)
+    user_id: str = Field(index=True)
+    title: str = ""
+    state: bytes = Field(default=b"", sa_column=Column(LargeBinary, nullable=False))
+    size: int = 0
+    link_token: str = Field(unique=True, index=True)
+    link_role: str = "none"  # none | view | edit
+    link_password_hash: str = ""
+    link_expires_at: float = 0
+    # 只读成员与只读链接能否复制、导出正文；所有者与可编辑成员不受限制。
+    allow_copy: bool = True
+    created_at: float
+    updated_at: float
+    updated_by: str = ""
+
+
+class DocMember(SQLModel, table=True):
+    __tablename__ = "doc_member"
+    doc_id: str = Field(primary_key=True)
+    user_id: str = Field(primary_key=True, index=True)
+    role: str = "view"  # view | edit
+    # 可以把文档再分享给他人，授予的权限不超过自己的权限。
+    can_share: bool = False
+    added_by: str = ""
+    created_at: float
+
+
+class DocVersion(SQLModel, table=True):
+    __tablename__ = "doc_version"
+    id: str = Field(primary_key=True)
+    doc_id: str = Field(index=True)
+    state: bytes = Field(sa_column=Column(LargeBinary, nullable=False))
+    size: int = 0
+    label: str = ""
+    auto: bool = True
+    created_at: float = Field(index=True)
+    created_by: str = ""

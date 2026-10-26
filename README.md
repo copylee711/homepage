@@ -50,6 +50,7 @@ uv run uvicorn app.asgi:app --host 127.0.0.1 --port 8000
 | [内容后端](backend/README.md) | 后端目录与文档索引 |
 | [SCUT 通知索引](docs/scut.md) | 采集范围、阅读状态、初始化与运维 |
 | [云盘](docs/drive.md) | 网页、SFTP 与 WebDAV 云盘 |
+| [协作文档](docs/docs.md) | 实时协作的 Markdown 文档、权限与编辑器 |
 | [归档](legacy/README.md) | 已停用的 SFTPGo 部署与迁移工具 |
 
 ## 许可证

@@ -403,3 +403,37 @@ class FeedbackWrite(StrictModel):
 class FeedbackUpdate(StrictModel):
     status: Literal["new", "read", "done"]
     reply: str | None = Field(default=None, max_length=2000)
+
+
+# —— 协作文档 ——
+
+
+class DocCreate(StrictModel):
+    title: str = Field(default="", max_length=200)
+
+
+class DocUpdate(StrictModel):
+    title: str | None = Field(default=None, max_length=200)
+    allow_copy: bool | None = None
+
+
+class DocMemberWrite(StrictModel):
+    email: str = Field(min_length=3, max_length=254)
+    role: Literal["view", "edit"] = "view"
+    can_share: bool = False
+
+
+class DocLinkWrite(StrictModel):
+    role: Literal["none", "view", "edit"]
+    # None 保持原密码，空字符串取消密码。
+    password: str | None = Field(default=None, max_length=128)
+    expires_at: float = Field(default=0, ge=0)
+    regenerate: bool = False
+
+
+class DocVersionCreate(StrictModel):
+    label: str = Field(default="", max_length=80)
+
+
+class DocUnlock(StrictModel):
+    password: str = Field(max_length=128)

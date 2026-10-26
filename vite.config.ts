@@ -13,7 +13,8 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       proxy: {
-        '/api': backend,
+        // 协作文档的实时连接走 /api/docs/ws，需要转发 WebSocket。
+        '/api': { target: backend, ws: true },
         '/media': backend,
         '/posts': backend,
         '/content-assets': backend,

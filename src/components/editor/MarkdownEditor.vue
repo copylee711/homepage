@@ -1,0 +1,438 @@
+<script setup lang="ts">
+/**
+ * 所见即所得的 Markdown 编辑器：输入 Markdown 语法即时变成格式（类似 Typora），也可以切到源码模式。
+ *
+ * 两种用法：
+ * - 普通模式：v-model 绑定 Markdown 字符串，用于文章与笔记。只有用户真正编辑后才回写，打开不改动原文。
+ * - 协作模式：传入 collab（Yjs 文档与 y-websocket 连接），内容由 Yjs 同步，显示其他人的光标。
+ */
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { Editor, EditorContent, Extension, InputRule } from '@tiptap/vue-3'
+import { BubbleMenu } from '@tiptap/vue-3/menus'
+import StarterKit from '@tiptap/starter-kit'
+import { Markdown } from '@tiptap/markdown'
+import { TaskItem, TaskList } from '@tiptap/extension-list'
+import { TableKit } from '@tiptap/extension-table'
+import Image from '@tiptap/extension-image'
+import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
+import Mathematics from '@tiptap/extension-mathematics'
+import { Placeholder } from '@tiptap/extensions'
+import Collaboration from '@tiptap/extension-collaboration'
+import CollaborationCaret from '@tiptap/extension-collaboration-caret'
+import { common, createLowlight } from 'lowlight'
+import katex from 'katex'
+import { confirmDialog, promptDialog } from '../../composables/useConfirm'
+import type * as Y from 'yjs'
+import type { WebsocketProvider } from 'y-websocket'
+import 'katex/dist/katex.min.css'
+import './editor.css'
+
+/** 协作模式的参数；不带 provider 时只显示这份 Yjs 文档（如查看历史版本）。 */
+export interface CollabOptions { doc: Y.Doc; provider?: WebsocketProvider; user?: { name: string; color: string } }
+
+const props = withDefaults(defineProps<{
+  modelValue?: string
+  collab?: CollabOptions
+  editable?: boolean
+  placeholder?: string
+  /** 粘贴或拖入图片时上传，返回图片地址；不提供则只能插入图片链接。 */
+  upload?: (file: File) => Promise<string>
+}>(), { modelValue: '', editable: true, placeholder: '输入 / 插入内容，或直接用 Markdown 语法书写…' })
+const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
+
+const lowlight = createLowlight(common)
+const source = ref(false)
+const sourceText = ref('')
+const notice = ref('')
+const slash = ref<{ query: string; from: number; left: number; top: number; index: number } | null>(null)
+
+// 可视化编辑无法原样保留的语法：原始 HTML、脚注与引用式链接，以及夹在文字中间的 $$行内公式$$
+// （编辑器会把它拆成独立的公式块）。遇到时默认进入源码模式，避免保存时改变原文。
+const LOSSY = /<\/?[a-zA-Z][\w-]*(\s[^>]*)?>|^\[\^?[^\]]+\]:\s|[^\s$][^\S\n]*\$\$[^$\n]+\$\$/m
+function lossy(markdown: string) {
+  return LOSSY.test(markdown.replace(/```[\s\S]*?```|`[^`\n]*`/g, ''))
+}
+
+// 贴近 Typora 的输入习惯：$公式$ 即时变成行内公式（首尾不能是空格，避免把“$5 到 $6”当成公式），
+// 一行只写 ```语言 后按回车开始代码块；常用格式都有与 Typora 相同的快捷键。
+// 浏览器占用的组合键（Ctrl+T、Ctrl+1–6 等）改用 Tiptap 自带的 Ctrl+Alt 版本。
+const TypingHabits = Extension.create({
+  name: 'typingHabits',
+  addInputRules() {
+    return [new InputRule({
+      find: /(?:^|[^$\\\w])\$([^\s$](?:[^$\n]*[^\s$])?)\$$/,
+      handler: ({ state, range, match }) => {
+        const start = range.from + match[0].indexOf('$')
+        state.tr.replaceWith(start, range.to, state.schema.nodes.inlineMath.create({ latex: match[1] }))
+      },
+    })]
+  },
+  addKeyboardShortcuts() {
+    return {
+      'Mod-m': () => newMath('block'),
+      'Mod-Shift-m': () => newMath('block'),
+      'Mod-Shift-e': () => newMath('inline'),
+      'Mod-Shift-k': ({ editor: current }) => current.chain().focus().toggleCodeBlock().run(),
+      'Mod-Shift-q': ({ editor: current }) => current.chain().focus().toggleBlockquote().run(),
+      'Mod-Shift-[': ({ editor: current }) => current.chain().focus().toggleOrderedList().run(),
+      'Mod-Shift-]': ({ editor: current }) => current.chain().focus().toggleBulletList().run(),
+      'Mod-Shift-x': ({ editor: current }) => current.chain().focus().toggleTaskList().run(),
+      'Mod-Shift-`': ({ editor: current }) => current.chain().focus().toggleCode().run(),
+      'Mod-Alt-t': ({ editor: current }) => current.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
+      'Mod-k': () => { void setLink(); return true },
+      'Mod-/': () => { void toggleSource(); return true },
+      Enter: ({ editor: current }) => {
+        const { $from, empty } = current.state.selection
+        if (!empty || $from.parent.type.name !== 'paragraph' || $from.parentOffset !== $from.parent.content.size) return false
+        const fence = /^```([\w+#-]*)$/.exec($from.parent.textContent)
+        if (!fence) return false
+        return current.chain().deleteRange({ from: $from.start(), to: $from.end() }).setCodeBlock({ language: fence[1] || null } as never).run()
+      },
+    }
+  },
+})
+
+let emitTimer = 0
+const editor = shallowRef<Editor>()
+
+// 手机上编辑时，工具栏停靠在软键盘正上方；触屏不显示选中浮动菜单，以免和系统的复制粘贴菜单打架。
+const touch = matchMedia('(pointer: coarse)').matches
+const narrow = matchMedia('(max-width: 760px)')
+const phone = ref(narrow.matches)
+const focused = ref(false)
+const keyboard = ref(0)
+const docked = computed(() => phone.value && focused.value && !source.value)
+function onNarrow(event: MediaQueryListEvent) { phone.value = event.matches }
+function onViewport() {
+  const view = window.visualViewport
+  keyboard.value = view ? Math.max(0, innerHeight - view.height - view.offsetTop) : 0
+}
+narrow.addEventListener('change', onNarrow)
+window.visualViewport?.addEventListener('resize', onViewport)
+window.visualViewport?.addEventListener('scroll', onViewport)
+let blurTimer = 0
+
+function build() {
+  const collab = props.collab
+  editor.value = new Editor({
+    editable: props.editable,
+    ...(collab ? {} : { content: props.modelValue, contentType: 'markdown' as const }),
+    extensions: [
+      StarterKit.configure({ underline: false, codeBlock: false, link: { openOnClick: false, autolink: true }, ...(collab ? { undoRedo: false } : {}) }),
+      Markdown,
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      TableKit.configure({ table: { resizable: false } }),
+      Image,
+      CodeBlockLowlight.configure({ lowlight, defaultLanguage: null }),
+      Mathematics.configure({
+        katexOptions: { throwOnError: false },
+        inlineOptions: { onClick: (node, pos) => editMath('inline', pos, node.attrs.latex) },
+        blockOptions: { onClick: (node, pos) => editMath('block', pos, node.attrs.latex) },
+      }),
+      Placeholder.configure({ placeholder: props.placeholder }),
+      TypingHabits,
+      ...(collab ? [
+        Collaboration.configure({ document: collab.doc }),
+        ...(collab.provider ? [CollaborationCaret.configure({ provider: collab.provider, user: collab.user })] : []),
+      ] : []),
+    ],
+    editorProps: {
+      attributes: { class: 'prose md-content', spellcheck: 'false' },
+      handleKeyDown: (_, event) => slashKey(event),
+      handlePaste: (_, event) => pasteImages(event.clipboardData?.files),
+      handleDrop: (_, event) => pasteImages((event as DragEvent).dataTransfer?.files),
+    },
+    onUpdate: ({ editor: current }) => {
+      updateSlash()
+      if (props.collab) return
+      clearTimeout(emitTimer)
+      emitTimer = window.setTimeout(() => emit('update:modelValue', current.getMarkdown()), 120)
+    },
+    onSelectionUpdate: () => updateSlash(),
+    onFocus: () => { clearTimeout(blurTimer); focused.value = true; onViewport() },
+    // 点工具栏时编辑区会短暂失焦，稍等再收起停靠的工具栏。
+    onBlur: () => { blurTimer = window.setTimeout(() => { focused.value = false }, 150) },
+  })
+}
+
+build()
+// 正文里的 $ 也要转义，否则发布后“$5 到 $6”会被当成公式；默认只转义 \ ` * _ [ ] ~。
+const manager = (editor.value as unknown as { markdown?: { escapeMarkdownSyntax: (text: string) => string } }).markdown
+if (manager) manager.escapeMarkdownSyntax = text => text.replace(/([\\`*_[\]~$])/g, '\\$1')
+if (!props.collab && lossy(props.modelValue)) {
+  source.value = true
+  sourceText.value = props.modelValue
+  notice.value = '这篇内容含有 HTML、脚注或引用式链接，可视化编辑可能无法完整保留，已切换到源码模式。'
+}
+
+// 外部替换内容（如导入 .md 文件）时同步到编辑器；自己发出的更新不会触发重设。
+watch(() => props.modelValue, value => {
+  if (props.collab || !editor.value) return
+  if (source.value) { if (value !== sourceText.value) sourceText.value = value; return }
+  if (value !== editor.value.getMarkdown()) editor.value.commands.setContent(value, { contentType: 'markdown', emitUpdate: false })
+})
+watch(() => props.editable, value => editor.value?.setEditable(value))
+
+onBeforeUnmount(() => {
+  clearTimeout(emitTimer); clearTimeout(blurTimer); editor.value?.destroy()
+  narrow.removeEventListener('change', onNarrow)
+  window.visualViewport?.removeEventListener('resize', onViewport)
+  window.visualViewport?.removeEventListener('scroll', onViewport)
+})
+
+async function toggleSource() {
+  const current = editor.value
+  if (!current) return
+  if (!source.value) {
+    sourceText.value = props.collab ? current.getMarkdown() : (props.modelValue || current.getMarkdown())
+    source.value = true
+    return
+  }
+  if (lossy(sourceText.value) && !await confirmDialog({ title: '切换到可视化编辑？', message: '内容含有 HTML、脚注或引用式链接，切换后这部分可能丢失。', confirmText: '仍要切换', danger: true })) return
+  current.commands.setContent(sourceText.value, { contentType: 'markdown', emitUpdate: !!props.collab })
+  source.value = false
+  notice.value = ''
+}
+
+function onSource() {
+  if (!props.collab) emit('update:modelValue', sourceText.value)
+}
+
+defineExpose({
+  getMarkdown: () => (source.value ? sourceText.value : editor.value?.getMarkdown() ?? ''),
+  getJSON: () => editor.value?.getJSON(),
+  setJSON: (content: object) => editor.value?.commands.setContent(content),
+  insertMarkdown: (markdown: string) => {
+    if (source.value) { sourceText.value += markdown; onSource(); return }
+    editor.value?.chain().focus().insertContent(markdown, { contentType: 'markdown' }).run()
+  },
+  editor,
+})
+
+// —— 工具栏 ——
+
+const active = (name: string, attrs?: Record<string, unknown>) => editor.value?.isActive(name, attrs) ?? false
+const run = () => editor.value!.chain().focus()
+const inTable = computed(() => active('table'))
+
+async function setLink() {
+  const previous = editor.value?.getAttributes('link').href as string | undefined
+  const url = await promptDialog({ title: previous ? '编辑链接' : '插入链接', message: '留空则移除链接。', value: previous ?? 'https://', confirmText: '确定' })
+  if (url === null) return
+  if (!url) run().extendMarkRange('link').unsetLink().run()
+  else run().extendMarkRange('link').setLink({ href: url }).run()
+}
+
+async function insertImage() {
+  if (props.upload) {
+    const input = document.createElement('input')
+    input.type = 'file'; input.accept = 'image/*'
+    input.onchange = () => pasteImages(input.files)
+    input.click()
+    return
+  }
+  const url = await promptDialog({ title: '插入图片', value: 'https://', input: { placeholder: '图片地址' } })
+  if (url) run().setImage({ src: url }).run()
+}
+
+function pasteImages(files?: FileList | null) {
+  const images = [...(files ?? [])].filter(file => file.type.startsWith('image/'))
+  if (!images.length || !props.upload || !editor.value?.isEditable) return false
+  void (async () => {
+    for (const file of images) {
+      try { run().setImage({ src: await props.upload!(file), alt: file.name.replace(/\.[^.]+$/, '') }).run() }
+      catch (err) { alert(err instanceof Error ? err.message : '图片上传失败') }
+    }
+  })()
+  return true
+}
+
+// —— 公式：插入后直接进入公式编辑框，边输入边预览（类似 Typora 的公式块） ——
+
+type MathKind = 'inline' | 'block'
+const math = ref<{ kind: MathKind; pos: number; latex: string; fresh: boolean; left: number; top: number } | null>(null)
+const mathField = ref<HTMLTextAreaElement>()
+const mathPreview = computed(() => {
+  if (!math.value?.latex.trim()) return ''
+  return katex.renderToString(math.value.latex, { displayMode: math.value.kind === 'block', throwOnError: false })
+})
+const nodeName = (kind: MathKind) => kind === 'block' ? 'blockMath' : 'inlineMath'
+
+function insertMath(block = false) { newMath(block ? 'block' : 'inline') }
+
+function newMath(kind: MathKind) {
+  const current = editor.value
+  if (!current?.isEditable) return false
+  const from = current.state.selection.from
+  current.chain().focus().insertContent({ type: nodeName(kind), attrs: { latex: '' } }).run()
+  let found = -1
+  current.state.doc.nodesBetween(Math.max(0, from - 2), Math.min(current.state.doc.content.size, from + 4), (node, pos) => {
+    if (node.type.name === nodeName(kind)) found = pos
+  })
+  if (found >= 0) editMath(kind, found, '', true)
+  return true
+}
+
+async function editMath(kind: MathKind, pos: number, latex: string, fresh = false) {
+  const current = editor.value
+  if (!current?.isEditable) return
+  const dom = current.view.nodeDOM(pos) as HTMLElement | null
+  const box = current.view.dom.closest('.md-editor')!.getBoundingClientRect()
+  const rect = dom?.getBoundingClientRect() ?? current.view.coordsAtPos(pos) as unknown as DOMRect
+  math.value = { kind, pos, latex, fresh, left: Math.max(0, Math.min(rect.left - box.left, box.width - 340)), top: rect.bottom - box.top + 8 }
+  await nextTick()
+  mathField.value?.focus()
+  mathField.value?.select()
+}
+
+function finishMath(save: boolean) {
+  const state = math.value
+  const current = editor.value
+  if (!state || !current) return
+  math.value = null
+  const node = current.state.doc.nodeAt(state.pos)
+  if (!node || node.type.name !== nodeName(state.kind)) return
+  const latex = state.latex.trim()
+  if ((save && !latex) || (!save && state.fresh && !node.attrs.latex)) {
+    current.chain().focus().deleteRange({ from: state.pos, to: state.pos + node.nodeSize }).run()
+    return
+  }
+  if (save) {
+    if (state.kind === 'block') current.commands.updateBlockMath({ pos: state.pos, latex })
+    else current.commands.updateInlineMath({ pos: state.pos, latex })
+  }
+  // 光标落到公式后面，接着输入正文。
+  current.chain().focus().setTextSelection(state.pos + current.state.doc.nodeAt(state.pos)!.nodeSize).run()
+}
+
+function mathKey(event: KeyboardEvent) {
+  if (event.key === 'Escape') { event.preventDefault(); finishMath(false) }
+  // 行内公式回车完成；公式块里回车换行，Ctrl+Enter 或 Shift+Enter 完成。
+  else if (event.key === 'Enter' && (math.value?.kind === 'inline' || event.ctrlKey || event.metaKey || event.shiftKey)) {
+    event.preventDefault(); finishMath(true)
+  }
+}
+
+// —— 斜杠菜单：在空段落开头输入 / 呼出 ——
+
+type Command = { id: string; label: string; hint: string; keys: string; action: () => void }
+const commands: Command[] = [
+  { id: 'p', label: '正文', hint: '普通段落', keys: 'text zw', action: () => run().setParagraph().run() },
+  { id: 'h1', label: '一级标题', hint: '#', keys: 'h1 heading bt', action: () => run().setHeading({ level: 1 }).run() },
+  { id: 'h2', label: '二级标题', hint: '##', keys: 'h2 heading bt', action: () => run().setHeading({ level: 2 }).run() },
+  { id: 'h3', label: '三级标题', hint: '###', keys: 'h3 heading bt', action: () => run().setHeading({ level: 3 }).run() },
+  { id: 'ul', label: '无序列表', hint: '-', keys: 'bullet list lb', action: () => run().toggleBulletList().run() },
+  { id: 'ol', label: '有序列表', hint: '1.', keys: 'ordered number list lb', action: () => run().toggleOrderedList().run() },
+  { id: 'task', label: '待办清单', hint: '[ ]', keys: 'todo task check db', action: () => run().toggleTaskList().run() },
+  { id: 'quote', label: '引用', hint: '>', keys: 'quote yy', action: () => run().toggleBlockquote().run() },
+  { id: 'code', label: '代码块', hint: '```', keys: 'code dm', action: () => run().toggleCodeBlock().run() },
+  { id: 'table', label: '表格', hint: '3 × 3', keys: 'table bg', action: () => run().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run() },
+  { id: 'math', label: '公式', hint: '$$', keys: 'math latex gs', action: () => insertMath(true) },
+  { id: 'image', label: '图片', hint: props.upload ? '上传' : '链接', keys: 'image picture tp', action: () => insertImage() },
+  { id: 'hr', label: '分割线', hint: '---', keys: 'divider hr line fgx', action: () => run().setHorizontalRule().run() },
+]
+const slashItems = computed(() => {
+  const query = slash.value?.query.toLowerCase() ?? ''
+  return commands.filter(item => !query || item.label.includes(query) || item.keys.includes(query))
+})
+
+function updateSlash() {
+  const current = editor.value
+  if (!current || !current.isEditable) { slash.value = null; return }
+  const { $from, empty } = current.state.selection
+  const text = $from.parent.textBetween(0, $from.parentOffset, undefined, '￼')
+  const match = empty && $from.parent.type.name === 'paragraph' ? /^\/([^\s/]{0,12})$/.exec(text) : null
+  if (!match) { slash.value = null; return }
+  const coords = current.view.coordsAtPos($from.pos)
+  const box = current.view.dom.closest('.md-editor')!.getBoundingClientRect()
+  slash.value = { query: match[1], from: $from.pos - text.length, left: coords.left - box.left, top: coords.bottom - box.top + 6,
+                  index: slash.value?.query === match[1] ? slash.value.index : 0 }
+}
+
+function pick(item: Command) {
+  const state = slash.value
+  if (!state) return
+  editor.value!.chain().focus().deleteRange({ from: state.from, to: editor.value!.state.selection.from }).run()
+  slash.value = null
+  item.action()
+}
+
+function slashKey(event: KeyboardEvent) {
+  const state = slash.value
+  if (!state || !slashItems.value.length) return false
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    const count = slashItems.value.length
+    state.index = (state.index + (event.key === 'ArrowDown' ? 1 : count - 1)) % count
+    return true
+  }
+  if (event.key === 'Enter' || event.key === 'Tab') { pick(slashItems.value[state.index]); return true }
+  if (event.key === 'Escape') { slash.value = null; return true }
+  return false
+}
+</script>
+
+<template>
+  <div class="md-editor" :class="{ 'is-source': source, 'is-readonly': !editable, 'is-docked': docked }">
+    <div v-if="editable && editor" class="md-toolbar" :class="{ docked }" :style="docked ? { bottom: `${keyboard}px` } : undefined" role="toolbar" aria-label="格式" @mousedown="event => { if ((event.target as HTMLElement).closest('button')) event.preventDefault() }">
+      <template v-if="!source">
+        <button v-if="!collab" type="button" title="撤销 (Ctrl+Z)" :disabled="!editor.can().undo()" @click="run().undo().run()"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></svg></button>
+        <button v-if="!collab" type="button" title="重做 (Ctrl+Shift+Z)" :disabled="!editor.can().redo()" @click="run().redo().run()"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13" /></svg></button>
+        <span v-if="!collab" class="sep" />
+        <button type="button" class="text" :class="{ on: active('heading', { level: 1 }) }" title="一级标题 (Ctrl+Alt+1)" @click="run().toggleHeading({ level: 1 }).run()">H1</button>
+        <button type="button" class="text" :class="{ on: active('heading', { level: 2 }) }" title="二级标题 (Ctrl+Alt+2)" @click="run().toggleHeading({ level: 2 }).run()">H2</button>
+        <button type="button" class="text" :class="{ on: active('heading', { level: 3 }) }" title="三级标题 (Ctrl+Alt+3)" @click="run().toggleHeading({ level: 3 }).run()">H3</button>
+        <span class="sep" />
+        <button type="button" :class="{ on: active('bold') }" title="加粗 (Ctrl+B)" @click="run().toggleBold().run()"><svg viewBox="0 0 24 24"><path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z" /></svg></button>
+        <button type="button" :class="{ on: active('italic') }" title="斜体 (Ctrl+I)" @click="run().toggleItalic().run()"><svg viewBox="0 0 24 24"><path d="M10 5h8M6 19h8M14 5l-4 14" /></svg></button>
+        <button type="button" :class="{ on: active('strike') }" title="删除线 (Ctrl+Shift+S)" @click="run().toggleStrike().run()"><svg viewBox="0 0 24 24"><path d="M5 12h14M16 7.5C15.4 5.9 13.9 5 12 5c-2.5 0-4 1.3-4 3 0 1.4.9 2.4 3 3M8 16.5c.6 1.6 2.1 2.5 4 2.5 2.5 0 4-1.3 4-3 0-.6-.2-1.2-.5-1.6" /></svg></button>
+        <button type="button" :class="{ on: active('code') }" title="行内代码 (Ctrl+Shift+`)" @click="run().toggleCode().run()"><svg viewBox="0 0 24 24"><path d="m9 8-4 4 4 4M15 8l4 4-4 4" /></svg></button>
+        <button type="button" :class="{ on: active('link') }" title="链接 (Ctrl+K)" @click="setLink"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></svg></button>
+        <span class="sep" />
+        <button type="button" :class="{ on: active('bulletList') }" title="无序列表 (Ctrl+Shift+])" @click="run().toggleBulletList().run()"><svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01" /></svg></button>
+        <button type="button" :class="{ on: active('orderedList') }" title="有序列表 (Ctrl+Shift+[)" @click="run().toggleOrderedList().run()"><svg viewBox="0 0 24 24"><path d="M10 6h10M10 12h10M10 18h10M4 5l1.5-1V9M4 14.5c0-.8.7-1.5 1.5-1.5S7 13.6 7 14.4c0 1.1-3 2.1-3 3.6h3" /></svg></button>
+        <button type="button" :class="{ on: active('taskList') }" title="待办清单 (Ctrl+Shift+X)" @click="run().toggleTaskList().run()"><svg viewBox="0 0 24 24"><path d="M4 5h5v5H4zM5.5 7.5l1 1 1.5-2M4 14h5v5H4zM12 7.5h8M12 16.5h8" /></svg></button>
+        <button type="button" :class="{ on: active('blockquote') }" title="引用 (Ctrl+Shift+Q)" @click="run().toggleBlockquote().run()"><svg viewBox="0 0 24 24"><path d="M5 6v12M10 8h9M10 12h9M10 16h6" /></svg></button>
+        <button type="button" :class="{ on: active('codeBlock') }" title="代码块 (Ctrl+Shift+K)" @click="run().toggleCodeBlock().run()"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM9 10l-2 2 2 2M15 10l2 2-2 2" /></svg></button>
+        <span class="sep" />
+        <button type="button" title="表格 (Ctrl+Alt+T)" @click="run().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 10h16M4 14.5h16M10 5v14" /></svg></button>
+        <button type="button" title="公式块 (Ctrl+M)；行内公式 Ctrl+Shift+E 或输入 $公式$" @click="insertMath(true)"><svg viewBox="0 0 24 24"><path d="M17 5H7l5 7-5 7h10" /></svg></button>
+        <button type="button" title="图片" @click="insertImage"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 16l5-5 4 4 2-2 5 5M15 9h.01" /></svg></button>
+        <button type="button" title="分割线" @click="run().setHorizontalRule().run()"><svg viewBox="0 0 24 24"><path d="M4 12h16" /></svg></button>
+        <template v-if="inTable">
+          <span class="sep" />
+          <button type="button" class="text" title="在下方插入行" @click="run().addRowAfter().run()">+行</button>
+          <button type="button" class="text" title="在右侧插入列" @click="run().addColumnAfter().run()">+列</button>
+          <button type="button" class="text" title="删除所在行" @click="run().deleteRow().run()">−行</button>
+          <button type="button" class="text" title="删除所在列" @click="run().deleteColumn().run()">−列</button>
+          <button type="button" class="text danger" title="删除表格" @click="run().deleteTable().run()">删表</button>
+        </template>
+      </template>
+      <span class="grow" />
+      <button type="button" class="text mode" :class="{ on: source }" :title="source ? '回到可视化编辑 (Ctrl+/)' : '查看与编辑 Markdown 源码 (Ctrl+/)'" @click="toggleSource">{{ source ? '可视化' : 'Markdown' }}</button>
+    </div>
+    <p v-if="notice" class="md-notice">{{ notice }}</p>
+
+    <textarea v-if="source" v-model="sourceText" class="md-source" spellcheck="false" :readonly="!editable" @input="onSource" @keydown.ctrl.slash.prevent="toggleSource" @keydown.meta.slash.prevent="toggleSource" />
+    <template v-else>
+      <EditorContent :editor="editor" class="md-body" />
+      <BubbleMenu v-if="editor && editable && !touch" :editor="editor" class="md-bubble" :should-show="({ editor: e, state }) => !state.selection.empty && !e.isActive('codeBlock') && !e.isActive('image')">
+        <button type="button" :class="{ on: active('bold') }" @click="run().toggleBold().run()"><b>B</b></button>
+        <button type="button" :class="{ on: active('italic') }" @click="run().toggleItalic().run()"><i>I</i></button>
+        <button type="button" :class="{ on: active('strike') }" @click="run().toggleStrike().run()"><s>S</s></button>
+        <button type="button" :class="{ on: active('code') }" @click="run().toggleCode().run()"><code>&lt;/&gt;</code></button>
+        <button type="button" :class="{ on: active('link') }" @click="setLink">链接</button>
+      </BubbleMenu>
+      <div v-if="slash && slashItems.length" class="md-slash" :style="{ left: `${slash.left}px`, top: `${slash.top}px` }" role="listbox">
+        <button v-for="(item, i) in slashItems" :key="item.id" type="button" role="option" :aria-selected="i === slash.index" :class="{ on: i === slash.index }" @mousedown.prevent="pick(item)" @mouseenter="slash.index = i">
+          <span>{{ item.label }}</span><kbd>{{ item.hint }}</kbd>
+        </button>
+      </div>
+      <div v-if="math" class="md-math" :style="{ left: `${math.left}px`, top: `${math.top}px` }">
+        <textarea ref="mathField" v-model="math.latex" :rows="math.kind === 'block' ? 3 : 1" spellcheck="false" placeholder="输入 LaTeX，例如 rac{a}{b}" @keydown="mathKey" @blur="finishMath(true)" />
+        <div v-if="mathPreview" class="preview" v-html="mathPreview" />
+        <p>{{ math.kind === 'block' ? 'Ctrl+Enter 完成' : 'Enter 完成' }} · Esc 取消</p>
+      </div>
+    </template>
+  </div>
+</template>

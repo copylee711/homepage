@@ -400,6 +400,9 @@ def delete_account(session, user: User, password: str, media_dir):
                   UserChallenge, Feedback):
         session.exec(delete(table).where(table.user_id == user.id))
     session.exec(delete(EmailCode).where(EmailCode.email == user.email))
+    from .docs import purge_user
+
+    purge_user(session, user.id)
     remove_avatar(user, media_dir)
     session.delete(user)
     session.commit()

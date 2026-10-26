@@ -20,6 +20,14 @@ const GamesPage = defineAsyncComponent(() => import('./games/GamesPage.vue'))
 const DrivePage = defineAsyncComponent(() => import('./components/drive/DrivePage.vue'))
 const SharePage = defineAsyncComponent(() => import('./components/drive/SharePage.vue'))
 const onCloud = location.hostname.startsWith('cloud.')
+// 协作文档：列表在主站 /docs，编辑页（需要 WebSocket）在云盘子域名的 /doc/<id> 与链接分享 /d/<token>。
+const DocsList = defineAsyncComponent(() => import('./components/docs/DocsList.vue'))
+const DocPage = defineAsyncComponent(() => import('./components/docs/DocPage.vue'))
+const isDocPage = /^\/(doc|d)\/[A-Za-z0-9]+\/?$/.test(location.pathname)
+const isDocs = location.pathname.replace(/\/$/, '') === '/docs'
+const local = /^(localhost|127\.|\[::1\])/.test(location.hostname)
+if (isDocPage && !onCloud && !local) location.replace(location.origin.replace(/\/\/(www\.)?/, '//cloud.') + location.pathname + location.search)
+if (isDocs && onCloud) location.replace(location.origin.replace('//cloud.', '//') + '/docs')
 // 云盘子域名上的账户页直接回主站（登录 Cookie 两边共用），完成后再跳回来。
 if (onCloud && /^\/account\/?$/.test(location.pathname)) {
   const params = new URLSearchParams(location.search)
@@ -35,14 +43,14 @@ const isAccount = location.pathname.replace(/\/$/, '') === '/account'
 const isGames = /^\/games(\/|$)/.test(location.pathname)
 let stop: (() => void) | undefined
 let stopScut: (() => void) | undefined
-onMounted(() => { if (!isAdmin) { stop = startContent(); if (!isDrive && !isShare) stopScut = startScut() } })
+onMounted(() => { if (!isAdmin) { stop = startContent(); if (!isDrive && !isShare && !isDocPage) stopScut = startScut() } })
 onBeforeUnmount(() => { stop?.(); stopScut?.() })
 
 // 从其他页面打开 /#projects 等地址时，浏览器加载瞬间目标尚未渲染，原生锚点跳转会落空。
 // 内容就绪后再定位；之后 1.5 秒内上方区块异步加载导致的高度变化会继续校正，用户一旦滚动即停止。
 watch(ready, async value => {
   const id = decodeURIComponent(location.hash.slice(1))
-  if (!value || !id || isAdmin || isScut || isAccount || isGames || isDrive || isShare) return
+  if (!value || !id || isAdmin || isScut || isAccount || isGames || isDrive || isShare || isDocPage || isDocs) return
   await nextTick()
   const target = document.getElementById(id)
   if (!target) return
@@ -61,6 +69,9 @@ watch(ready, async value => {
 
 <template>
   <AdminPage v-if="isAdmin" />
+  <template v-else-if="ready && isDocPage">
+    <DocPage />
+  </template>
   <template v-else-if="ready && (isDrive || isShare)">
     <DrivePage v-if="isDrive" />
     <SharePage v-else />
@@ -69,10 +80,11 @@ watch(ready, async value => {
   <template v-else-if="ready">
   <SiteHeader />
   <p v-if="contentStatus.stale" class="content-banner" role="status">暂时无法检查更新，正在显示已加载的内容。<button @click="reloadContent">重试</button></p>
-  <main :id="isScut || isAccount || isGames ? 'top' : undefined">
+  <main :id="isScut || isAccount || isGames || isDocs ? 'top' : undefined">
     <ScutSection v-if="isScut" full />
     <AccountPage v-else-if="isAccount" />
     <GamesPage v-else-if="isGames" />
+    <div v-else-if="isDocs" class="container docs-page"><DocsList /></div>
     <template v-else>
     <HeroSection />
     <PortalGrid />
@@ -93,6 +105,7 @@ watch(ready, async value => {
 /* 内容就绪后加载页淡出并轻微放大，露出下方首页 */
 .boot-leave-active { transition:opacity .6s var(--ease),transform .6s var(--ease); }
 .boot-leave-to { opacity:0; transform:scale(1.04); }
+.docs-page { padding-top:calc(var(--header-h) + 40px); padding-bottom:80px; min-height:70vh; }
 .content-banner { position:fixed; top:64px; z-index:11; width:100%; padding:8px 24px; margin:0; background:var(--surface); border-bottom:1px solid var(--line); font-size:13px; }
 .content-banner button { margin:0 0 0 12px; }
 </style>

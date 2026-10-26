@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { confirmDialog } from '../composables/useConfirm'
 import { fetchJson } from '../content'
 import AdminInbox from './AdminInbox.vue'
@@ -12,6 +12,8 @@ import { noteSlug, postSlug } from '../slug'
 import AnimatedSelect from './AnimatedSelect.vue'
 import AppIcon from './AppIcon.vue'
 import LogoMark from './LogoMark.vue'
+// 编辑器较大，打开文章或笔记编辑时再加载。
+const MarkdownEditor = defineAsyncComponent(() => import('./editor/MarkdownEditor.vue'))
 
 type Draft = { title: string; slug: string; summary: string; markdown: string; cover: string }
 type Article = { id: string; revision: number; draft: Draft; published: object | null; slug_locked: boolean }
@@ -305,15 +307,16 @@ async function renderPreview() { await action(async () => {
 async function upload(event: Event, insert = (markdown: string) => { draft.value.markdown += markdown }) {
   const input = event.target as HTMLInputElement, file = input.files?.[0]
   if(!file) return
-  await action(async () => {
-    if(file.size > 20 * 1024 * 1024) throw new Error('图片不能超过 20 MiB')
-    const result = await fetchJson<{url: string}>('/api/admin/media', {method:'POST', body:file,
-      headers:{'Content-Type':file.type || 'application/octet-stream','X-CSRF-Token':csrf.value},
-      credentials:'same-origin', signal:AbortSignal.timeout(60000)})
-    insert(`\n\n![图片说明](${result.url})\n`)
-    message.value = `图片已上传到图床：${result.url}`
-  })
+  await action(async () => { insert(`\n\n![图片说明](${await uploadImage(file)})\n`) })
   input.value = ''
+}
+async function uploadImage(file: File) {
+  if(file.size > 20 * 1024 * 1024) throw new Error('图片不能超过 20 MiB')
+  const result = await fetchJson<{url: string}>('/api/admin/media', {method:'POST', body:file,
+    headers:{'Content-Type':file.type || 'application/octet-stream','X-CSRF-Token':csrf.value},
+    credentials:'same-origin', signal:AbortSignal.timeout(60000)})
+  message.value = `图片已上传到图床：${result.url}`
+  return result.url
 }
 // 从本地 Markdown 文件导入：首个一级标题作为标题，文件名作为地址，其余为正文。
 async function importMarkdown(event: Event, target: 'post' | 'note') {
@@ -500,8 +503,8 @@ runuser -u copylee -- .venv/bin/python -m app.cli reset-security --email you@exa
             <template v-if="noteEdit.source==='manual'">
               <div class="form-grid"><label>标题<input v-model="noteEdit.title" maxlength="200"></label><label>地址<input v-model="noteEdit.slug" maxlength="120" placeholder="my-note"><span class="field-hint">小写字母、数字、中文与连字符</span></label>
                 <label>分类<input v-model="noteEdit.category" maxlength="80" placeholder="例如：Python"></label><label>摘要<input v-model="noteEdit.summary" maxlength="1000" placeholder="留空则取正文第一段"></label></div>
-              <div class="markdown-tools"><span class="eyebrow">Markdown · 支持 $公式$</span><div class="buttons"><label class="upload-button">上传图片<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" @change="upload($event, md => { noteEdit!.markdown += md })"></label><button @click="previewNote">预览</button></div></div>
-              <textarea v-model="noteEdit.markdown" class="markdown-input" rows="16" aria-label="笔记正文"></textarea>
+              <div class="markdown-tools"><span class="eyebrow">正文 · 支持 Markdown 与 $公式$，可粘贴或拖入图片</span><div class="buttons"><button @click="previewNote">按发布效果预览</button></div></div>
+              <MarkdownEditor :key="noteEdit.id || 'new-note'" v-model="noteEdit.markdown" :upload="uploadImage" class="admin-editor" />
               <label class="checkbox"><input type="checkbox" v-model="noteEdit.visible">公开显示</label>
               <section v-if="notePreview" class="preview-panel"><h2>预览</h2><div class="prose" v-html="notePreview"></div></section>
               <div class="editor-actions"><button class="primary" @click="saveNote">保存笔记</button><button v-if="noteEdit.id" class="danger" @click="deleteNote">删除</button><a v-if="noteEdit.id && noteEdit.visible" :href="`/notes/${noteEdit.slug}`" target="_blank">查看公开页面 ↗</a></div>
@@ -526,9 +529,9 @@ runuser -u copylee -- .venv/bin/python -m app.cli reset-security --email you@exa
               <label>固定链接<span class="slug-field"><span class="slug-prefix">/posts/</span><input v-model="draft.slug" :readonly="article?.slug_locked" placeholder="根据标题自动生成" maxlength="120"></span><span class="field-hint">{{ article?.slug_locked ? (article.published ? '已发布，固定链接已锁定。' : '曾经发布过，固定链接已锁定；删除文章可释放该链接。') : '根据标题自动生成，中文转为拼音；可手动修改，清空后恢复自动生成。首次发布后锁定。' }}</span></label>
               <label>摘要<textarea v-model="draft.summary" rows="2" maxlength="1000"></textarea></label>
               <label>封面地址<input v-model="draft.cover" placeholder="https://… 或 /media/…"></label>
-              <div class="markdown-tools"><span class="eyebrow">Markdown</span><div class="buttons"><label class="upload-button">上传图片<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" @change="upload"></label><button @click="renderPreview">预览</button></div></div>
-              <textarea v-model="draft.markdown" class="markdown-input" rows="18" aria-label="Markdown 正文" placeholder="从这里开始…"></textarea>
-              <p class="field-hint">图片上传后可公开访问，单张上限 10 MiB；上传会将图片链接插入正文。</p>
+              <div class="markdown-tools"><span class="eyebrow">正文 · 支持 Markdown 与 $公式$，可粘贴或拖入图片</span><div class="buttons"><button @click="renderPreview">按发布效果预览</button></div></div>
+              <MarkdownEditor :key="article?.id || 'new-article'" v-model="draft.markdown" :upload="uploadImage" placeholder="从这里开始，输入 / 插入内容…" class="admin-editor" />
+              <p class="field-hint">图片上传后可公开访问，单张上限 10 MiB。</p>
               <section v-if="preview" class="preview-panel"><h2>预览</h2><div class="prose" v-html="preview"></div></section>
               <div class="editor-actions"><button @click="saveDraft">保存草稿</button><button class="primary" @click="publish">{{article?.published ? '发布更新' : '发布文章'}}</button><button v-if="article?.published" class="danger" @click="unpublish">撤下</button><button v-else-if="article" class="danger" @click="deleteArticle">删除</button><a v-if="article?.published" :href="`/posts/${article.draft.slug}`" target="_blank">查看公开版本 ↗</a></div>
               <p class="field-hint">保存草稿不会修改公开内容。发布会先保存当前编辑内容，再更新公开版本。撤下后可删除文章并释放固定链接。</p>
@@ -701,6 +704,9 @@ input:read-only { color:var(--muted); }
 .markdown-tools { display:flex; align-items:center; justify-content:space-between; margin:28px 0 12px; }
 .upload-button { position:relative; overflow:hidden; display:block; }.upload-button input { position:absolute; inset:0; opacity:0; cursor:pointer; }
 .markdown-input { font-family:var(--font-mono); font-size:14px; line-height:1.8; }
+.admin-editor { margin-bottom:8px; }
+.admin-editor :deep(.md-content) { min-height:420px; padding:24px 20px 40px; border:1px solid var(--line); border-top:0; border-radius:0 0 12px 12px; background:var(--surface); }
+.admin-editor :deep(.md-toolbar:not(.docked)) { border-radius:12px 12px 0 0; }
 .editor-actions { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:28px 0 14px; }.editor-actions>a { font-size:13px; color:var(--accent); }
 .preview-panel { margin-top:28px; padding:28px; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); }.preview-panel h2 { margin-bottom:24px; }
 @media(max-width:1050px) { .writing-layout { grid-template-columns:1fr; }.article-sidebar { border-right:0; border-bottom:1px solid var(--line); max-height:220px; overflow:auto; }.admin-layout { grid-template-columns:180px 1fr; } }
