@@ -8,7 +8,8 @@
  */
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { Editor, EditorContent, Extension, InputRule, VueNodeViewRenderer } from '@tiptap/vue-3'
-import { Plugin } from '@tiptap/pm/state'
+import { NodeSelection, Plugin } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import type { Schema } from '@tiptap/pm/model'
 import { ySyncPluginKey } from '@tiptap/y-tiptap'
 import { BubbleMenu } from '@tiptap/vue-3/menus'
@@ -192,9 +193,23 @@ const TypingHabits = Extension.create({
         for (const item of found.sort((a, b) => b.from - a.from)) tr.replaceWith(item.from, item.to, item.node)
         return tr
       },
+    }), new Plugin({
+      // 拖选文字时，浏览器只给文字画选中背景；选区里的视频、图片、公式另外加上标记，看得出它们也被选中了。
+      props: {
+        decorations: state => {
+          const { selection } = state
+          if (selection.empty || selection instanceof NodeSelection) return null
+          const marks: Decoration[] = []
+          state.doc.nodesBetween(selection.from, selection.to, (node, pos) => {
+            if (SELECTABLE_MEDIA.has(node.type.name)) marks.push(Decoration.node(pos, pos + node.nodeSize, { class: 'in-selection' }))
+          })
+          return marks.length ? DecorationSet.create(state.doc, marks) : null
+        },
+      },
     })]
   },
 })
+const SELECTABLE_MEDIA = new Set(['videoEmbed', 'embed', 'image', 'video', 'inlineMath', 'blockMath'])
 
 let emitTimer = 0
 const editor = shallowRef<Editor>()

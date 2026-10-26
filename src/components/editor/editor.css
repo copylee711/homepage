@@ -170,3 +170,15 @@
 /* 行内图片、视频后面留一点空隙，光标不会被画到图片下面 */
 .md-content [data-resize-container]:not([data-node=embed]):not([data-node=videoEmbed]) { margin-right:3px; }
 .md-content :is([data-node=embed],[data-node=videoEmbed])[data-resize-container] { margin:0 0 1.5em; }
+
+/* 选区里的媒体：盖一层与文字选中背景相同的颜色 */
+.md-content .in-selection { position:relative; }
+.md-content .in-selection::after { content:''; position:absolute; inset:0; z-index:3; border-radius:8px; background:color-mix(in srgb,var(--accent) 22%,transparent); pointer-events:none; }
+.md-content [data-resize-container].in-selection::after { inset:0 0 0 0; }
+.md-content .tiptap-mathematics-render.in-selection { background:color-mix(in srgb,var(--accent) 22%,transparent); }
+.md-content .tiptap-mathematics-render.in-selection::after { display:none; }
+
+/* 间隙光标（视频等块级元素上下没有段落时出现）：画成与普通光标一样的竖线，
+   在块的上方时向上画，在下方时向下画 */
+.md-content .ProseMirror-gapcursor::after { top:.35em; width:0; height:1.35em; border-top:0; border-left:1.5px solid var(--text); }
+.md-content .ProseMirror-gapcursor:has(+ *)::after { top:-1.7em; }
