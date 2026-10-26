@@ -425,3 +425,54 @@ class DocImageSetting(SQLModel, table=True):
     target: str = "builtin"
     custom: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
     updated_at: float = 0
+
+
+# —— 好友与私信 ——
+
+
+class Friendship(SQLModel, table=True):
+    """好友关系是双向的，每对好友存两行（双方各一行），按 user_id 即可查到自己的全部好友。"""
+
+    __tablename__ = "friendship"
+    user_id: str = Field(primary_key=True)
+    friend_id: str = Field(primary_key=True, index=True)
+    created_at: float
+
+
+class FriendRequest(SQLModel, table=True):
+    __tablename__ = "friend_request"
+    id: str = Field(primary_key=True)
+    from_id: str = Field(index=True)
+    to_id: str = Field(index=True)
+    message: str = ""
+    status: str = Field(default="pending", index=True)  # pending | accepted | declined | cancelled
+    created_at: float
+    responded_at: float | None = None
+
+
+class FriendInvite(SQLModel, table=True):
+    """个人邀请链接：打开链接并确认的人直接成为好友；重新生成即可让旧链接失效。"""
+
+    __tablename__ = "friend_invite"
+    user_id: str = Field(primary_key=True)
+    token: str = Field(unique=True, index=True)
+    created_at: float
+
+
+class Message(SQLModel, table=True):
+    """好友私信。kind 为 file 时 data 记录发送者云盘里的文件，为 doc_invite 时记录文档与邀请的权限。
+
+    updated_at 在发送、撤回、邀请被处理时更新，前端按它轮询增量，卡片状态变化也能同步到对方。
+    """
+
+    __tablename__ = "message"
+    id: str = Field(primary_key=True)
+    sender_id: str = Field(index=True)
+    recipient_id: str = Field(index=True)
+    kind: str = "text"  # text | file | doc_invite
+    body: str = ""
+    data: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
+    created_at: float = Field(index=True)
+    updated_at: float = Field(index=True)
+    read_at: float | None = None
+    revoked: bool = False

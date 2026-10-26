@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { account, features, loadAccount } from '../account'
 import { site } from '../content'
+import { unread, watchUnread } from '../friends'
 import { useTheme } from '../composables/useTheme'
 import AppIcon from './AppIcon.vue'
 import LogoMark from './LogoMark.vue'
@@ -17,6 +18,7 @@ const isScut = path === '/scut'
 const isAccount = path === '/account'
 const isGames = path.startsWith('/games')
 const isDocs = path === '/docs'
+const isMessages = path === '/messages'
 // 非首页时，锚点链接回到首页对应区块。
 const onHome = path === ''
 // 入口区没有单独的导航项，滚动到那里时仍高亮 Home
@@ -61,7 +63,14 @@ onMounted(() => {
   nextTick(() => { updateEdges(); revealActive() })
   if (!isAccount) loadAccount()
 })
+// 登录后每分钟查一次未读私信与好友申请，在 Messages 入口显示红点。
+let stopUnread: (() => void) | undefined
+watch(account, value => {
+  stopUnread?.(); stopUnread = undefined
+  if (value) stopUnread = watchUnread()
+}, { immediate: true })
 onBeforeUnmount(() => {
+  stopUnread?.()
   window.removeEventListener('scroll', onScroll)
   window.removeEventListener('resize', updateEdges)
 })
@@ -90,6 +99,7 @@ onBeforeUnmount(() => {
         <a href="/posts">Articles</a>
         <a href="/notes">Notes</a>
         <a v-if="account" href="/docs" :class="{ active: isDocs }" :aria-current="isDocs ? 'page' : undefined">Docs</a>
+        <a v-if="account" href="/messages" :class="{ active: isMessages }" :aria-current="isMessages ? 'page' : undefined" :aria-label="unread.unread + unread.requests ? `Messages，${unread.unread} 条未读私信，${unread.requests} 个好友申请` : undefined">Messages<span v-if="unread.unread + unread.requests" class="dot" aria-hidden="true" /></a>
         <a v-if="features.drive" :href="site.cloud" target="_blank" rel="noopener">Cloud</a>
         </div>
         <a class="account" :class="{ active: isAccount }" href="/account" :aria-label="account ? `账户：${account.name}` : '登录或注册'" :title="account ? account.name : '登录 / 注册'">
@@ -217,6 +227,15 @@ onBeforeUnmount(() => {
 
 .nav a.active::after {
   transform: scaleX(1);
+}
+
+/* Messages 入口的未读红点 */
+.nav .dot {
+  width: 7px;
+  height: 7px;
+  margin: -10px 0 0 3px;
+  border-radius: 50%;
+  background: #e0607e;
 }
 
 .account {

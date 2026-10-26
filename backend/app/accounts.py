@@ -401,8 +401,12 @@ def delete_account(session, user: User, password: str, media_dir):
         session.exec(delete(table).where(table.user_id == user.id))
     session.exec(delete(EmailCode).where(EmailCode.email == user.email))
     from .docs import purge_user
+    from .friends import purge_user as purge_friends
+    from .messages import purge_user as purge_messages
 
     purge_user(session, user.id, media_dir.parent)
+    purge_friends(session, user.id)
+    purge_messages(session, user.id)
     remove_avatar(user, media_dir)
     session.delete(user)
     session.commit()
