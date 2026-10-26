@@ -39,6 +39,7 @@ const count = computed(() => matches.value.length + (custom.value ? 1 : 0))
 
 async function toggle() {
   if (open.value) { close(); return }
+  if (!props.editor.isEditable) return
   open.value = true
   query.value = ''
   active.value = Math.max(0, LANGUAGES.findIndex(([value]) => value === language.value))
@@ -94,13 +95,18 @@ async function copy() {
   } catch { /* 剪贴板不可用时什么也不做 */ }
 }
 
-onBeforeUnmount(() => { clearTimeout(timer); document.removeEventListener('pointerdown', outside, true) })
+onBeforeUnmount(() => {
+  clearTimeout(timer)
+  document.removeEventListener('pointerdown', outside, true)
+})
 </script>
 
 <template>
   <NodeViewWrapper class="code-block" :class="{ selected }">
     <div class="code-head" contenteditable="false">
-      <div v-if="editor.isEditable" ref="root" class="lang">
+      <!-- 两种都渲染，由编辑器的 contenteditable 决定显示哪个（见 editor.css）：
+           editor.isEditable 不是响应式的，切换阅读模式后节点视图不会重新渲染。 -->
+      <div ref="root" class="lang">
         <button type="button" class="lang-button" :class="{ open }" :aria-expanded="open" aria-label="代码语言" @mousedown.prevent @click="toggle">
           {{ label || '纯文本' }}<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 8 5 5 5-5" /></svg>
         </button>
@@ -117,7 +123,7 @@ onBeforeUnmount(() => { clearTimeout(timer); document.removeEventListener('point
           </div>
         </div>
       </div>
-      <span v-else class="lang-static">{{ label || '纯文本' }}</span>
+      <span class="lang-static">{{ label || '纯文本' }}</span>
       <button type="button" class="code-copy" :class="{ done: copied }" :aria-label="copied ? '已复制' : '复制代码'" @mousedown.prevent @click="copy">
         <svg v-if="!copied" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2" /><path d="M15.5 8.5v-3a1 1 0 0 0-1-1h-9a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h3" /></svg>
         <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>

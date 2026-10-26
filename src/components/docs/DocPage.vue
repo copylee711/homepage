@@ -7,6 +7,9 @@ import { connect } from '../../docs-live'
 import type { DocItem, DocLinkInfo } from '../../docs'
 import '../../styles/drive.css'
 import DriveTopBar from '../drive/DriveTopBar.vue'
+import AppIcon from '../AppIcon.vue'
+import LogoMark from '../LogoMark.vue'
+import { useTheme } from '../../composables/useTheme'
 import MarkdownEditor from '../editor/MarkdownEditor.vue'
 import DocHistory from './DocHistory.vue'
 import DocShare from './DocShare.vue'
@@ -43,6 +46,8 @@ const words = computed(() => editor.value?.words ?? 0)
 const editor = ref<InstanceType<typeof MarkdownEditor>>()
 const title = ref('')
 const listUrl = `${mainSite}/docs`
+const profileUrl = mainSite ? `${mainSite}/account` : '/account'
+const { theme, toggle: toggleTheme } = useTheme()
 
 const canEdit = computed(() => doc.value?.role === 'owner' || doc.value?.role === 'edit')
 // 阅读模式只影响当前页面：编辑器变为只读、收起工具栏，不改变权限，也不影响其他协作者。
@@ -160,8 +165,9 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
 </script>
 
 <template>
-  <div class="doc-shell">
-    <DriveTopBar />
+  <!-- 编辑页不显示站点顶栏，文档栏顶到最上方，给正文腾出空间；加载、登录等状态页仍显示顶栏。 -->
+  <div class="doc-shell" :class="{ editing: state === 'ready' }">
+    <DriveTopBar v-if="state !== 'ready'" />
     <main v-if="state !== 'ready'" class="state">
       <div class="state-card">
         <template v-if="state === 'loading'"><p class="d-muted">正在打开文档…</p></template>
@@ -195,6 +201,7 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
 
     <template v-else-if="doc">
       <div class="doc-bar">
+        <a class="brand" :href="mainSite || '/'" title="Copy Lee 主页" aria-label="返回主页"><LogoMark class="logo" /></a>
         <a class="back" :href="listUrl" title="我的文档" aria-label="返回文档列表"><svg viewBox="0 0 24 24"><path d="m14 6-6 6 6 6" /></svg></a>
         <div class="meta">
           <span class="status" :class="status"><i />{{ statusText }}</span>
@@ -210,6 +217,14 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
           <button v-if="canEdit" class="d-btn" type="button" @click="history = true">历史</button>
           <button v-if="doc.can_copy" class="d-btn" type="button" @click="exportMarkdown">导出</button>
           <button v-if="doc.can_share" class="d-btn primary" type="button" @click="sharing = true">分享</button>
+        </div>
+        <div class="corner">
+          <button class="icon-btn" type="button" :aria-label="theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'" @click="toggleTheme"><AppIcon :name="theme === 'dark' ? 'moon' : 'sun'" /></button>
+          <a class="avatar" :href="account ? profileUrl : loginUrl" :title="account ? account.name : '登录'" :aria-label="account ? `账户：${account.name}` : '登录'">
+            <img v-if="account?.avatar" :src="account.avatar" alt="">
+            <span v-else-if="account">{{ account.name.slice(0, 1).toUpperCase() }}</span>
+            <svg v-else viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="3.5" /><path d="M5 19.5a7 7 0 0 1 14 0" /></svg>
+          </a>
         </div>
       </div>
       <p v-if="!canEdit" class="readonly">
@@ -242,13 +257,24 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
 
 <style scoped>
 .doc-shell { min-height:100vh; }
+.doc-shell.editing { --header-h: 0px; }
+.brand { display:grid; place-items:center; width:32px; height:32px; color:var(--text); }
+.brand .logo { width:26px; height:auto; }
+.corner { display:flex; align-items:center; gap:6px; margin-left:4px; padding-left:12px; border-left:1px solid var(--line); }
+.icon-btn, .avatar { display:grid; place-items:center; width:32px; height:32px; border-radius:50%; overflow:hidden; color:var(--muted); }
+.icon-btn { border:0; background:none; cursor:pointer; transition:background .2s,color .2s; }
+.icon-btn:hover { background:color-mix(in srgb,var(--text) 6%,transparent); color:var(--text); }
+.icon-btn :deep(svg) { width:18px; height:18px; }
+.avatar { background:var(--accent-soft); color:var(--accent); font-size:13px; font-weight:600; }
+.avatar img { width:100%; height:100%; object-fit:cover; }
+.avatar svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.6; }
 .state { display:grid; place-items:center; min-height:70vh; padding:24px; }
 .state-card { width:min(440px,100%); padding:36px; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); text-align:center; box-shadow:0 30px 60px -40px rgba(17,24,39,.35); }
 .state-card h1 { font-size:24px; letter-spacing:-.02em; }
 .state-card p { margin:10px 0 22px; color:var(--muted); font-size:14px; line-height:1.7; }
 .unlock { display:flex; gap:8px; }
 .unlock input { flex:1; }
-.doc-bar { position:sticky; top:var(--header-h); z-index:15; display:flex; align-items:center; gap:14px; padding:10px clamp(16px,3vw,32px); border-bottom:1px solid var(--line); background:var(--header-bg); -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px); }
+.doc-bar { position:sticky; top:var(--header-h); z-index:15; box-sizing:border-box; height:56px; display:flex; align-items:center; gap:14px; padding:10px clamp(16px,3vw,32px); border-bottom:1px solid var(--line); background:var(--header-bg); -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px); }
 .back { display:grid; place-items:center; width:32px; height:32px; border-radius:8px; color:var(--muted); transition:background .2s,color .2s; }
 .back:hover { background:color-mix(in srgb,var(--text) 6%,transparent); color:var(--text); }
 .back svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
@@ -265,7 +291,7 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
 .readonly a { margin-left:8px; color:var(--accent); }
 .doc-body { display:grid; grid-template-columns:0 minmax(0,1fr); }
 .doc-body.with-outline { grid-template-columns:268px minmax(0,1fr); }
-.outline { position:sticky; top:calc(var(--header-h) + 53px); align-self:start; display:flex; flex-direction:column; width:268px; height:calc(100vh - var(--header-h) - 53px); border-right:1px solid var(--line); background:var(--bg); overflow:hidden; opacity:0; visibility:hidden; transform:translateX(-12px); transition:opacity .25s ease,transform .3s var(--ease),visibility .3s; }
+.outline { position:sticky; top:calc(var(--header-h) + 56px); align-self:start; display:flex; flex-direction:column; width:268px; height:calc(100vh - var(--header-h) - 56px); border-right:1px solid var(--line); background:var(--bg); overflow:hidden; opacity:0; visibility:hidden; transform:translateX(-12px); transition:opacity .25s ease,transform .3s var(--ease),visibility .3s; }
 .outline.open { opacity:1; visibility:visible; transform:none; }
 .outline-head { display:flex; align-items:center; justify-content:space-between; padding:18px 12px 10px 22px; color:var(--faint); font-size:12px; font-weight:600; letter-spacing:.12em; }
 .outline-close { display:grid; place-items:center; width:28px; height:28px; border:0; border-radius:7px; background:none; color:var(--muted); cursor:pointer; transition:background .2s,color .2s; }
@@ -288,13 +314,15 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
   .paper { grid-column:1; }
 }
 .paper { box-sizing:border-box; width:100%; max-width:860px; margin:0 auto; padding:36px clamp(16px,4vw,24px) 40px; }
-.paper :deep(.md-toolbar:not(.docked)) { top:calc(var(--header-h) + 53px); }
+.paper :deep(.md-toolbar:not(.docked)) { top:calc(var(--header-h) + 56px); }
 .title { width:100%; margin:0 0 18px; padding:0; border:0; background:none; color:var(--text); font:800 clamp(1.9rem,4vw,2.6rem)/1.2 var(--font); letter-spacing:-.03em; outline:none; }
 .title::placeholder { color:var(--faint); }
 .no-copy :deep(.md-content) { user-select:none; -webkit-user-select:none; }
 @media (max-width:760px) {
-  .doc-bar { gap:10px; }
-  .meta .d-muted { display:none; }
+  .doc-bar { gap:8px; padding-inline:12px; }
+  .meta .d-muted, .brand, .icon-btn { display:none; }
+  .status { font-size:0; gap:0; }
+  .corner { margin-left:0; padding-left:8px; }
   .actions .d-btn { padding:7px 10px; }
   .paper { padding-top:24px; }
 }

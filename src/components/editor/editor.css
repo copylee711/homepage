@@ -40,7 +40,7 @@
 .md-content .selectedCell::after { content:''; position:absolute; inset:0; background:var(--accent-soft); pointer-events:none; }
 
 /* 代码块与语法高亮 */
-.md-content .code-block { margin:0 0 1.5em; border:1px solid var(--line); border-radius:10px; background:color-mix(in srgb,var(--text) 4%,var(--surface)); }
+.md-content .code-block { margin:0 0 1.5em; border:1px solid var(--line); border-radius:10px; background:color-mix(in srgb,var(--text) 4%,var(--surface)); overflow:visible; }
 .md-content .code-block.selected { border-color:var(--field-focus-border); }
 .md-content .code-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px 0 12px; user-select:none; }
 .md-content .lang { position:relative; }
@@ -130,3 +130,5 @@
 
 /* 从大纲跳转时，标题停在顶栏与工具栏下方，不被遮住 */
 .md-content :is(h1,h2,h3,h4,h5,h6) { scroll-margin-top:calc(var(--header-h) + 130px); }
+
+.ProseMirror[contenteditable=false] .code-block .lang, .ProseMirror[contenteditable=true] .code-block .lang-static { display:none; }
