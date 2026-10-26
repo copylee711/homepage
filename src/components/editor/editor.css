@@ -139,7 +139,11 @@
 .md-content [data-resize-wrapper] > img, .md-content [data-resize-wrapper] > video { display:block; max-width:100%; height:auto; margin:0; border-radius:8px; }
 .md-content video { display:block; max-width:100%; height:auto; border-radius:8px; background:#000; }
 .md-content [data-resize-handle] { z-index:2; opacity:0; transition:opacity .15s ease; }
-.md-content [data-resize-container]:hover [data-resize-handle], .md-content .ProseMirror-selectednode [data-resize-handle], .md-content [data-resize-state=true] [data-resize-handle] { opacity:1; }
+/* 拖动柄只在选中后出现（点图片本身，或点视频上方的标签），悬停不显示；
+   原生视频点击会落到播放控件上选不中，仍在悬停时显示。 */
+.md-content .ProseMirror-selectednode [data-resize-handle], .md-content [data-resize-state=true] [data-resize-handle], .md-content [data-node=video][data-resize-container]:hover [data-resize-handle] { opacity:1; }
+.md-content [data-resize-container]:not(.ProseMirror-selectednode):not([data-resize-state=true]) [data-resize-handle] { pointer-events:none; }
+.md-content [data-node=video][data-resize-container]:hover [data-resize-handle] { pointer-events:auto; }
 .md-content [data-resize-handle=left], .md-content [data-resize-handle=right] { top:50% !important; bottom:auto !important; width:6px; height:44px; margin-top:-22px; border-radius:3px; background:var(--accent); box-shadow:0 0 0 2px var(--surface); cursor:ew-resize; }
 .md-content [data-resize-handle=left] { left:-3px !important; }
 .md-content [data-resize-handle=right] { right:-3px !important; }
