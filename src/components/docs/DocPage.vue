@@ -14,7 +14,7 @@ import MarkdownEditor from '../editor/MarkdownEditor.vue'
 import DocHistory from './DocHistory.vue'
 import DocShare from './DocShare.vue'
 import ImageSettings from './ImageSettings.vue'
-import { DropdownMenuContent, DropdownMenuItem, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuSeparator, DropdownMenuTrigger } from 'reka-ui'
+import { DropdownMenuContent, DropdownMenuItem, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuSeparator, DropdownMenuTrigger, PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 
 // /doc/<id> 直接打开；/d/<token> 是链接分享，先解析出文档再按链接权限打开。
 const match = /^\/(doc|d)\/([A-Za-z0-9]+)\/?$/.exec(location.pathname)!
@@ -29,7 +29,10 @@ const password = ref(''), unlocking = ref(false)
 const session = shallowRef<ReturnType<typeof connect>>()
 const status = ref<'connecting' | 'connected' | 'disconnected'>('connecting')
 const synced = ref(false)
-const peers = ref<{ id: number; name: string; color: string; avatar: string }[]>([])
+// 在线的每个连接（同一个人在不同设备上打开各算一个，各有各的光标）；自己排在最前。
+interface Peer { client: number; user: string; name: string; color: string; avatar: string; device: string; self: boolean; editing: boolean }
+const peers = ref<Peer[]>([])
+const peersOpen = ref(false)
 const sharing = ref(false), history = ref(false), menuOpen = ref(false)
 const imageSettings = ref<'doc' | 'user' | null>(null)
 // 大纲：宽屏默认显示在正文左侧，记住用户的选择。
@@ -57,7 +60,11 @@ const canEdit = computed(() => doc.value?.role === 'owner' || doc.value?.role ==
 const reading = ref(false)
 const editable = computed(() => canEdit.value && !reading.value)
 // 在线状态里带上头像地址，其他人看到的是头像；没有头像时显示带颜色的首字。
-const me = computed(() => ({ name: account.value?.name ?? '访客', color: colorOf(account.value?.id ?? 'guest'), avatar: account.value?.avatar ?? '' }))
+const DEVICES = ['电脑', '手机', '平板']
+const device = /iPad|Tablet/i.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1) ? '平板'
+  : /Mobi|Android|iPhone/i.test(navigator.userAgent) ? '手机' : '电脑'
+const me = computed(() => ({ id: String(account.value?.id ?? 'guest'), client: session.value?.doc.clientID ?? 0, device,
+                             name: account.value?.name ?? '访客', color: colorOf(account.value?.id ?? 'guest'), avatar: account.value?.avatar ?? '' }))
 const collab = computed(() => session.value ? { doc: session.value.doc, provider: session.value.provider, user: me.value } : undefined)
 
 async function start() {
@@ -92,9 +99,16 @@ function open() {
   next.provider.on('status', ({ status: value }: { status: typeof status.value }) => { status.value = value })
   next.provider.on('sync', (value: boolean) => { synced.value = value })
   next.provider.awareness.on('change', () => {
+    // 这些字段来自其他协作者的浏览器，只取需要的部分并做基本校验。
+    const text = (value: unknown, max: number) => (typeof value === 'string' ? value.slice(0, max) : '')
     peers.value = [...next.provider.awareness.getStates().entries()]
-      .filter(([id, value]) => id !== next.doc.clientID && value.user)
-      .map(([id, value]) => ({ id, name: value.user.name as string, color: value.user.color as string, avatar: typeof value.user.avatar === 'string' ? value.user.avatar : '' }))
+      .filter(([, value]) => value.user)
+      .map(([client, value]) => ({
+        client, user: text(value.user.id, 40), name: text(value.user.name, 40) || '协作者', color: text(value.user.color, 32),
+        avatar: text(value.user.avatar, 500), device: DEVICES.includes(value.user.device) ? value.user.device : '',
+        self: client === next.doc.clientID, editing: !!value.cursor,
+      }))
+      .sort((a, b) => Number(b.self) - Number(a.self))
   })
   session.value = next
   state.value = 'ready'
@@ -133,7 +147,8 @@ function onTitle() {
 }
 
 function exportMarkdown() {
-  const markdown = editor.value?.getMarkdown() ?? ''
+  // 正文里的站内图片是相对地址，导出后在其他软件里打开会找不到；换成带域名的完整地址。
+  const markdown = (editor.value?.getMarkdown() ?? '').replace(/(\]\(|\ssrc=")\/(?!\/)/g, `$1${location.origin}/`)
   const blob = new Blob([`# ${doc.value?.title ?? ''}\n\n${markdown}`], { type: 'text/markdown;charset=utf-8' })
   const anchor = document.createElement('a')
   anchor.href = URL.createObjectURL(blob)
@@ -152,6 +167,14 @@ async function uploadImage(file: File) {
   const data = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : '图片上传失败')
   return data.url as string
+}
+
+// 同一账号的其他设备显示为“你”，并标出设备，方便区分。
+const peerLabel = (peer: Peer) => peer.self ? `${peer.name}（你）`
+  : peer.user !== 'guest' && peer.user === me.value.id ? `${peer.name}（你的${peer.device || '其他设备'}）` : peer.name
+const peerNote = (peer: Peer) => [peer.self ? `本设备 · ${peer.device}` : peer.device, peer.editing ? '正在编辑' : '正在查看'].filter(Boolean).join(' · ')
+function locatePeer(peer: Peer) {
+  if (editor.value?.locate(peer.client)) peersOpen.value = false
 }
 
 function restore(content: object) {
@@ -214,10 +237,27 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
           <span class="status" :class="status"><i />{{ statusText }}</span>
           <span class="d-muted">{{ roleName[doc.role] }}<template v-if="doc.updated_by"> · {{ doc.updated_by.name }} {{ timeAgo(doc.updated_at) }}编辑</template> · {{ words.toLocaleString() }} 字</span>
         </div>
-        <div class="peers" :aria-label="`${peers.length} 人在线`">
-          <span v-for="peer in peers.slice(0, 5)" :key="peer.id" class="peer" :style="{ background: peer.color, '--ring': peer.color }" :title="`${peer.name} 正在查看`"><img v-if="safeAvatar(peer.avatar)" :src="peer.avatar" alt=""><template v-else>{{ peer.name.slice(0, 1) }}</template></span>
-          <span v-if="peers.length > 5" class="peer more">+{{ peers.length - 5 }}</span>
-        </div>
+        <PopoverRoot v-model:open="peersOpen">
+          <PopoverTrigger class="peers" :aria-label="`${peers.length} 人在线，查看协作者`" data-tip="协作者">
+            <span v-for="peer in peers.slice(0, 5)" :key="peer.client" class="peer" :style="{ background: peer.color, '--ring': peer.color }"><img v-if="safeAvatar(peer.avatar)" :src="peer.avatar" alt=""><template v-else>{{ peer.name.slice(0, 1) }}</template></span>
+            <span v-if="peers.length > 5" class="peer more">+{{ peers.length - 5 }}</span>
+          </PopoverTrigger>
+          <PopoverPortal>
+            <PopoverContent class="peer-panel" align="end" :side-offset="10" :collision-padding="12">
+              <p class="peer-head">在线 {{ peers.length }} 人</p>
+              <ul>
+                <li v-for="peer in peers" :key="peer.client">
+                  <span class="peer" :style="{ background: peer.color, '--ring': peer.color }"><img v-if="safeAvatar(peer.avatar)" :src="peer.avatar" alt=""><template v-else>{{ peer.name.slice(0, 1) }}</template></span>
+                  <span class="peer-info"><b>{{ peerLabel(peer) }}</b><small>{{ peerNote(peer) }}</small></span>
+                  <button v-if="!peer.self" type="button" class="peer-locate" :disabled="!peer.editing" :title="peer.editing ? '跳到对方光标所在位置' : '对方没有在编辑，没有光标'" @click="locatePeer(peer)">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /></svg>定位
+                  </button>
+                </li>
+              </ul>
+              <button v-if="doc.can_share" type="button" class="peer-invite" @click="peersOpen = false; sharing = true">邀请协作者与管理权限</button>
+            </PopoverContent>
+          </PopoverPortal>
+        </PopoverRoot>
         <div class="actions">
           <!-- 宽屏：常用操作是无边框图标按钮；导出、图片存储等收进“更多”。窄屏只留分享与“更多”。 -->
           <button v-if="canEdit" class="tool wide-only mode-toggle" :class="{ on: reading }" type="button" :aria-pressed="reading" :aria-label="reading ? '回到编辑' : '阅读模式'" :data-tip="reading ? '回到编辑' : '阅读模式（只影响当前页面）'" @click="reading = !reading">
@@ -230,7 +270,7 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
           <button v-if="canEdit" class="tool wide-only" type="button" aria-label="版本历史" data-tip="版本历史" @click="history = true">
             <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.6L4 8.7M4 4v4.7h4.7M12 8v4.5l3 2" /></svg>
           </button>
-          <DropdownMenuRoot v-model:open="menuOpen">
+          <DropdownMenuRoot v-model:open="menuOpen" :modal="false">
             <DropdownMenuTrigger class="tool" aria-label="更多操作" data-tip="更多">
               <svg viewBox="0 0 24 24"><path d="M6 12h.01M12 12h.01M18 12h.01" /></svg>
             </DropdownMenuTrigger>
@@ -316,7 +356,26 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
 .status i { width:7px; height:7px; border-radius:50%; background:#d9822b; }
 .status.connected i { background:#2f9e6e; }
 .status.disconnected i { background:#d15c5c; }
-.peers { display:flex; }
+.peers { position:relative; display:flex; padding:4px 4px 4px 10px; border:0; border-radius:20px; background:none; cursor:pointer; transition:background .2s; }
+.peers:hover, .peers[data-state=open] { background:color-mix(in srgb,var(--text) 6%,transparent); }
+.peers[data-tip]::after { content:attr(data-tip); position:absolute; top:calc(100% + 8px); left:50%; z-index:30; padding:4px 8px; border-radius:6px; background:var(--btn-bg); color:var(--btn-fg); font:12px/1.4 var(--font); white-space:nowrap; opacity:0; transform:translate(-50%,-2px); pointer-events:none; transition:opacity .15s ease .3s,transform .15s ease .3s; }
+.peers[data-tip]:hover::after { opacity:1; transform:translate(-50%,0); }
+.peers[data-state=open]::after { display:none; }
+:global(.peer-panel) { z-index:60; width:min(320px,calc(100vw - 24px)); padding:8px; border:1px solid var(--line); border-radius:14px; background:var(--surface); color:var(--text); box-shadow:0 16px 40px -12px rgba(17,24,39,.3); animation:menu-select-in .2s var(--ease); }
+:global(.peer-panel ul) { display:grid; gap:2px; max-height:min(360px,60vh); margin:0; padding:0; overflow:auto; list-style:none; }
+:global(.peer-panel li) { display:flex; align-items:center; gap:10px; padding:7px 8px; border-radius:10px; }
+:global(.peer-panel li:hover) { background:color-mix(in srgb,var(--text) 4%,transparent); }
+:global(.peer-panel .peer) { flex:none; width:32px; height:32px; margin:0; border-width:0; }
+:global(.peer-head) { margin:4px 8px 6px; color:var(--faint); font:600 12px var(--font); letter-spacing:.06em; }
+:global(.peer-info) { flex:1; display:grid; min-width:0; }
+:global(.peer-info b) { overflow:hidden; font:500 14px/1.4 var(--font); text-overflow:ellipsis; white-space:nowrap; }
+:global(.peer-info small) { color:var(--muted); font-size:12px; }
+:global(.peer-locate) { display:inline-flex; align-items:center; gap:4px; height:28px; padding:0 9px; border:1px solid var(--line); border-radius:8px; background:none; color:var(--text-2); font:13px var(--font); cursor:pointer; transition:background .2s,color .2s,border-color .2s; }
+:global(.peer-locate:hover:not(:disabled)) { border-color:var(--accent); color:var(--accent); }
+:global(.peer-locate:disabled) { opacity:.45; cursor:default; }
+:global(.peer-locate svg) { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; }
+:global(.peer-invite) { width:100%; margin-top:6px; padding:9px; border:0; border-top:1px solid var(--line); border-radius:0 0 8px 8px; background:none; color:var(--accent); font:14px var(--font); cursor:pointer; }
+:global(.peer-invite:hover) { background:var(--accent-soft); }
 .peer { display:grid; place-items:center; width:28px; height:28px; margin-left:-6px; overflow:hidden; border:2px solid var(--bg); border-radius:50%; box-shadow:0 0 0 1.5px var(--ring, transparent); color:#fff; font-size:12px; font-weight:600; }
 .peer img { width:100%; height:100%; object-fit:cover; }
 .peer.more { background:var(--muted); }
@@ -345,7 +404,7 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
 .readonly a { margin-left:8px; color:var(--accent); }
 .doc-body { display:grid; grid-template-columns:0 minmax(0,1fr); }
 .doc-body.with-outline { grid-template-columns:268px minmax(0,1fr); }
-.outline { position:sticky; top:calc(var(--header-h) + 56px); align-self:start; display:flex; flex-direction:column; width:268px; height:calc(100vh - var(--header-h) - 56px); border-right:1px solid var(--line); background:var(--bg); overflow:hidden; opacity:0; visibility:hidden; transform:translateX(-12px); transition:opacity .25s ease,transform .3s var(--ease),visibility .3s; }
+.outline { position:sticky; z-index:5; grid-column:1; grid-row:1; top:calc(var(--header-h) + 56px); align-self:start; display:flex; flex-direction:column; width:268px; height:calc(100vh - var(--header-h) - 56px); border-right:1px solid var(--line); background:var(--bg); overflow:hidden; opacity:0; visibility:hidden; transform:translateX(-12px); transition:opacity .25s ease,transform .3s var(--ease),visibility .3s; }
 .outline.open { opacity:1; visibility:visible; transform:none; }
 .outline-head { display:flex; align-items:center; justify-content:space-between; padding:18px 12px 10px 22px; color:var(--faint); font-size:12px; font-weight:600; letter-spacing:.12em; }
 .outline-close { display:grid; place-items:center; width:28px; height:28px; border:0; border-radius:7px; background:none; color:var(--muted); cursor:pointer; transition:background .2s,color .2s; }
@@ -365,8 +424,10 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
   .outline { position:fixed; top:0; left:0; z-index:70; height:100vh; height:100dvh; width:min(300px,84vw); box-shadow:12px 0 40px -20px rgba(17,24,39,.4); transform:translateX(-100%); }
   .outline.open { transform:none; }
   .outline-scrim { display:block; position:fixed; inset:0; z-index:69; background:rgba(12,13,16,.35); }
-  .paper { grid-column:1; }
+  .doc-body > .paper { grid-column:1; }
 }
+/* 大纲与正文固定在各自的列：任何时候大纲都不会叠到正文下面 */
+.doc-body > .paper { grid-column:2; grid-row:1; }
 .paper { box-sizing:border-box; width:100%; max-width:860px; margin:0 auto; padding:36px clamp(16px,4vw,24px) 40px; }
 .paper :deep(.md-toolbar:not(.docked)) { top:calc(var(--header-h) + 56px); }
 .title { width:100%; margin:0 0 18px; padding:0; border:0; background:none; color:var(--text); font:800 clamp(1.9rem,4vw,2.6rem)/1.2 var(--font); letter-spacing:-.03em; outline:none; }

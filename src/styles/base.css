@@ -36,6 +36,10 @@ body {
   overflow-x: hidden;
 }
 
+/* 弹出层锁定滚动时，reka-ui 会给 body 加上滚动条宽度的右内边距；根元素已用 scrollbar-gutter 预留了位置，
+   再加内边距会让整页向左偏移，这里抵消掉。 */
+body[style*="padding-right"] { padding-right: 0 !important; }
+
 /* 主题切换：新主题从点击位置圆形扩散（坐标由 useTheme 写入） */
 ::view-transition-old(root),
 ::view-transition-new(root) {

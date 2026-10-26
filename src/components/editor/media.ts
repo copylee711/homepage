@@ -16,6 +16,30 @@ const width = (value: unknown) => {
   const number = Math.round(Number(value))
   return Number.isFinite(number) && number > 0 ? number : null
 }
+/**
+ * 触屏拖动修正：Tiptap 自带的缩放只在 mouseup 时结束，手指抬起后仍处在“正在缩放”状态，
+ * 之后在页面上滑动都会继续改尺寸（图片忽然变得很小、再也拉不大）。这里补上 touchend/touchcancel。
+ */
+type ResizeInternals = {
+  handleResizeStart: (event: MouseEvent | TouchEvent, direction: string) => void
+  handleMouseUp: () => void
+  handleTouchMove: (event: TouchEvent) => void
+}
+const proto = ResizableNodeView.prototype as unknown as ResizeInternals
+const startResize = proto.handleResizeStart
+proto.handleResizeStart = function (event, direction) {
+  startResize.call(this, event, direction)
+  if (event.type !== 'touchstart') return
+  const end = () => {
+    document.removeEventListener('touchend', end)
+    document.removeEventListener('touchcancel', end)
+    document.removeEventListener('touchmove', this.handleTouchMove)
+    this.handleMouseUp()
+  }
+  document.addEventListener('touchend', end)
+  document.addEventListener('touchcancel', end)
+}
+
 const RESIZE = { directions: ['left', 'right', 'bottom-left', 'bottom-right'] as const, preserveAspectRatio: true }
 
 export const SizedImage = Image.extend({

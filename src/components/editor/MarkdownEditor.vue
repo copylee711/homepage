@@ -7,13 +7,14 @@
  * - 协作模式：传入 collab（Yjs 文档与 y-websocket 连接），内容由 Yjs 同步，显示其他人的光标。
  */
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
-import { Editor, EditorContent, Extension, InputRule, VueNodeViewRenderer } from '@tiptap/vue-3'
+import { Editor, EditorContent, Extension, InputRule, VueNodeViewRenderer, textblockTypeInputRule } from '@tiptap/vue-3'
 import { NodeSelection, Plugin } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import type { Schema } from '@tiptap/pm/model'
 import { ySyncPluginKey } from '@tiptap/y-tiptap'
 import { BubbleMenu } from '@tiptap/vue-3/menus'
 import StarterKit from '@tiptap/starter-kit'
+import Heading from '@tiptap/extension-heading'
 import { Markdown } from '@tiptap/markdown'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { TableKit } from '@tiptap/extension-table'
@@ -36,10 +37,12 @@ import type * as Y from 'yjs'
 import type { WebsocketProvider } from 'y-websocket'
 import 'katex/dist/katex.min.css'
 import CodeBlockView from './CodeBlockView.vue'
+import { EMOJI_GROUPS, recentEmoji, rememberEmoji } from './emoji'
+import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import './editor.css'
 
 /** 协作模式的参数；不带 provider 时只显示这份 Yjs 文档（如查看历史版本）。 */
-export interface CollabOptions { doc: Y.Doc; provider?: WebsocketProvider; user?: { name: string; color: string } }
+export interface CollabOptions { doc: Y.Doc; provider?: WebsocketProvider; user?: { id: string; client: number; device: string; name: string; color: string } }
 
 const props = withDefaults(defineProps<{
   modelValue?: string
@@ -84,6 +87,15 @@ const fullHref = (url: string) => (/^([a-z][\w+.-]*:|\/|#)/i.test(url) ? url : `
 // \u94FE\u63A5\u6587\u5B57\u4E3A\u7A7A\u65F6\u663E\u793A\u5730\u5740\u672C\u8EAB\u3002
 const linkText = (schema: Schema, text: string, url: string) =>
   schema.text(text || url, [schema.marks.link.create({ href: fullHref(url) })])
+// 标题：# 后接空格（含中文输入法的全角空格）变成标题；与 Tiptap 自带规则不同，只打一个 # 就回车不会变成标题。
+const MarkdownHeading = Heading.extend({
+  addInputRules() {
+    return this.options.levels.map(level => textblockTypeInputRule({
+      find: new RegExp(`^(#{1,${level}})[ \\u3000]$`), type: this.type, getAttributes: { level },
+    }))
+  },
+})
+
 const TypingHabits = Extension.create({
   name: 'typingHabits',
   addInputRules() {
@@ -132,6 +144,16 @@ const TypingHabits = Extension.create({
   addProseMirrorPlugins() {
     return [new Plugin({
       props: {
+        // 已经是标题时，在标题开头再输入 # 提升一级（# 变成 ##），不用退回正文重打。
+        handleTextInput: (view, from, to, text) => {
+          if (text !== '#' && text !== '＃') return false
+          const { $from, empty } = view.state.selection
+          if (!empty || from !== to || $from.parent.type.name !== 'heading' || $from.parentOffset !== 0) return false
+          const level = $from.parent.attrs.level as number
+          if (level >= 6) return false
+          view.dispatch(view.state.tr.setNodeMarkup($from.before(), undefined, { ...$from.parent.attrs, level: level + 1 }))
+          return true
+        },
         handleDOMEvents: {
           compositionend: view => {
             setTimeout(() => {
@@ -211,6 +233,32 @@ const TypingHabits = Extension.create({
 })
 const SELECTABLE_MEDIA = new Set(['videoEmbed', 'embed', 'image', 'video', 'inlineMath', 'blockMath'])
 
+// 其他人的光标：与自带样式相同，另外标上连接编号（同一个人的每台设备各有一个），协作者面板据此定位光标。
+function renderCaret(user: Record<string, string>) {
+  const caret = document.createElement('span')
+  caret.className = 'collaboration-carets__caret'
+  caret.style.borderColor = user.color
+  if (user.client) caret.dataset.client = String(user.client)
+  const label = document.createElement('div')
+  label.className = 'collaboration-carets__label'
+  label.style.backgroundColor = user.color
+  label.textContent = user.name ?? ''
+  caret.append(label)
+  return caret
+}
+
+/** 滚动到某个连接的光标处并闪一下；对方没有光标（只在查看）时返回 false。 */
+function locate(client: number) {
+  const root = editor.value?.view.dom
+  const caret = [...root?.querySelectorAll<HTMLElement>('.collaboration-carets__caret') ?? []].find(item => item.dataset.client === String(client))
+  if (!caret) return false
+  caret.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  caret.classList.remove('flash')
+  void caret.offsetWidth
+  caret.classList.add('flash')
+  return true
+}
+
 let emitTimer = 0
 const editor = shallowRef<Editor>()
 
@@ -237,8 +285,9 @@ function build() {
     editable: props.editable,
     ...(collab ? {} : { content: props.modelValue, contentType: 'markdown' as const }),
     extensions: [
-      StarterKit.configure({ underline: false, codeBlock: false, link: { openOnClick: false, autolink: true }, ...(collab ? { undoRedo: false } : {}) }),
+      StarterKit.configure({ underline: false, codeBlock: false, heading: false, link: { openOnClick: false, autolink: true }, ...(collab ? { undoRedo: false } : {}) }),
       Markdown,
+      MarkdownHeading,
       TaskList,
       TaskItem.configure({ nested: true }),
       TableKit.configure({ table: { resizable: false } }),
@@ -254,7 +303,7 @@ function build() {
       TypingHabits,
       ...(collab ? [
         Collaboration.configure({ document: collab.doc }),
-        ...(collab.provider ? [CollaborationCaret.configure({ provider: collab.provider, user: collab.user })] : []),
+        ...(collab.provider ? [CollaborationCaret.configure({ provider: collab.provider, user: collab.user, render: renderCaret })] : []),
       ] : []),
     ],
     editorProps: {
@@ -380,6 +429,7 @@ defineExpose({
   headings,
   words,
   jumpTo,
+  locate,
   editor,
 })
 
@@ -482,6 +532,18 @@ function pasteImages(files?: FileList | null) {
     }
   })()
   return true
+}
+
+// —— 表情 ——
+
+const emojiOpen = ref(false)
+const emojiTab = ref(0)
+const recent = ref<string[]>([])
+const emojiGroups = computed(() => recent.value.length ? [{ name: '最近', icon: '🕘', items: recent.value.join(' ') }, ...EMOJI_GROUPS] : EMOJI_GROUPS)
+watch(emojiOpen, open => { if (open) { recent.value = recentEmoji(); emojiTab.value = 0 } })
+function insertEmoji(emoji: string) {
+  run().insertContent(emoji).run()
+  rememberEmoji(emoji)
 }
 
 // —— 公式：插入后直接进入公式编辑框，边输入边预览（类似 Typora 的公式块） ——
@@ -646,6 +708,21 @@ function slashKey(event: KeyboardEvent) {
         <button type="button" title="图片（可粘贴或拖入）" @click="insertImage"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 16l5-5 4 4 2-2 5 5M15 9h.01" /></svg></button>
         <button type="button" title="视频（网络地址）" @click="insertVideo"><svg viewBox="0 0 24 24"><path d="M4 6h11v12H4zM15 10l5-3v10l-5-3" /></svg></button>
         <button type="button" title="分割线" @click="run().setHorizontalRule().run()"><svg viewBox="0 0 24 24"><path d="M4 12h16" /></svg></button>
+        <PopoverRoot v-model:open="emojiOpen">
+          <PopoverTrigger as-child><button type="button" title="表情" :class="{ on: emojiOpen }"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" /><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0M9.5 9.5h.01M14.5 9.5h.01" /></svg></button></PopoverTrigger>
+          <PopoverPortal>
+            <!-- 不抢走编辑器的焦点：点表情时光标留在原处，可以连续插入。 -->
+            <PopoverContent class="md-emoji" :side="docked ? 'top' : 'bottom'" align="end" :side-offset="8" :collision-padding="12" @open-auto-focus.prevent @close-auto-focus.prevent @mousedown.prevent>
+              <div class="md-emoji-tabs" role="tablist">
+                <button v-for="(group, i) in emojiGroups" :key="group.name" type="button" role="tab" :aria-selected="emojiTab === i" :class="{ on: emojiTab === i }" :title="group.name" @click="emojiTab = i">{{ group.icon }}</button>
+              </div>
+              <p class="md-emoji-name">{{ emojiGroups[emojiTab]?.name }}</p>
+              <div class="md-emoji-grid">
+                <button v-for="emoji in (emojiGroups[emojiTab]?.items ?? '').split(' ')" :key="emoji" type="button" @click="insertEmoji(emoji)">{{ emoji }}</button>
+              </div>
+            </PopoverContent>
+          </PopoverPortal>
+        </PopoverRoot>
         <template v-if="inTable">
           <span class="sep" />
           <button type="button" class="text" title="在下方插入行" @click="run().addRowAfter().run()">+行</button>
@@ -676,7 +753,7 @@ function slashKey(event: KeyboardEvent) {
         </button>
       </div>
       <div v-if="math" class="md-math" :style="{ left: `${math.left}px`, top: `${math.top}px` }">
-        <textarea ref="mathField" v-model="math.latex" :rows="math.kind === 'block' ? 3 : 1" spellcheck="false" placeholder="输入 LaTeX，例如 rac{a}{b}" @keydown="mathKey" @blur="finishMath(true)" />
+        <textarea ref="mathField" v-model="math.latex" :rows="math.kind === 'block' ? 3 : 1" spellcheck="false" placeholder="输入 LaTeX，例如 \frac{a}{b}" @keydown="mathKey" @blur="finishMath(true)" />
         <div v-if="mathPreview" class="preview" v-html="mathPreview" />
         <p>{{ math.kind === 'block' ? 'Ctrl+Enter 完成' : 'Enter 完成' }} · Esc 取消</p>
       </div>

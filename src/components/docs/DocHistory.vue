@@ -50,8 +50,10 @@ async function restore() {
 }
 
 const when = (version: DocVersion) => new Date(version.created_at * 1000).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-onMounted(load)
-onBeforeUnmount(() => preview.value?.destroy())
+// 版本历史盖住整页，打开期间停用页面本身的滚动，只留列表与预览各自的滚动条。
+// 根元素设置了 scrollbar-gutter: stable，隐藏滚动条不会让页面左右跳动。
+onMounted(() => { document.documentElement.style.overflow = 'hidden'; void load() })
+onBeforeUnmount(() => { document.documentElement.style.overflow = ''; preview.value?.destroy() })
 </script>
 
 <template>
