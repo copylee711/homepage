@@ -29,7 +29,7 @@ const password = ref(''), unlocking = ref(false)
 const session = shallowRef<ReturnType<typeof connect>>()
 const status = ref<'connecting' | 'connected' | 'disconnected'>('connecting')
 const synced = ref(false)
-const peers = ref<{ id: number; name: string; color: string }[]>([])
+const peers = ref<{ id: number; name: string; color: string; avatar: string }[]>([])
 const sharing = ref(false), history = ref(false), menuOpen = ref(false)
 const imageSettings = ref<'doc' | 'user' | null>(null)
 // 大纲：宽屏默认显示在正文左侧，记住用户的选择。
@@ -56,7 +56,8 @@ const canEdit = computed(() => doc.value?.role === 'owner' || doc.value?.role ==
 // 阅读模式只影响当前页面：编辑器变为只读、收起工具栏，不改变权限，也不影响其他协作者。
 const reading = ref(false)
 const editable = computed(() => canEdit.value && !reading.value)
-const me = computed(() => ({ name: account.value?.name ?? '访客', color: colorOf(account.value?.id ?? 'guest') }))
+// 在线状态里带上头像地址，其他人看到的是头像；没有头像时显示带颜色的首字。
+const me = computed(() => ({ name: account.value?.name ?? '访客', color: colorOf(account.value?.id ?? 'guest'), avatar: account.value?.avatar ?? '' }))
 const collab = computed(() => session.value ? { doc: session.value.doc, provider: session.value.provider, user: me.value } : undefined)
 
 async function start() {
@@ -93,11 +94,14 @@ function open() {
   next.provider.awareness.on('change', () => {
     peers.value = [...next.provider.awareness.getStates().entries()]
       .filter(([id, value]) => id !== next.doc.clientID && value.user)
-      .map(([id, value]) => ({ id, name: value.user.name as string, color: value.user.color as string }))
+      .map(([id, value]) => ({ id, name: value.user.name as string, color: value.user.color as string, avatar: typeof value.user.avatar === 'string' ? value.user.avatar : '' }))
   })
   session.value = next
   state.value = 'ready'
 }
+
+// 头像地址来自其他协作者的浏览器，只接受站内头像路径与 http(s) 地址。
+const safeAvatar = (src: string) => /^(\/media\/|https:\/\/)/.test(src)
 
 function close() {
   session.value?.provider.destroy()
@@ -211,7 +215,7 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
           <span class="d-muted">{{ roleName[doc.role] }}<template v-if="doc.updated_by"> · {{ doc.updated_by.name }} {{ timeAgo(doc.updated_at) }}编辑</template> · {{ words.toLocaleString() }} 字</span>
         </div>
         <div class="peers" :aria-label="`${peers.length} 人在线`">
-          <span v-for="peer in peers.slice(0, 5)" :key="peer.id" class="peer" :style="{ background: peer.color }" :title="peer.name">{{ peer.name.slice(0, 1) }}</span>
+          <span v-for="peer in peers.slice(0, 5)" :key="peer.id" class="peer" :style="{ background: peer.color, '--ring': peer.color }" :title="`${peer.name} 正在查看`"><img v-if="safeAvatar(peer.avatar)" :src="peer.avatar" alt=""><template v-else>{{ peer.name.slice(0, 1) }}</template></span>
           <span v-if="peers.length > 5" class="peer more">+{{ peers.length - 5 }}</span>
         </div>
         <div class="actions">
@@ -313,7 +317,8 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
 .status.connected i { background:#2f9e6e; }
 .status.disconnected i { background:#d15c5c; }
 .peers { display:flex; }
-.peer { display:grid; place-items:center; width:28px; height:28px; margin-left:-6px; border:2px solid var(--bg); border-radius:50%; color:#fff; font-size:12px; font-weight:600; }
+.peer { display:grid; place-items:center; width:28px; height:28px; margin-left:-6px; overflow:hidden; border:2px solid var(--bg); border-radius:50%; box-shadow:0 0 0 1.5px var(--ring, transparent); color:#fff; font-size:12px; font-weight:600; }
+.peer img { width:100%; height:100%; object-fit:cover; }
 .peer.more { background:var(--muted); }
 .actions { display:flex; align-items:center; gap:2px; }
 .tool { position:relative; display:grid; place-items:center; width:36px; height:36px; border:0; border-radius:10px; background:none; color:var(--muted); cursor:pointer; transition:background .2s,color .2s; }
