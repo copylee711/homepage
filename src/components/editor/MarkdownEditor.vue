@@ -249,12 +249,25 @@ function renderCaret(user: Record<string, string>) {
   return caret
 }
 
-/** 滚动到某个连接的光标处并闪一下；对方没有光标（只在查看）时返回 false。 */
+/**
+ * 滚动到某个连接的光标处并闪一下；对方没有光标（只在查看）时返回 false。
+ * 不用平滑滚动：滚动途中懒加载的图片、视频撑开高度，或弹出层关闭时抢回焦点，都会让平滑滚动停在半路。
+ * 直接算出位置跳过去，等布局稳定后再校正一次。
+ */
 function locate(client: number) {
-  const root = editor.value?.view.dom
-  const caret = [...root?.querySelectorAll<HTMLElement>('.collaboration-carets__caret') ?? []].find(item => item.dataset.client === String(client))
+  const find = () => [...editor.value?.view.dom.querySelectorAll<HTMLElement>('.collaboration-carets__caret') ?? []]
+    .find(item => item.dataset.client === String(client))
+  const caret = find()
   if (!caret) return false
-  caret.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  const center = () => {
+    const rect = find()?.getBoundingClientRect()
+    if (rect && Math.abs(rect.top + rect.height / 2 - innerHeight / 2) > 24) {
+      window.scrollTo({ top: scrollY + rect.top + rect.height / 2 - innerHeight / 2, behavior: 'instant' })
+    }
+  }
+  center()
+  requestAnimationFrame(() => requestAnimationFrame(center))
+  setTimeout(center, 400)
   caret.classList.remove('flash')
   void caret.offsetWidth
   caret.classList.add('flash')
@@ -795,13 +808,6 @@ function fileKey(event: KeyboardEvent) {
     <textarea v-if="source" ref="sourceField" v-model="sourceText" class="md-source" spellcheck="false" :readonly="!editable" @input="onSource" @keydown="sourceKey" />
     <template v-else>
       <EditorContent :editor="editor" class="md-body" />
-      <BubbleMenu v-if="editor && editable && !touch" :editor="editor" class="md-bubble" :should-show="({ editor: e, state }) => !state.selection.empty && !e.isActive('codeBlock') && !e.isActive('image')">
-        <button type="button" :class="{ on: active('bold') }" @click="run().toggleBold().run()"><b>B</b></button>
-        <button type="button" :class="{ on: active('italic') }" @click="run().toggleItalic().run()"><i>I</i></button>
-        <button type="button" :class="{ on: active('strike') }" @click="run().toggleStrike().run()"><s>S</s></button>
-        <button type="button" :class="{ on: active('code') }" @click="run().toggleCode().run()"><code>&lt;/&gt;</code></button>
-        <button type="button" :class="{ on: active('link') }" @click="setLink">链接</button>
-      </BubbleMenu>
       <div v-if="slash && slashItems.length" class="md-slash" :style="{ left: `${slash.left}px`, top: `${slash.top}px` }" role="listbox">
         <button v-for="(item, i) in slashItems" :key="item.id" type="button" role="option" :aria-selected="i === slash.index" :class="{ on: i === slash.index }" @mousedown.prevent="pick(item)" @mouseenter="slash.index = i">
           <span>{{ item.label }}</span><kbd>{{ item.hint }}</kbd>
@@ -819,5 +825,14 @@ function fileKey(event: KeyboardEvent) {
         <p>{{ math.kind === 'block' ? 'Ctrl+Enter 完成' : 'Enter 完成' }} · Esc 取消</p>
       </div>
     </template>
+    <!-- 不随只读或源码模式切换卸载：Tiptap 在菜单隐藏时会把它移出页面，这时卸载会让 Vue 的更新出错，之后整页不再刷新。
+         只读与源码模式下由 should-show 隐藏。 -->
+    <BubbleMenu v-if="editor && !touch" :editor="editor" class="md-bubble" :should-show="({ editor: e, state }) => e.isEditable && !source && !state.selection.empty && !e.isActive('codeBlock') && !e.isActive('image')">
+      <button type="button" :class="{ on: active('bold') }" @click="run().toggleBold().run()"><b>B</b></button>
+      <button type="button" :class="{ on: active('italic') }" @click="run().toggleItalic().run()"><i>I</i></button>
+      <button type="button" :class="{ on: active('strike') }" @click="run().toggleStrike().run()"><s>S</s></button>
+      <button type="button" :class="{ on: active('code') }" @click="run().toggleCode().run()"><code>&lt;/&gt;</code></button>
+      <button type="button" :class="{ on: active('link') }" @click="setLink">链接</button>
+    </BubbleMenu>
   </div>
 </template>

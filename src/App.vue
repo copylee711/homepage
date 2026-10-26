@@ -30,9 +30,12 @@ const TeamsList = defineAsyncComponent(() => import('./components/teams/TeamsLis
 const TeamPage = defineAsyncComponent(() => import('./components/teams/TeamPage.vue'))
 const isTeamPage = /^\/t\/[a-z0-9]+\/?$/.test(location.pathname)
 const isTeams = location.pathname.replace(/\/$/, '') === '/teams'
+// 好友与私信：主站 /messages，轮询即可，不需要 WebSocket。
+const MessagesPage = defineAsyncComponent(() => import('./components/messages/MessagesPage.vue'))
+const isMessages = location.pathname.replace(/\/$/, '') === '/messages'
 const local = /^(localhost|127\.|\[::1\])/.test(location.hostname)
 if ((isDocPage || isTeamPage) && !onCloud && !local) location.replace(location.origin.replace(/\/\/(www\.)?/, '//cloud.') + location.pathname + location.search)
-if ((isDocs || isTeams) && onCloud) location.replace(location.origin.replace('//cloud.', '//') + location.pathname)
+if ((isDocs || isTeams || isMessages) && onCloud) location.replace(location.origin.replace('//cloud.', '//') + location.pathname + location.search)
 // 云盘子域名上的账户页直接回主站（登录 Cookie 两边共用），完成后再跳回来。
 if (onCloud && /^\/account\/?$/.test(location.pathname)) {
   const params = new URLSearchParams(location.search)
@@ -55,7 +58,7 @@ onBeforeUnmount(() => { stop?.(); stopScut?.() })
 // 内容就绪后再定位；之后 1.5 秒内上方区块异步加载导致的高度变化会继续校正，用户一旦滚动即停止。
 watch(ready, async value => {
   const id = decodeURIComponent(location.hash.slice(1))
-  if (!value || !id || isAdmin || isScut || isAccount || isGames || isDrive || isShare || isDocPage || isDocs || isTeamPage || isTeams) return
+  if (!value || !id || isAdmin || isScut || isAccount || isGames || isDrive || isShare || isDocPage || isDocs || isTeamPage || isTeams || isMessages) return
   await nextTick()
   const target = document.getElementById(id)
   if (!target) return
@@ -89,12 +92,13 @@ watch(ready, async value => {
   <template v-else-if="ready">
   <SiteHeader />
   <p v-if="contentStatus.stale" class="content-banner" role="status">暂时无法检查更新，正在显示已加载的内容。<button @click="reloadContent">重试</button></p>
-  <main :id="isScut || isAccount || isGames || isDocs || isTeams ? 'top' : undefined">
+  <main :id="isScut || isAccount || isGames || isDocs || isTeams || isMessages ? 'top' : undefined">
     <ScutSection v-if="isScut" full />
     <AccountPage v-else-if="isAccount" />
     <GamesPage v-else-if="isGames" />
     <div v-else-if="isDocs" class="container docs-page"><DocsList /></div>
     <div v-else-if="isTeams" class="container docs-page"><TeamsList /></div>
+    <div v-else-if="isMessages" class="container docs-page messages-page"><MessagesPage /></div>
     <template v-else>
     <HeroSection />
     <PortalGrid />
@@ -116,6 +120,8 @@ watch(ready, async value => {
 .boot-leave-active { transition:opacity .6s var(--ease),transform .6s var(--ease); }
 .boot-leave-to { opacity:0; transform:scale(1.04); }
 .docs-page { padding-top:calc(var(--header-h) + 40px); padding-bottom:80px; min-height:70vh; }
+.messages-page { padding-bottom:48px; }
+@media (max-width:760px) { .messages-page { padding-top:calc(var(--header-h) + 16px); padding-bottom:16px; min-height:0; } }
 .content-banner { position:fixed; top:64px; z-index:11; width:100%; padding:8px 24px; margin:0; background:var(--surface); border-bottom:1px solid var(--line); font-size:13px; }
 .content-banner button { margin:0 0 0 12px; }
 </style>

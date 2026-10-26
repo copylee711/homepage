@@ -67,7 +67,7 @@ copylee.cn {
     # 协作文档的编辑页需要 WebSocket，ESA 免费版不支持；团队工作区要上传大文件。统一跳到直连源站的云盘子域名。
     @docpage path /doc/* /d/* /t/*
     redir @docpage https://cloud.copylee.cn{uri} 302
-    @scut path /scut /scut/ /account /games /games/* /docs /docs/ /teams /teams/
+    @scut path /scut /scut/ /account /games /games/* /docs /docs/ /teams /teams/ /messages /messages/
     handle @scut {
         root * /var/www/copylee
         header Cache-Control no-cache

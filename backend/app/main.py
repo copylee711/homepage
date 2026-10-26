@@ -58,8 +58,10 @@ from .drive.errors import DriveError
 from .drive.routes import drive_error
 from .drive.routes import router as drive_router
 from .feed import atom_feed
+from .friends import router as friends_router
 from .github import sync_loop, sync_repos
 from .limits import JsonBodyLimit
+from .messages import router as messages_router
 from .models import (
     Article,
     Favorite,
@@ -219,6 +221,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(drive_router)
     app.include_router(docs_router)
     app.include_router(teams.router)
+    app.include_router(friends_router)
+    app.include_router(messages_router)
 
     @app.get("/api/health")
     def health(session: Session = Depends(database)):

@@ -500,3 +500,19 @@ class TeamText(StrictModel):
 
 class DocMarkdown(StrictModel):
     markdown: str = Field(max_length=2 * 1024 * 1024)
+
+
+class FriendRequestCreate(StrictModel):
+    email: str = Field(min_length=3, max_length=254)
+    message: str = Field(default="", max_length=120)
+
+
+class MessageCreate(StrictModel):
+    kind: Literal["text", "file", "doc_invite"] = "text"
+    body: str = Field(default="", max_length=2000)
+    # file：发送者云盘里的文件路径。
+    path: str = Field(default="", max_length=1024)
+    # doc_invite：文档与邀请的权限。
+    doc_id: str = Field(default="", max_length=32)
+    role: Literal["view", "edit"] = "view"
+    can_share: bool = False

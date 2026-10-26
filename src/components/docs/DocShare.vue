@@ -4,6 +4,7 @@ import { DialogClose, DialogContent, DialogDescription, DialogOverlay, DialogPor
 import { confirmDialog } from '../../composables/useConfirm'
 import { docsApi, roleName } from '../../docs'
 import type { DocItem, DocLink, DocMember, Person } from '../../docs'
+import FriendPicker from '../FriendPicker.vue'
 import MenuSelect from '../MenuSelect.vue'
 
 const props = defineProps<{ doc: DocItem }>()
@@ -96,10 +97,10 @@ onMounted(load)
           <DialogTitle class="confirm-title">分享「{{ doc.title }}」</DialogTitle>
           <DialogClose class="close" aria-label="关闭">×</DialogClose>
         </div>
-        <DialogDescription class="d-muted">邀请已注册的用户协作，或通过链接分享。未登录的访客最多只能查看。</DialogDescription>
+        <DialogDescription class="d-muted">从好友中选择或输入已注册用户的邮箱邀请协作，也可以通过链接分享。未登录的访客最多只能查看。</DialogDescription>
 
         <form class="invite" @submit.prevent="invite">
-          <input v-model="email" class="d-input" type="email" placeholder="对方的注册邮箱" autocomplete="off" required>
+          <FriendPicker v-model="email" :exclude="[...members.map(member => member.id), ...(owner ? [owner.id] : [])]" />
           <MenuSelect v-model="role" :options="roleOptions" label="邀请的权限" />
           <button class="d-btn primary" type="submit" :disabled="busy">邀请</button>
         </form>

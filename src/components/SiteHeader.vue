@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { account, features, loadAccount } from '../account'
 import { site } from '../content'
+import { unread, watchUnread } from '../friends'
 import { useTheme } from '../composables/useTheme'
 import AppIcon from './AppIcon.vue'
 import LogoMark from './LogoMark.vue'
@@ -15,7 +16,7 @@ const onHome = path === ''
 // 首页上滚动到作品区时高亮 Make；入口区没有单独的导航项，仍算 Home。
 const sections = ['top', 'portals', 'projects']
 
-interface Item { label: string; href: string; hint: string; external?: boolean; current?: boolean }
+interface Item { label: string; href: string; hint: string; external?: boolean; current?: boolean; dot?: boolean }
 interface Group { id: string; label: string; items: Item[] }
 
 const scrolled = ref(false)
@@ -39,12 +40,21 @@ const groups = computed<Group[]>(() => {
     const workspace: Item[] = [
       { label: 'Teams', href: '/teams', hint: '团队空间与文件', current: path === '/teams' },
       { label: 'Docs', href: '/docs', hint: '协作文档', current: path === '/docs' },
+      { label: 'Messages', href: '/messages', hint: unreadHint.value || '好友与私信', current: path === '/messages', dot: unreadCount.value > 0 },
     ]
     if (features.value.drive && site.value) workspace.push({ label: 'Cloud', href: site.value.cloud, hint: '个人云盘', external: true })
     result.push({ id: 'workspace', label: 'Workspace', items: workspace })
   }
   return result
 })
+// 登录后每分钟查一次未读私信与好友申请，在 Workspace 与 Messages 上显示红点。
+const unreadCount = computed(() => unread.value.unread + unread.value.requests)
+const unreadHint = computed(() => [unread.value.unread && `${unread.value.unread} 条未读私信`, unread.value.requests && `${unread.value.requests} 个好友申请`].filter(Boolean).join('，'))
+let stopUnread: (() => void) | undefined
+watch(account, value => {
+  stopUnread?.(); stopUnread = undefined
+  if (value) stopUnread = watchUnread()
+}, { immediate: true })
 const homeActive = computed(() => onHome && section.value !== 'projects')
 const groupActive = (group: Group) => group.items.some(item => item.current)
 
@@ -92,6 +102,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', onDocument)
   document.removeEventListener('keydown', onKey)
   clearTimeout(closeTimer)
+  stopUnread?.()
 })
 </script>
 
@@ -107,12 +118,12 @@ onBeforeUnmount(() => {
           <a :href="onHome ? '#top' : '/#top'" class="top-link home" :class="{ active: homeActive }" :aria-current="homeActive ? 'true' : undefined">Home</a>
           <div v-for="group in groups" :key="group.id" class="group" :class="{ open: openGroup === group.id }" @pointerenter="enter(group.id, $event)" @pointerleave="leave">
             <button type="button" class="top-link" :class="{ active: groupActive(group) }" :aria-expanded="openGroup === group.id" aria-haspopup="true" @click="flip(group.id, $event)">
-              {{ group.label }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
+              {{ group.label }}<span v-if="group.items.some(item => item.dot)" class="dot" aria-hidden="true" /><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
             </button>
             <Transition name="drop">
               <div v-if="openGroup === group.id" class="panel" role="menu">
                 <a v-for="item in group.items" :key="item.label" :href="item.href" role="menuitem" :class="{ current: item.current }" :aria-current="item.current ? 'page' : undefined" :target="item.external ? '_blank' : undefined" :rel="item.external ? 'noopener' : undefined" @click="openGroup = ''">
-                  <strong>{{ item.label }}<span v-if="item.external" aria-hidden="true"> ↗</span></strong><small>{{ item.hint }}</small>
+                  <strong>{{ item.label }}<span v-if="item.external" aria-hidden="true"> ↗</span><span v-if="item.dot" class="dot" aria-hidden="true" /></strong><small>{{ item.hint }}</small>
                 </a>
               </div>
             </Transition>
@@ -295,6 +306,21 @@ onBeforeUnmount(() => {
 
 .panel a.current strong {
   color: var(--accent);
+}
+
+/* 未读私信与好友申请的红点 */
+.dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin: -10px 0 0 3px;
+  border-radius: 50%;
+  background: #e0607e;
+  vertical-align: middle;
+}
+
+.panel .dot {
+  margin: -2px 0 0 6px;
 }
 
 .panel small {

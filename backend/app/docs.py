@@ -382,6 +382,32 @@ def list_members(doc_id: str, request: Request, session: Session = Depends(datab
             "members": member_rows(session, doc)}
 
 
+def grant(session: Session, doc: Doc, access: Access, granter: User, target: User, role: str,
+          can_share: bool) -> DocMember:
+    """以 granter 的权限把 target 设为成员；私信里的协作邀请被接受时也走这里。
+
+    调用方负责提交并刷新在线连接。
+    """
+    if target.disabled:
+        raise HTTPException(404, "没有找到这个用户")
+    if target.id == doc.user_id:
+        raise HTTPException(400, "所有者已拥有全部权限")
+    existing = session.get(DocMember, (doc.id, target.id))
+    if access.role != "owner":
+        # 非所有者只能授予不超过自己的权限，也不能改动比自己权限高的成员。
+        if RANK[role] > RANK[access.role] or (existing and RANK[existing.role] > RANK[access.role]):
+            raise HTTPException(403, "不能授予超过自己的权限")
+    if existing is None:
+        count = session.exec(select(func.count()).select_from(DocMember)
+                             .where(DocMember.doc_id == doc.id)).one()
+        if count >= MEMBER_LIMIT:
+            raise HTTPException(400, f"每篇文档最多 {MEMBER_LIMIT} 位成员")
+        existing = DocMember(doc_id=doc.id, user_id=target.id, added_by=granter.id, created_at=time.time())
+    existing.role, existing.can_share = role, can_share
+    session.add(existing)
+    return existing
+
+
 @router.post("/api/docs/{doc_id}/members")
 def put_member(doc_id: str, body: DocMemberWrite, request: Request,
                session: Session = Depends(database)):
@@ -389,21 +415,7 @@ def put_member(doc_id: str, body: DocMemberWrite, request: Request,
     target = session.exec(select(User).where(func.lower(User.email) == body.email.strip().lower())).first()
     if target is None or target.disabled:
         raise HTTPException(404, "没有找到这个邮箱对应的用户，请确认对方已注册")
-    if target.id == doc.user_id:
-        raise HTTPException(400, "所有者已拥有全部权限")
-    existing = session.get(DocMember, (doc.id, target.id))
-    if access.role != "owner":
-        # 非所有者只能授予不超过自己的权限，也不能改动比自己权限高的成员。
-        if RANK[body.role] > RANK[access.role] or (existing and RANK[existing.role] > RANK[access.role]):
-            raise HTTPException(403, "不能授予超过自己的权限")
-    if existing is None:
-        count = session.exec(select(func.count()).select_from(DocMember)
-                             .where(DocMember.doc_id == doc.id)).one()
-        if count >= MEMBER_LIMIT:
-            raise HTTPException(400, f"每篇文档最多 {MEMBER_LIMIT} 位成员")
-        existing = DocMember(doc_id=doc.id, user_id=target.id, added_by=user.id, created_at=time.time())
-    existing.role, existing.can_share = body.role, body.can_share
-    session.add(existing)
+    grant(session, doc, access, user, target, body.role, body.can_share)
     session.commit()
     anyio.from_thread.run(rooms_of(request).refresh, doc.id)
     audit.record("doc.member", request, ok=True, user=user.id, doc=doc.id, target=target.id,
