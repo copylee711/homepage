@@ -288,12 +288,25 @@ async function toggleSource() {
   if (!source.value) {
     sourceText.value = props.collab ? current.getMarkdown() : (props.modelValue || current.getMarkdown())
     source.value = true
+    await nextTick()
+    sourceField.value?.focus()
     return
   }
   if (lossy(sourceText.value) && !await confirmDialog({ title: '切换到可视化编辑？', message: '内容含有 HTML、脚注或引用式链接，切换后这部分可能丢失。', confirmText: '仍要切换', danger: true })) return
   current.commands.setContent(sourceText.value, { contentType: 'markdown', emitUpdate: !!props.collab })
   source.value = false
   notice.value = ''
+  await nextTick()
+  current.commands.focus()
+}
+
+// 源码模式里同样用 Ctrl/⌘ + / 切回（Vue 的按键修饰符没有 slash，这里直接判断按键）。
+const sourceField = ref<HTMLTextAreaElement>()
+function sourceKey(event: KeyboardEvent) {
+  if (event.key === '/' && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault()
+    void toggleSource()
+  }
 }
 
 function onSource() {
@@ -532,7 +545,7 @@ function slashKey(event: KeyboardEvent) {
     </div>
     <p v-if="notice" class="md-notice">{{ notice }}</p>
 
-    <textarea v-if="source" v-model="sourceText" class="md-source" spellcheck="false" :readonly="!editable" @input="onSource" @keydown.ctrl.slash.prevent="toggleSource" @keydown.meta.slash.prevent="toggleSource" />
+    <textarea v-if="source" ref="sourceField" v-model="sourceText" class="md-source" spellcheck="false" :readonly="!editable" @input="onSource" @keydown="sourceKey" />
     <template v-else>
       <EditorContent :editor="editor" class="md-body" />
       <BubbleMenu v-if="editor && editable && !touch" :editor="editor" class="md-bubble" :should-show="({ editor: e, state }) => !state.selection.empty && !e.isActive('codeBlock') && !e.isActive('image')">
