@@ -25,7 +25,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, select
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import accounts, audit, feedback, games, images, storage, user_security
+from . import accounts, audit, feedback, games, images, storage, teams, user_security
 from .accounts import current_user, profile
 from .auth import (
     COOKIE,
@@ -218,6 +218,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(drive_router)
     app.include_router(docs_router)
+    app.include_router(teams.router)
 
     @app.get("/api/health")
     def health(session: Session = Depends(database)):
@@ -467,6 +468,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         with audit.outcome("account.delete", request, user=user.id, email=user.email):
             accounts.delete_account(session, user, body.password, settings.media_dir)
             images.remove_owner(session, settings, user.id)
+            teams.purge_user(session, settings, user.id)
             drive_accounts.remove_user(session, settings, user.id)
             session.commit()
         accounts.clear_cookie(response, settings)
@@ -646,6 +648,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             session.exec(delete(table).where(table.user_id == user.id))
         accounts.remove_avatar(user, settings.media_dir)
         images.remove_owner(session, settings, user.id)
+        teams.purge_user(session, settings, user.id)
         drive_accounts.remove_user(session, settings, user.id)
         session.delete(user)
         session.commit()

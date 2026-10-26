@@ -23,6 +23,8 @@ class Entry:
     size: int = 0
     mtime: float = 0
     etag: str = ""
+    # 团队文档的只读 Markdown 快照：对应的文档 id。
+    doc: str = ""
 
 
 class Backend:

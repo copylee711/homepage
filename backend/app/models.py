@@ -339,6 +339,8 @@ class DriveUpload(SQLModel, table=True):
     __tablename__ = "drive_upload"
     id: str = Field(primary_key=True)
     user_id: str = Field(index=True)
+    # 上传到团队空间时为团队代号，否则为空（上传到自己的云盘）。
+    team_id: str = ""
     path: str
     size: int
     received: int = 0
@@ -389,6 +391,11 @@ class Doc(SQLModel, table=True):
     # 粘贴图片的去处：空字符串表示按上传者自己的默认设置；builtin | site | custom 由所有者统一指定。
     image_target: str = ""
     image_custom: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
+    # 所属团队与团队文件树中的文件夹；不属于团队时 team_id 为空。
+    team_id: str = Field(default="", index=True)
+    folder: str = "/"
+    # 正文的 Markdown 快照，由正在编辑的浏览器上传，供团队 WebDAV 以只读 .md 文件提供。
+    markdown: str = ""
     created_at: float
     updated_at: float
     updated_by: str = ""
@@ -425,3 +432,34 @@ class DocImageSetting(SQLModel, table=True):
     target: str = "builtin"
     custom: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
     updated_at: float = 0
+
+
+# —— 团队 ——
+
+
+class Team(SQLModel, table=True):
+    """团队：成员共享的一块存储空间与一组协作文档。
+
+    quota_bytes 在创建时从所有者的总配额里划拨，空着也计入所有者的用量；
+    文件放在 drive_dir/.teams/<id>/，used_bytes 记录实际用量。
+    """
+
+    __tablename__ = "team"
+    id: str = Field(primary_key=True)
+    user_id: str = Field(index=True)
+    name: str
+    description: str = ""
+    quota_bytes: int = 0
+    used_bytes: int = 0
+    used_files: int = 0
+    created_at: float
+    updated_at: float
+
+
+class TeamMember(SQLModel, table=True):
+    __tablename__ = "team_member"
+    team_id: str = Field(primary_key=True)
+    user_id: str = Field(primary_key=True, index=True)
+    role: str = "view"  # view | edit
+    added_by: str = ""
+    created_at: float

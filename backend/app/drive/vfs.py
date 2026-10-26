@@ -3,6 +3,8 @@
 Web、SFTP、WebDAV 都通过 Drive 访问文件，因此权限、配额与审计只在这里实现一次。
 """
 
+import io
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -14,10 +16,10 @@ from sqlalchemy import text
 from sqlmodel import Session, select
 
 from .. import audit, storage, storage_terms
-from ..models import DriveMount, HostedImage
+from ..models import Doc, DriveMount, HostedImage, Team
 from . import paths
 from .backends import Backend, Entry, ImagesBackend, LocalBackend, OssBackend
-from .errors import Conflict, Forbidden, Invalid, NotFound, QuotaExceeded
+from .errors import Conflict, DriveError, Forbidden, Invalid, NotFound, QuotaExceeded
 from .objects import oss_store
 
 IMAGES_PATH = "/图床"
@@ -411,3 +413,203 @@ def rescan(engine, settings, user_id: str) -> list[dict]:
             result.append({"path": row.path, "size": size, "files": files})
         session.commit()
     return result
+
+
+# —— 团队空间 ——
+
+TEAMS_DIR = ".teams"
+UNSAFE_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+
+
+def team_dir(settings, team_id: str) -> Path:
+    return settings.drive_dir / TEAMS_DIR / team_id
+
+
+def snapshot_name(title: str) -> str:
+    """文档标题 → 可以在 Windows 上使用的文件名主体。"""
+    name = UNSAFE_NAME.sub("_", title).strip(" .") or "未命名文档"
+    return name[:120]
+
+
+class TeamDrive(Drive):
+    """团队空间：只有一个本地挂载点的 Drive，配额与用量记在 team 表。
+
+    团队文档以只读的“标题.md”出现在所在文件夹里（内容是 Markdown 快照），不能改写、删除或移动，
+    只能在网页上编辑。文件夹移动或删除时，文档跟着移动或回到根目录。
+    """
+
+    def __init__(self, engine, settings, team_id: str, user_id: str, read_only: bool, *,
+                 protocol: str = "web", ip: str = "", ua: str = ""):
+        # 不调用 Drive.__init__：成员访问团队空间不要求开通自己的云盘。
+        self.engine = engine
+        self.settings = settings
+        self.user_id = user_id
+        self.team_id = team_id
+        self.actor = {"protocol": protocol, "ip": ip, "ua": ua}
+        with Session(engine) as session:
+            team = session.get(Team, team_id)
+            if team is None:
+                raise NotFound("团队不存在")
+            quota = team.quota_bytes
+        folder = team_dir(settings, team_id)
+        folder.mkdir(parents=True, exist_ok=True)
+        self.mounts = [Mount(team_id, "/", "team", read_only,
+                             quota, LocalBackend(folder, spool_dir(settings)))]
+
+    def log(self, event: str, path: str, **fields):
+        audit.log(f"team.{event}", self.actor["ip"], self.actor["ua"], user=self.user_id,
+                  team=self.team_id, protocol=self.actor["protocol"], path=path, **fields)
+
+    # —— 配额 ——
+
+    def allowance(self, mount: Mount) -> int | None:
+        with Session(self.engine) as session:
+            team = session.get(Team, self.team_id)
+            return (team.quota_bytes - team.used_bytes) if team else 0
+
+    def charge(self, mount: Mount, size: int, files: int):
+        if not size and not files:
+            return
+        with Session(self.engine) as session:
+            session.exec(text(
+                "UPDATE team SET used_bytes = MAX(0, used_bytes + :size), "
+                "used_files = MAX(0, used_files + :files) WHERE id = :id"
+            ), params={"size": size, "files": files, "id": self.team_id})
+            session.commit()
+
+    # —— 文档快照 ——
+
+    def docs_in(self, folder: str, real: set[str]) -> dict[str, Doc]:
+        """folder 下显示的文档：文件名 → 文档。所在文件夹已不存在的文档显示在根目录。"""
+        with Session(self.engine) as session:
+            rows = session.exec(select(Doc).where(Doc.team_id == self.team_id)
+                                .order_by(Doc.created_at)).all()
+        result: dict[str, Doc] = {}
+        for doc in rows:
+            home = doc.folder if doc.folder == "/" or self.real_dir(doc.folder) else "/"
+            if home != folder:
+                continue
+            base = snapshot_name(doc.title)
+            name, number = f"{base}.md", 1
+            if name in real:
+                name = f"{base}（文档）.md"
+            while name in result or name in real:
+                number += 1
+                name = f"{base}（文档 {number}）.md"
+            result[name] = doc
+        return result
+
+    def real_dir(self, path: str) -> bool:
+        try:
+            mount, rel = self.resolve(paths.clean(path))
+            entry = mount.backend.stat(rel)
+        except DriveError:
+            return False
+        return entry is not None and entry.is_dir
+
+    def real_names(self, folder: str) -> set[str]:
+        mount, rel = self.resolve(folder)
+        try:
+            return {entry.name for entry in mount.backend.list(rel)}
+        except DriveError:
+            return set()
+
+    def doc_at(self, path: str) -> Doc | None:
+        path = paths.clean(path)
+        if path == "/":
+            return None
+        folder = paths.parent(path)
+        if not self.real_dir(folder):
+            return None
+        return self.docs_in(folder, self.real_names(folder)).get(paths.name(path))
+
+    @staticmethod
+    def doc_entry(name: str, doc: Doc) -> Entry:
+        return Entry(name, False, len(doc.markdown.encode()), doc.updated_at, doc=doc.id,
+                     etag=f"doc-{doc.id}-{int(doc.updated_at * 1000):x}")
+
+    # —— 读取 ——
+
+    def stat(self, path: str) -> Entry:
+        try:
+            return super().stat(path)
+        except NotFound:
+            doc = self.doc_at(path)
+            if doc is None:
+                raise
+            return self.doc_entry(paths.name(paths.clean(path)), doc)
+
+    def list(self, path: str) -> list[Entry]:
+        entries = super().list(path)
+        names = {entry.name for entry in entries}
+        docs = [self.doc_entry(name, doc)
+                for name, doc in self.docs_in(paths.clean(path), names).items()]
+        return sorted(entries + docs, key=lambda entry: (not entry.is_dir, entry.name.lower()))
+
+    def open_read(self, path: str, offset: int = 0, log: bool = True):
+        doc = None
+        try:
+            return super().open_read(path, offset, log)
+        except NotFound:
+            doc = self.doc_at(path)
+            if doc is None:
+                raise
+        return io.BytesIO(doc.markdown.encode()[offset:])
+
+    # —— 写入 ——
+
+    def writable(self, path: str) -> tuple[Mount, str]:
+        if self.doc_at(path) is not None:
+            raise Forbidden("团队文档只能在网页上编辑")
+        return super().writable(path)
+
+    def copy(self, src: str, dst: str, overwrite: bool = False):
+        if self.doc_at(src) is not None:
+            raise Forbidden("团队文档不能复制，请在网页上导出 Markdown")
+        super().copy(src, dst, overwrite)
+
+    def move(self, src: str, dst: str, overwrite: bool = False):
+        src, dst = paths.clean(src), paths.clean(dst)
+        doc = self.doc_at(src)
+        if doc is not None:
+            self.move_doc(doc, src, dst)
+            return
+        moved_dir = self.real_dir(src)
+        super().move(src, dst, overwrite)
+        if moved_dir:
+            self.refolder(src, dst)
+
+    def delete(self, path: str):
+        path = paths.clean(path)
+        removed_dir = path != "/" and self.real_dir(path)
+        super().delete(path)
+        if removed_dir:
+            self.refolder(path, "/", flatten=True)
+
+    def move_doc(self, doc: Doc, src: str, dst: str):
+        """移动或改名文档快照：改的是文档所在的文件夹与标题，正文不变。"""
+        if self.mounts[0].read_only:
+            raise Forbidden("该目录只读")
+        folder = paths.parent(dst)
+        if folder != "/" and not self.real_dir(folder):
+            raise NotFound("目标目录不存在")
+        with Session(self.engine) as session:
+            row = session.get(Doc, doc.id)
+            row.folder = folder
+            name = paths.name(dst)
+            if name != paths.name(src):
+                row.title = (name[:-3] if name.lower().endswith(".md") else name).strip() or row.title
+            session.add(row)
+            session.commit()
+        self.log("move", src, target=dst, doc=doc.id)
+
+    def refolder(self, src: str, dst: str, flatten: bool = False):
+        """文件夹移动后改写其中文档的位置；flatten 时（文件夹被删除）全部回到 dst。"""
+        with Session(self.engine) as session:
+            rows = session.exec(select(Doc).where(Doc.team_id == self.team_id)).all()
+            for doc in rows:
+                if not paths.within(doc.folder, src):
+                    continue
+                doc.folder = dst if flatten else paths.clean(dst + doc.folder[len(src):])
+                session.add(doc)
+            session.commit()

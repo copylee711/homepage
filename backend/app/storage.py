@@ -1,6 +1,6 @@
 """存储方案：云盘与图床共用一个总配额。
 
-总用量 = 图床图片 + 未单独设置配额的云盘挂载点。单独设置了配额的挂载点（例如 OSS
+总用量 = 图床图片 + 未单独设置配额的云盘挂载点 + 名下团队的划拨额（空着也算）。单独设置了配额的挂载点（例如 OSS
 归档目录）只受自己的配额限制。管理员同样受自己的存储方案约束（可在后台调整），
 只有旧数据里 owner 为 "admin" 的图片不计配额。
 """
@@ -11,7 +11,7 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from . import storage_terms
-from .models import DriveMount, HostedImage, StoragePlan, User
+from .models import DriveMount, HostedImage, StoragePlan, Team, User
 
 ADMIN = "admin"
 # 文章与笔记引用的图片：随内容自动增减，不属于任何人，也不计入配额。
@@ -38,8 +38,14 @@ def drive_used(session: Session, user_id: str, shared_only: bool = True) -> int:
     return session.exec(query).one()
 
 
+def teams_reserved(session: Session, user_id: str) -> int:
+    return session.exec(
+        select(func.coalesce(func.sum(Team.quota_bytes), 0)).where(Team.user_id == user_id)
+    ).one()
+
+
 def shared_used(session: Session, user_id: str) -> int:
-    return images_used(session, user_id) + drive_used(session, user_id)
+    return images_used(session, user_id) + drive_used(session, user_id) + teams_reserved(session, user_id)
 
 
 def unlimited(session: Session, user_id: str) -> bool:
@@ -77,11 +83,13 @@ def summary(session: Session, user_id: str) -> dict:
     row = plan(session, user_id)
     images = images_used(session, user_id)
     drive = drive_used(session, user_id)
+    teams = teams_reserved(session, user_id)
     return {"drive_enabled": row.drive_enabled, "images_enabled": row.images_enabled,
             "agreed": agreed(session, user_id), "terms_accepted_at": row.terms_accepted_at,
             "quota": None if unlimited(session, user_id) else row.quota_bytes,
             "max_image": row.max_image_bytes,
-            "used": images + drive, "images_used": images, "drive_used": drive}
+            "used": images + drive + teams, "images_used": images, "drive_used": drive,
+            "teams_reserved": teams}
 
 
 def save(session: Session, user_id: str, *, drive_enabled: bool | None = None,

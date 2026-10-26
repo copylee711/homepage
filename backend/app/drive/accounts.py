@@ -76,10 +76,15 @@ def fail(session: Session, login: str, ip: str):
     session.commit()
 
 
-def check_password(session: Session, login: str, password: str) -> User | None:
-    """应用密码或导入的旧密码；成功返回用户，失败返回 None（由调用方计入失败次数）。"""
+def check_password(session: Session, login: str, password: str,
+                   require_drive: bool = True) -> User | None:
+    """应用密码或导入的旧密码；成功返回用户，失败返回 None（由调用方计入失败次数）。
+
+    require_drive=False 用于团队空间：成员不需要开通个人云盘，团队权限由调用方另行检查。
+    """
     user = find_user(session, login)
-    if not usable(session, user) or not password:
+    allowed = usable(session, user) if require_drive else user is not None and not user.disabled
+    if not allowed or not password:
         return None
     row = session.exec(select(DriveCredential).where(
         DriveCredential.user_id == user.id, DriveCredential.kind == "app_password",

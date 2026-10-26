@@ -454,3 +454,49 @@ class ImageTargetWrite(StrictModel):
     # inherit 只用于文档：跟随上传者自己的默认设置。
     target: Literal["inherit", "builtin", "site", "custom"]
     custom: ImageHostConfig | None = None
+
+
+# —— 团队 ——
+
+
+class TeamCreate(StrictModel):
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=500)
+    quota_mb: int = Field(ge=10, le=10 * 1024 * 1024)
+
+
+class TeamUpdate(StrictModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    description: str | None = Field(default=None, max_length=500)
+    quota_mb: int | None = Field(default=None, ge=10, le=10 * 1024 * 1024)
+
+
+class TeamMemberWrite(StrictModel):
+    """按邮箱或用户 id（从好友列表选择时）添加成员。"""
+
+    email: str = Field(default="", max_length=254)
+    user_id: str = Field(default="", max_length=64)
+    role: Literal["view", "edit"] = "edit"
+
+    @model_validator(mode="after")
+    def one_target(self):
+        if not self.email.strip() and not self.user_id:
+            raise ValueError("请填写邮箱或选择好友")
+        return self
+
+
+class TeamDocCreate(StrictModel):
+    title: str = Field(default="", max_length=200)
+    folder: str = Field(default="/", min_length=1, max_length=4096)
+
+
+class TeamText(StrictModel):
+    path: str = Field(min_length=1, max_length=4096)
+    content: str = Field(max_length=2 * 1024 * 1024)
+    # 打开时的文件版本；为空表示新建文件。与当前版本不一致时拒绝保存，除非 force。
+    version: str = Field(default="", max_length=128)
+    force: bool = False
+
+
+class DocMarkdown(StrictModel):
+    markdown: str = Field(max_length=2 * 1024 * 1024)

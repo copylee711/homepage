@@ -78,14 +78,25 @@ def open_drive(request: Request, user_id: str) -> Drive:
                  ip=client_ip(request), ua=request.headers.get("user-agent", ""))
 
 
-def user_drive(request: Request, session: Session, write: bool = False) -> tuple[User, Drive]:
+def user_drive(request: Request, session: Session, write: bool = False,
+               team: str | None = None) -> tuple[User, Drive]:
+    """登录用户的云盘；带 team 参数（或显式传入）时是该团队的空间，按团队角色决定能否写入。"""
     user, _ = current_user(request, session, write=write)
+    team = request.query_params.get("team", "") if team is None else team
+    if team:
+        from .. import teams
+
+        row, role, _ = teams.require(request, session, team)
+        return user, teams.open_drive(request, row, user.id, role)
     return user, open_drive(request, user.id)
 
 
 def entry_view(entry, path: str) -> dict:
-    return {"name": entry.name, "path": path, "dir": entry.is_dir, "size": entry.size,
+    view = {"name": entry.name, "path": path, "dir": entry.is_dir, "size": entry.size,
             "mtime": entry.mtime}
+    if entry.doc:
+        view["doc"] = entry.doc
+    return view
 
 
 # —— 下载 ——
@@ -187,7 +198,7 @@ def overview(request: Request, session: Session = Depends(database)):
             "account": accounts.account_view(session, settings_of(request), user)}
 
 
-MOUNT_LABELS = {"local": "本地磁盘", "oss": "阿里云 OSS", "images": "图床"}
+MOUNT_LABELS = {"local": "本地磁盘", "oss": "阿里云 OSS", "images": "图床", "team": "团队空间"}
 # 统计文件夹时最多遍历的条目数，避免超大目录（尤其是 OSS）拖慢请求。
 INFO_LIMIT = 20000
 
@@ -340,6 +351,7 @@ def upload_create(body: UploadCreate, request: Request, session: Session = Depen
         raise Invalid("同名目录已存在")
     drive.reserve(mount, body.size - (existing.size if existing else 0))
     row = DriveUpload(id=secrets.token_hex(16), user_id=user.id, path=path, size=body.size,
+                      team_id=request.query_params.get("team", ""),
                       created_at=time.time(), expires_at=time.time() + UPLOAD_HOURS * 3600)
     target = upload_file(settings, row.id)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -386,9 +398,11 @@ async def upload_part(upload_id: str, offset: int, request: Request,
 
 @router.post("/api/drive/uploads/{upload_id}/finish")
 def upload_finish(upload_id: str, request: Request, session: Session = Depends(database)):
-    user, drive = user_drive(request, session, write=True)
+    user, _ = current_user(request, session, write=True)
     settings = settings_of(request)
     row = get_upload(session, settings, user.id, upload_id)
+    # 按创建会话时的去处保存，团队成员资格在这里重新检查。
+    _, drive = user_drive(request, session, write=True, team=row.team_id)
     if row.received != row.size:
         raise HTTPException(409, f"文件尚未传完（{row.received}/{row.size}）")
     session.delete(row)

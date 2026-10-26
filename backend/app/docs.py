@@ -39,10 +39,11 @@ from .accounts import (
 )
 from .auth import check_origin, digest
 from .drive.shares import secret_key
-from .models import Doc, DocImageSetting, DocMember, DocVersion, User, UserSession
+from .models import Doc, DocImageSetting, DocMember, DocVersion, Team, TeamMember, User, UserSession
 from .schemas import (
     DocCreate,
     DocLinkWrite,
+    DocMarkdown,
     DocMemberWrite,
     DocUnlock,
     DocUpdate,
@@ -120,15 +121,22 @@ def optional_user(session: Session, cookies) -> User | None:
 
 
 def resolve(session: Session, settings, doc: Doc, user: User | None, link: str, cookies) -> Access | None:
-    if user and user.id == doc.user_id:
+    """团队文档的权限取团队角色与文档自身成员、链接中较高的一个；团队所有者等同文档所有者。"""
+    team_role = None
+    if doc.team_id and user:
+        from .teams import role_of, usable
+
+        team = session.get(Team, doc.team_id)
+        team_role = role_of(session, team, user.id) if usable(session, team) else None
+    if user and (user.id == doc.user_id or team_role == "owner"):
         return Access("owner", True, True)
     owner = session.get(User, doc.user_id)
     if owner is None or owner.disabled:
         return None
-    rank, can_share = 0, False
+    rank, can_share = RANK.get(team_role, 0), False
     member = session.get(DocMember, (doc.id, user.id)) if user else None
     if member:
-        rank, can_share = RANK[member.role], member.can_share
+        rank, can_share = max(rank, RANK[member.role]), member.can_share
     if link_open(doc, link) and link_unlocked(settings, doc, cookies):
         # 访客永远只读：可编辑链接只对登录用户生效。
         rank = max(rank, RANK[doc.link_role] if user else RANK["view"])
@@ -185,7 +193,10 @@ def doc_view(session: Session, settings, doc: Doc, access: Access) -> dict:
             "updated_at": doc.updated_at, "owner": person(session.get(User, doc.user_id)),
             "updated_by": person(session.get(User, doc.updated_by)) if doc.updated_by else None,
             "role": access.role, "can_share": access.can_share, "can_copy": access.can_copy,
-            "allow_copy": doc.allow_copy}
+            "allow_copy": doc.allow_copy, "team": None, "folder": doc.folder}
+    if doc.team_id:
+        team = session.get(Team, doc.team_id)
+        data["team"] = {"id": team.id, "name": team.name} if team else None
     if access.role == "owner":
         data["link"] = link_view(settings, doc)
     return data
@@ -204,6 +215,14 @@ def list_docs(request: Request, session: Session = Depends(database)):
         select(Doc).join(DocMember, DocMember.doc_id == Doc.id)
         .where(DocMember.user_id == user.id).order_by(Doc.updated_at.desc())
     ).all()
+    # 所在团队的文档（自己建的已在 owned 里）。
+    team_ids = [team.id for team in session.exec(select(Team).where(Team.user_id == user.id)).all()]
+    team_ids += session.exec(select(TeamMember.team_id).where(TeamMember.user_id == user.id)).all()
+    seen = {doc.id for doc in [*owned, *shared]}
+    shared = list(shared) + [doc for doc in session.exec(
+        select(Doc).where(Doc.team_id.in_(team_ids)).order_by(Doc.updated_at.desc())
+    ).all() if doc.id not in seen]
+    shared.sort(key=lambda doc: doc.updated_at, reverse=True)
     views = []
     for doc in shared:
         access = resolve(session, settings, doc, user, "", {})
@@ -291,6 +310,20 @@ def update_doc(doc_id: str, body: DocUpdate, request: Request,
     if copy_changed:
         anyio.from_thread.run(rooms_of(request).refresh, doc.id)
     return doc_view(session, request.app.state.settings, doc, access)
+
+
+@router.put("/api/docs/{doc_id}/markdown")
+def put_markdown(doc_id: str, body: DocMarkdown, request: Request,
+                 link: str = Query(default="", max_length=64), session: Session = Depends(database)):
+    """正在编辑的浏览器上传正文的 Markdown 快照，供团队 WebDAV 以只读 .md 文件提供。"""
+    doc, access, _ = require(request, session, doc_id, link, write=True)
+    if access.role not in WRITERS:
+        raise HTTPException(403, "没有编辑权限")
+    if doc.markdown != body.markdown:
+        doc.markdown = body.markdown
+        session.add(doc)
+        session.commit()
+    return {"ok": True}
 
 
 @router.delete("/api/docs/{doc_id}")
