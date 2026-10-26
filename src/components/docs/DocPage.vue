@@ -243,7 +243,7 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
             <span v-if="peers.length > 5" class="peer more">+{{ peers.length - 5 }}</span>
           </PopoverTrigger>
           <PopoverPortal>
-            <PopoverContent class="peer-panel" align="end" :side-offset="10" :collision-padding="12">
+            <PopoverContent class="peer-panel" align="end" :side-offset="10" :collision-padding="12" @close-auto-focus.prevent>
               <p class="peer-head">在线 {{ peers.length }} 人</p>
               <ul>
                 <li v-for="peer in peers" :key="peer.client">
@@ -418,6 +418,8 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
 .outline-count { margin:0; padding:12px 22px 16px; border-top:1px solid var(--line); color:var(--faint); font:12px var(--font-mono); }
 .outline-toggle.on, .mode-toggle.on { border-color:var(--accent); color:var(--accent); }
 .outline-scrim { display:none; }
+/* 大纲与正文固定在各自的列：任何时候大纲都不会叠到正文下面（窄屏在下面的媒体查询里改回单列） */
+.doc-body > .paper { grid-column:2; grid-row:1; }
 /* 窄屏：大纲作为抽屉盖在正文上，点遮罩收起 */
 @media (max-width:1100px) {
   .doc-body, .doc-body.with-outline { grid-template-columns:minmax(0,1fr); }
@@ -426,8 +428,6 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
   .outline-scrim { display:block; position:fixed; inset:0; z-index:69; background:rgba(12,13,16,.35); }
   .doc-body > .paper { grid-column:1; }
 }
-/* 大纲与正文固定在各自的列：任何时候大纲都不会叠到正文下面 */
-.doc-body > .paper { grid-column:2; grid-row:1; }
 .paper { box-sizing:border-box; width:100%; max-width:860px; margin:0 auto; padding:36px clamp(16px,4vw,24px) 40px; }
 .paper :deep(.md-toolbar:not(.docked)) { top:calc(var(--header-h) + 56px); }
 .title { width:100%; margin:0 0 18px; padding:0; border:0; background:none; color:var(--text); font:800 clamp(1.9rem,4vw,2.6rem)/1.2 var(--font); letter-spacing:-.03em; outline:none; }

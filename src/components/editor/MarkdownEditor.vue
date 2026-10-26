@@ -247,12 +247,25 @@ function renderCaret(user: Record<string, string>) {
   return caret
 }
 
-/** 滚动到某个连接的光标处并闪一下；对方没有光标（只在查看）时返回 false。 */
+/**
+ * 滚动到某个连接的光标处并闪一下；对方没有光标（只在查看）时返回 false。
+ * 不用平滑滚动：滚动途中懒加载的图片、视频撑开高度，或弹出层关闭时抢回焦点，都会让平滑滚动停在半路。
+ * 直接算出位置跳过去，等布局稳定后再校正一次。
+ */
 function locate(client: number) {
-  const root = editor.value?.view.dom
-  const caret = [...root?.querySelectorAll<HTMLElement>('.collaboration-carets__caret') ?? []].find(item => item.dataset.client === String(client))
+  const find = () => [...editor.value?.view.dom.querySelectorAll<HTMLElement>('.collaboration-carets__caret') ?? []]
+    .find(item => item.dataset.client === String(client))
+  const caret = find()
   if (!caret) return false
-  caret.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  const center = () => {
+    const rect = find()?.getBoundingClientRect()
+    if (rect && Math.abs(rect.top + rect.height / 2 - innerHeight / 2) > 24) {
+      window.scrollTo({ top: scrollY + rect.top + rect.height / 2 - innerHeight / 2, behavior: 'instant' })
+    }
+  }
+  center()
+  requestAnimationFrame(() => requestAnimationFrame(center))
+  setTimeout(center, 400)
   caret.classList.remove('flash')
   void caret.offsetWidth
   caret.classList.add('flash')
