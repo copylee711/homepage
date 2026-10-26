@@ -8,9 +8,11 @@ import InfoDialog from './InfoDialog.vue'
 import PreviewDialog from './PreviewDialog.vue'
 import ShareDialog from './ShareDialog.vue'
 import TransferDialog from './TransferDialog.vue'
-import { kindIcons, kindOf, middleTrim, previewable, splitName } from './fileKinds'
+import { isTextName, kindIcons, kindOf, middleTrim, previewable, splitName } from './fileKinds'
 
-const emit = defineEmits<{ changed: [] }>()
+// team：团队空间里使用。不提供外链分享；文档交给页面打开，文本文件在线编辑。
+const props = defineProps<{ team?: boolean }>()
+const emit = defineEmits<{ changed: []; navigate: [path: string]; openDoc: [id: string]; editText: [entry: DriveEntry] }>()
 
 const initial = new URLSearchParams(location.search).get('path') || '/'
 const path = ref(initial)
@@ -83,6 +85,7 @@ async function load(target = path.value, push = false) {
   try {
     const data = await driveApi<DriveListing>(`/list?path=${encodeURIComponent(target)}`)
     listing.value = data; path.value = data.path; selected.value = new Set(); filter.value = ''
+    emit('navigate', data.path)
     const url = data.path === '/' ? location.pathname : `${location.pathname}?path=${encodeURIComponent(data.path)}`
     if (push) history.pushState({ path: data.path }, '', url)
     else history.replaceState({ path: data.path }, '', url)
@@ -128,6 +131,8 @@ function sortBy(key: typeof sortKey.value) {
 
 function activate(entry: DriveEntry) {
   if (entry.dir) { void load(entry.path, true); return }
+  if (props.team && entry.doc) { emit('openDoc', entry.doc); return }
+  if (props.team && isTextName(entry.name)) { emit('editText', entry); return }
   if (previewable(kindOf(entry.name))) dialog.value = { kind: 'preview', entry }
   else location.href = downloadUrl(entry.path)
 }
@@ -256,7 +261,7 @@ onBeforeUnmount(() => {
   clearTimeout(noticeTimer)
   clearTimeout(pressTimer)
 })
-defineExpose({ reload: () => load() })
+defineExpose({ reload: () => load(), open: (target: string) => load(target, true), activate, path })
 </script>
 
 <template>
@@ -291,6 +296,7 @@ defineExpose({ reload: () => load() })
         <button class="d-btn quiet" type="button" :aria-label="view === 'list' ? '网格视图' : '列表视图'" :title="view === 'list' ? '网格视图' : '列表视图'" @click="view = view === 'list' ? 'grid' : 'list'"><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="view === 'list' ? 'M4 4h7v7H4Zm9 0h7v7h-7ZM4 13h7v7H4Zm9 0h7v7h-7Z' : 'M4 6h16M4 12h16M4 18h16'" /></svg></button>
         <button class="d-btn quiet" type="button" aria-label="刷新" title="刷新" @click="load()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" /></svg></button>
         <button class="d-btn" type="button" :disabled="readOnly" @click="openDialog({ kind: 'mkdir', value: '' })"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5a1 1 0 0 1 1-1h4.6l2 2h8.4a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1ZM12 10v6m-3-3h6" /></svg>新建文件夹</button>
+        <slot name="tools" :path="path" :read-only="readOnly" />
         <label class="d-btn primary upload" :class="{ disabled: readOnly }"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m-5 5 5-5 5 5M4 16v4h16v-4" /></svg>上传<input type="file" multiple :disabled="readOnly" @change="pickFiles"></label>
         <label class="d-btn" :class="{ disabled: readOnly }" title="上传整个文件夹">文件夹<input type="file" webkitdirectory :disabled="readOnly" @change="pickFiles"></label>
       </div>
@@ -300,7 +306,7 @@ defineExpose({ reload: () => load() })
       <div v-if="chosen.length && !isMobile" class="selection" role="toolbar" aria-label="已选项目操作">
         <span>已选 {{ chosen.length }} 项</span>
         <button class="d-btn" type="button" @click="download">{{ chosen.length === 1 && !chosen[0]!.dir ? '下载' : '打包下载' }}</button>
-        <button class="d-btn" type="button" @click="openDialog({ kind: 'share', paths: chosen.map(item => item.path), folder: chosen.length === 1 && chosen[0]!.dir })">分享</button>
+        <button v-if="!team" class="d-btn" type="button" @click="openDialog({ kind: 'share', paths: chosen.map(item => item.path), folder: chosen.length === 1 && chosen[0]!.dir })">分享</button>
         <button v-if="chosen.length === 1" class="d-btn" type="button" :disabled="readOnly" @click="openDialog({ kind: 'rename', value: chosen[0]!.name, entry: chosen[0] })">重命名</button>
         <button class="d-btn" type="button" :disabled="readOnly" @click="openDialog({ kind: 'transfer', mode: 'move', paths: chosen.map(item => item.path) })">移动</button>
         <button class="d-btn" type="button" @click="openDialog({ kind: 'transfer', mode: 'copy', paths: chosen.map(item => item.path) })">复制</button>
@@ -373,7 +379,7 @@ defineExpose({ reload: () => load() })
     <Transition name="dock">
       <nav v-if="isMobile && selecting" class="m-actions" aria-label="已选项目操作">
         <button type="button" @click="download"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M4 20h16" /></svg>{{ chosen.length === 1 && !chosen[0]!.dir ? '下载' : '打包' }}</button>
-        <button type="button" @click="openDialog(shareTarget())"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 13.5 15.5 17.5M15.5 6.5l-7 4M18 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM6 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm12 6.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" /></svg>分享</button>
+        <button v-if="!team" type="button" @click="openDialog(shareTarget())"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 13.5 15.5 17.5M15.5 6.5l-7 4M18 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM6 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm12 6.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" /></svg>分享</button>
         <button type="button" :disabled="readOnly" @click="openDialog({ kind: 'transfer', mode: 'move', paths: chosen.map(item => item.path) })"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5a1 1 0 0 1 1-1h4.6l2 2h8.4a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1ZM10 13h6m-2-2 2 2-2 2" /></svg>移动</button>
         <button type="button" @click="openDialog({ kind: 'transfer', mode: 'copy', paths: chosen.map(item => item.path) })"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 9h10v10H9ZM5 15V5h10" /></svg>复制</button>
         <button type="button" :disabled="readOnly || chosen.length !== 1" @click="openDialog({ kind: 'rename', value: chosen[0]!.name, entry: chosen[0] })"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16Zm9-13 4 4" /></svg>重命名</button>
@@ -384,6 +390,7 @@ defineExpose({ reload: () => load() })
     <button v-if="isMobile && !selecting && !readOnly" class="m-fab" type="button" aria-label="上传或新建" @click="sheet = 'add'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button>
     <DriveDialog v-if="sheet === 'add'" :title="`上传到「${title}」`" @close="sheet = null">
       <div class="m-tiles">
+        <slot name="tiles" :path="path" :close="() => { sheet = null }" />
         <label class="m-tile"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6Zm9 0v4h4M12 17v-6m-3 3 3-3 3 3" /></svg>选择文件<input type="file" multiple @change="pickFiles"></label>
         <label class="m-tile"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4Zm0 11 4.5-4.5 4 4 2.5-2.5L20 18M15 9.5h.01" /></svg>图片和视频<input type="file" multiple accept="image/*,video/*" @change="pickFiles"></label>
         <button class="m-tile" type="button" @click="sheet = null; openDialog({ kind: 'mkdir', value: '' })"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5a1 1 0 0 1 1-1h4.6l2 2h8.4a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1ZM12 10v6m-3-3h6" /></svg>新建文件夹</button>

@@ -1082,6 +1082,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/drive", response_class=HTMLResponse)
     @app.get("/drive/{path:path}", response_class=HTMLResponse)
     @app.get("/s/{path:path}", response_class=HTMLResponse)
+    @app.get("/docs", response_class=HTMLResponse)
+    @app.get("/doc/{path:path}", response_class=HTMLResponse)
+    @app.get("/d/{path:path}", response_class=HTMLResponse)
+    @app.get("/teams", response_class=HTMLResponse)
+    @app.get("/t/{path:path}", response_class=HTMLResponse)
     def frontend(path: str = ""):
         index = settings.static_dir / "index.html"
         if not index.exists():

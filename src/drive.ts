@@ -2,7 +2,8 @@ import { ref } from 'vue'
 import { account, csrfToken, loadAccount } from './account'
 import { fetchJson } from './content'
 
-export interface DriveEntry { name: string; path: string; dir: boolean; size: number; mtime: number }
+/** doc：团队文档的只读 Markdown 快照，值为文档 id。 */
+export interface DriveEntry { name: string; path: string; dir: boolean; size: number; mtime: number; doc?: string }
 export interface DriveListing { path: string; read_only: boolean; items: DriveEntry[] }
 export interface DriveMount { id: string; path: string; kind: 'local' | 'oss'; location: string; quota: number; read_only: boolean; used: number; files: number }
 export interface StorageSummary { drive_enabled: boolean; images_enabled: boolean; agreed: boolean; terms_accepted_at: string | null; quota: number | null; max_image: number; used: number; images_used: number; drive_used: number }
@@ -11,10 +12,14 @@ export interface DriveAccount { login: string; email: string; legacy_password: b
 export interface DriveOverview { enabled: boolean; storage: StorageSummary; mounts?: DriveMount[]; account?: DriveAccount }
 export interface DriveShare { id: string; name: string; paths: string[]; mode: 'read' | 'upload'; has_password: boolean; expires_at: number; max_uses: number; used: number; created_at: number; last_used: number | null; url: string }
 
+/** 当前操作的团队空间（团队代号）；为空时是自己的云盘。文件接口都带上它。 */
+export const driveTeam = ref('')
+const scoped = (url: string) => driveTeam.value ? `${url}${url.includes('?') ? '&' : '?'}team=${driveTeam.value}` : url
+
 /** 云盘接口与账户共用登录会话；写操作附带同一个 CSRF 令牌。 */
 export async function driveApi<T>(path: string, method = 'GET', data?: unknown): Promise<T> {
   try {
-    return await fetchJson<T>(`/api/drive${path}`, {
+    return await fetchJson<T>(scoped(`/api/drive${path}`), {
       method, credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken() },
       ...(data === undefined ? {} : { body: JSON.stringify(data) }),
@@ -31,8 +36,8 @@ export const query = (params: Record<string, string | string[]>) => {
   return search.toString()
 }
 
-export const downloadUrl = (path: string, inline = false) => `/api/drive/download?${query({ path, ...(inline ? { inline: '1' } : {}) })}`
-export const zipUrl = (paths: string[]) => `/api/drive/zip?${query({ path: paths })}`
+export const downloadUrl = (path: string, inline = false) => scoped(`/api/drive/download?${query({ path, ...(inline ? { inline: '1' } : {}) })}`)
+export const zipUrl = (paths: string[]) => scoped(`/api/drive/zip?${query({ path: paths })}`)
 
 export function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
@@ -58,7 +63,7 @@ const RESUME_KEY = 'copylee-drive-uploads'
 function remember(task: UploadTask) {
   try {
     const saved = JSON.parse(localStorage.getItem(RESUME_KEY) || '{}')
-    const key = `${task.target}|${task.size}|${task.file.lastModified}`
+    const key = `${driveTeam.value}${task.target}|${task.size}|${task.file.lastModified}`
     if (task.session && task.state !== 'done') saved[key] = task.session
     else delete saved[key]
     localStorage.setItem(RESUME_KEY, JSON.stringify(saved))
@@ -66,7 +71,7 @@ function remember(task: UploadTask) {
 }
 
 function recall(task: UploadTask): string | undefined {
-  try { return JSON.parse(localStorage.getItem(RESUME_KEY) || '{}')[`${task.target}|${task.size}|${task.file.lastModified}`] }
+  try { return JSON.parse(localStorage.getItem(RESUME_KEY) || '{}')[`${driveTeam.value}${task.target}|${task.size}|${task.file.lastModified}`] }
   catch { return undefined }
 }
 

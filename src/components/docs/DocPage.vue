@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { account, accountChecked, csrfToken, loadAccount } from '../../account'
-import { accountUrl, mainSite } from '../../drive'
+import { accountUrl, downloadUrl, driveTeam, mainSite } from '../../drive'
 import { CLOSE_FORBIDDEN, CLOSE_GONE, CLOSE_LOGIN, CLOSE_RECONNECT, colorOf, docsApi, roleName, timeAgo, withLink } from '../../docs'
 import { connect } from '../../docs-live'
 import type { DocItem, DocLinkInfo } from '../../docs'
@@ -11,6 +11,13 @@ import AppIcon from '../AppIcon.vue'
 import LogoMark from '../LogoMark.vue'
 import { useTheme } from '../../composables/useTheme'
 import MarkdownEditor from '../editor/MarkdownEditor.vue'
+import { fileRefs } from '../editor/fileRef'
+import type { RefFile } from '../editor/fileRef'
+import { isTextName, kindOf, previewable } from '../drive/fileKinds'
+import { teamUrl, teamsApi } from '../../teams'
+import type { TreeItem } from '../../teams'
+import TeamTree from '../teams/TeamTree.vue'
+import TextEditor from '../teams/TextEditor.vue'
 import DocHistory from './DocHistory.vue'
 import DocShare from './DocShare.vue'
 import ImageSettings from './ImageSettings.vue'
@@ -48,6 +55,44 @@ function jump(pos: number) {
   if (!wide()) outlineOpen.value = false
 }
 const headings = computed(() => editor.value?.headings ?? [])
+
+// 团队文档：侧栏可切换到团队文件树，正文里的 [[文件]] 引用按这份列表解析。
+const sideTab = ref<'outline' | 'files'>('outline')
+const tree = ref<TreeItem[]>([])
+const editingText = ref('')
+async function loadTree() {
+  const team = doc.value?.team
+  if (!team) return
+  try {
+    tree.value = (await teamsApi<{ items: TreeItem[] }>(`/${team.id}/tree`)).items
+    fileRefs.value = { files: tree.value.filter(item => !item.doc), open: openFile, url: file => downloadUrl(file.path, true) }
+  } catch { /* 文件树读不到时引用显示为“找不到文件”，正文照常编辑 */ }
+}
+function openFile(file: RefFile | TreeItem) {
+  if ('doc' in file && file.doc) { if (file.doc !== doc.value?.id) location.href = `/doc/${file.doc}`; return }
+  if (file.dir) { window.open(teamUrl(doc.value!.team!.id, file.path), '_blank', 'noopener'); return }
+  if (isTextName(file.name)) { editingText.value = file.path; return }
+  if (previewable(kindOf(file.name))) window.open(downloadUrl(file.path, true), '_blank', 'noopener')
+  else location.href = downloadUrl(file.path)
+}
+function onTreeSelect(item: TreeItem | null) {
+  if (!wide()) outlineOpen.value = false
+  if (!item) { window.open(teamUrl(doc.value!.team!.id), '_blank', 'noopener'); return }
+  openFile(item)
+}
+const onFocus = () => { if (doc.value?.team) void loadTree() }
+
+// 团队文档的 Markdown 快照：本地有修改、停止输入几秒后上传，团队 WebDAV 以只读 .md 文件提供。
+let snapshotTimer = 0
+function scheduleSnapshot() {
+  if (!doc.value?.team || !canEdit.value) return
+  clearTimeout(snapshotTimer)
+  snapshotTimer = window.setTimeout(() => {
+    const markdown = editor.value?.getMarkdown()
+    if (markdown === undefined || !doc.value) return
+    void docsApi(withLink(`/${doc.value.id}/markdown`, link), 'PUT', { markdown: `# ${doc.value.title}\n\n${markdown}` }).catch(() => {})
+  }, 4000)
+}
 const words = computed(() => editor.value?.words ?? 0)
 const editor = ref<InstanceType<typeof MarkdownEditor>>()
 const title = ref('')
@@ -79,6 +124,11 @@ async function start() {
     doc.value = await docsApi<DocItem>(withLink(`/${docId.value}`, link))
     title.value = doc.value.title
     document.title = `${doc.value.title} · Copy Lee`
+    if (doc.value.team) {
+      driveTeam.value = doc.value.team.id
+      sideTab.value = 'files'
+      void loadTree()
+    }
     open()
   } catch (err) {
     const code = (err as { status?: number }).status
@@ -98,6 +148,8 @@ function open() {
   })
   next.provider.on('status', ({ status: value }: { status: typeof status.value }) => { status.value = value })
   next.provider.on('sync', (value: boolean) => { synced.value = value })
+  // 只有本机的修改触发快照上传（其他人的更新经由 provider 到达）。
+  next.doc.on('update', (_update: Uint8Array, origin: unknown) => { if (origin !== next.provider) scheduleSnapshot() })
   next.provider.awareness.on('change', () => {
     // 这些字段来自其他协作者的浏览器，只取需要的部分并做基本校验。
     const text = (value: unknown, max: number) => (typeof value === 'string' ? value.slice(0, max) : '')
@@ -190,8 +242,8 @@ function guard(event: Event) {
 const statusText = computed(() => status.value === 'connected' ? (synced.value ? '已同步' : '同步中…') : status.value === 'connecting' ? '连接中…' : '连接已断开，正在重试…')
 const loginUrl = accountUrl()
 
-onMounted(start)
-onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
+onMounted(() => { void start(); addEventListener('focus', onFocus) })
+onBeforeUnmount(() => { clearTimeout(titleTimer); clearTimeout(snapshotTimer); removeEventListener('focus', onFocus); fileRefs.value = null; close() })
 </script>
 
 <template>
@@ -232,7 +284,7 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
     <template v-else-if="doc">
       <div class="doc-bar">
         <a class="brand" :href="mainSite || '/'" title="Copy Lee 主页" aria-label="返回主页"><LogoMark class="logo" /></a>
-        <a class="back" :href="listUrl" title="我的文档" aria-label="返回文档列表"><svg viewBox="0 0 24 24"><path d="m14 6-6 6 6 6" /></svg></a>
+        <a class="back" :href="doc.team ? teamUrl(doc.team.id) : listUrl" :title="doc.team ? `回到团队 ${doc.team.name}` : '我的文档'" :aria-label="doc.team ? '返回团队' : '返回文档列表'"><svg viewBox="0 0 24 24"><path d="m14 6-6 6 6 6" /></svg></a>
         <div class="meta">
           <span class="status" :class="status"><i />{{ statusText }}</span>
           <span class="d-muted">{{ roleName[doc.role] }}<template v-if="doc.updated_by"> · {{ doc.updated_by.name }} {{ timeAgo(doc.updated_at) }}编辑</template> · {{ words.toLocaleString() }} 字</span>
@@ -306,14 +358,24 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
       <div class="doc-body" :class="{ 'with-outline': outlineOpen }">
         <aside class="outline" :class="{ open: outlineOpen }" aria-label="文档大纲" :aria-hidden="!outlineOpen" :inert="!outlineOpen">
           <div class="outline-head">
-            <span>大纲</span>
+            <span v-if="!doc.team">大纲</span>
+            <span v-else class="side-tabs" role="tablist">
+              <button type="button" role="tab" :aria-selected="sideTab === 'files'" :class="{ on: sideTab === 'files' }" @click="sideTab = 'files'">文件</button>
+              <button type="button" role="tab" :aria-selected="sideTab === 'outline'" :class="{ on: sideTab === 'outline' }" @click="sideTab = 'outline'">大纲</button>
+            </span>
             <button type="button" class="outline-close" aria-label="收起大纲" title="收起大纲" @click="toggleOutline"><svg viewBox="0 0 24 24"><path d="m14 6-6 6 6 6" /></svg></button>
           </div>
+          <template v-if="doc.team && sideTab === 'files'">
+            <div class="outline-list"><TeamTree :items="tree" :name="doc.team.name" :active-doc="doc.id" @select="onTreeSelect" /></div>
+            <p class="outline-count files-foot"><span>输入 [[ 引用文件</span><a :href="teamUrl(doc.team.id)" target="_blank" rel="noopener">打开团队 ↗</a></p>
+          </template>
+          <template v-else>
           <nav class="outline-list">
             <p v-if="!headings.length" class="outline-empty">使用标题后，这里会列出文档结构。</p>
             <button v-for="item in headings" :key="item.pos" type="button" :style="{ paddingLeft: `${(item.level - 1) * 14 + 12}px` }" :class="`level-${item.level}`" @click="jump(item.pos)">{{ item.text || '（空标题）' }}</button>
           </nav>
           <p class="outline-count">{{ words.toLocaleString() }} 字 · {{ headings.length }} 个标题</p>
+          </template>
         </aside>
         <div v-if="outlineOpen" class="outline-scrim" @click="toggleOutline" />
         <article class="paper" :class="{ 'no-copy': !doc.can_copy }" @copy="guard" @cut="guard" @dragstart="guard" @contextmenu="guard">
@@ -323,6 +385,7 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
       </div>
       <ImageSettings v-if="imageSettings" :doc-id="imageSettings === 'doc' ? doc.id : undefined" @close="imageSettings = null" />
       <DocShare v-if="sharing" :doc="doc" @close="sharing = false" @changed="value => doc = { ...doc!, ...value }" />
+      <TextEditor v-if="editingText && doc.team" :team="doc.team.id" :path="editingText" :read-only="!canEdit" @close="editingText = ''" @saved="loadTree" />
       <DocHistory v-if="history" :doc-id="doc.id" :link="link" @close="history = false" @restore="restore" />
     </template>
   </div>
@@ -418,6 +481,11 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
 .outline-count { margin:0; padding:12px 22px 16px; border-top:1px solid var(--line); color:var(--faint); font:12px var(--font-mono); }
 .outline-toggle.on, .mode-toggle.on { border-color:var(--accent); color:var(--accent); }
 .outline-scrim { display:none; }
+.side-tabs { display:flex; gap:4px; }
+.side-tabs button { padding:3px 10px; border:0; border-radius:7px; background:none; color:var(--faint); font:600 12px var(--font); letter-spacing:.12em; cursor:pointer; }
+.side-tabs button.on { background:var(--accent-soft); color:var(--accent); }
+.files-foot { display:flex; justify-content:space-between; gap:8px; font-family:var(--font); }
+.files-foot a { color:var(--accent); }
 /* 窄屏：大纲作为抽屉盖在正文上，点遮罩收起 */
 @media (max-width:1100px) {
   .doc-body, .doc-body.with-outline { grid-template-columns:minmax(0,1fr); }

@@ -8,6 +8,8 @@ export interface DocItem {
   id: string; title: string; size: number; created_at: number; updated_at: number
   owner: Person | null; updated_by: Person | null
   role: DocRole; can_share: boolean; can_copy: boolean; allow_copy: boolean; link?: DocLink
+  /** 所属团队与团队文件树里的文件夹 */
+  team: { id: string; name: string } | null; folder: string
 }
 export interface DocMember extends Person { email: string; role: 'view' | 'edit'; can_share: boolean; created_at: number }
 export interface DocVersion { id: string; label: string; auto: boolean; size: number; created_at: number; created_by: Person | null }

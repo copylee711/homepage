@@ -25,9 +25,14 @@ const DocsList = defineAsyncComponent(() => import('./components/docs/DocsList.v
 const DocPage = defineAsyncComponent(() => import('./components/docs/DocPage.vue'))
 const isDocPage = /^\/(doc|d)\/[A-Za-z0-9]+\/?$/.test(location.pathname)
 const isDocs = location.pathname.replace(/\/$/, '') === '/docs'
+// 团队：列表在主站 /teams，工作区在云盘子域名的 /t/<代号>（大文件上传不经过 CDN）。
+const TeamsList = defineAsyncComponent(() => import('./components/teams/TeamsList.vue'))
+const TeamPage = defineAsyncComponent(() => import('./components/teams/TeamPage.vue'))
+const isTeamPage = /^\/t\/[a-z0-9]+\/?$/.test(location.pathname)
+const isTeams = location.pathname.replace(/\/$/, '') === '/teams'
 const local = /^(localhost|127\.|\[::1\])/.test(location.hostname)
-if (isDocPage && !onCloud && !local) location.replace(location.origin.replace(/\/\/(www\.)?/, '//cloud.') + location.pathname + location.search)
-if (isDocs && onCloud) location.replace(location.origin.replace('//cloud.', '//') + '/docs')
+if ((isDocPage || isTeamPage) && !onCloud && !local) location.replace(location.origin.replace(/\/\/(www\.)?/, '//cloud.') + location.pathname + location.search)
+if ((isDocs || isTeams) && onCloud) location.replace(location.origin.replace('//cloud.', '//') + location.pathname)
 // 云盘子域名上的账户页直接回主站（登录 Cookie 两边共用），完成后再跳回来。
 if (onCloud && /^\/account\/?$/.test(location.pathname)) {
   const params = new URLSearchParams(location.search)
@@ -43,14 +48,14 @@ const isAccount = location.pathname.replace(/\/$/, '') === '/account'
 const isGames = /^\/games(\/|$)/.test(location.pathname)
 let stop: (() => void) | undefined
 let stopScut: (() => void) | undefined
-onMounted(() => { if (!isAdmin) { stop = startContent(); if (!isDrive && !isShare && !isDocPage) stopScut = startScut() } })
+onMounted(() => { if (!isAdmin) { stop = startContent(); if (!isDrive && !isShare && !isDocPage && !isTeamPage) stopScut = startScut() } })
 onBeforeUnmount(() => { stop?.(); stopScut?.() })
 
 // 从其他页面打开 /#projects 等地址时，浏览器加载瞬间目标尚未渲染，原生锚点跳转会落空。
 // 内容就绪后再定位；之后 1.5 秒内上方区块异步加载导致的高度变化会继续校正，用户一旦滚动即停止。
 watch(ready, async value => {
   const id = decodeURIComponent(location.hash.slice(1))
-  if (!value || !id || isAdmin || isScut || isAccount || isGames || isDrive || isShare || isDocPage || isDocs) return
+  if (!value || !id || isAdmin || isScut || isAccount || isGames || isDrive || isShare || isDocPage || isDocs || isTeamPage || isTeams) return
   await nextTick()
   const target = document.getElementById(id)
   if (!target) return
@@ -72,6 +77,10 @@ watch(ready, async value => {
   <template v-else-if="ready && isDocPage">
     <DocPage />
   </template>
+  <template v-else-if="ready && isTeamPage">
+    <TeamPage />
+    <SiteFooter class="drive-footer" />
+  </template>
   <template v-else-if="ready && (isDrive || isShare)">
     <DrivePage v-if="isDrive" />
     <SharePage v-else />
@@ -80,11 +89,12 @@ watch(ready, async value => {
   <template v-else-if="ready">
   <SiteHeader />
   <p v-if="contentStatus.stale" class="content-banner" role="status">暂时无法检查更新，正在显示已加载的内容。<button @click="reloadContent">重试</button></p>
-  <main :id="isScut || isAccount || isGames || isDocs ? 'top' : undefined">
+  <main :id="isScut || isAccount || isGames || isDocs || isTeams ? 'top' : undefined">
     <ScutSection v-if="isScut" full />
     <AccountPage v-else-if="isAccount" />
     <GamesPage v-else-if="isGames" />
     <div v-else-if="isDocs" class="container docs-page"><DocsList /></div>
+    <div v-else-if="isTeams" class="container docs-page"><TeamsList /></div>
     <template v-else>
     <HeroSection />
     <PortalGrid />

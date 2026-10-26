@@ -31,6 +31,18 @@ export const kindIcons: Record<FileKind, string> = {
   file: 'M6 3h9l4 4v14H6Zm9 0v4h4',
 }
 
+// 没有扩展名或扩展名不在列表里、但通常是文本的文件。
+const TEXT_NAMES = new Set(['makefile', 'dockerfile', 'license', 'readme', 'changelog', 'procfile', 'gemfile', 'cmakelists.txt'])
+const TEXT_EXTRA = ['jsx', 'tsx', 'mjs', 'cjs', 'scss', 'less', 'r', 'm', 'jl', 'kt', 'swift', 'rb', 'php', 'lua', 'pl', 'hpp', 'cc', 'cs', 'env', 'cfg', 'properties', 'gradle', 'lock', 'svg', 'rst', 'org', 'tsv', 'ipynb', 'gitignore', 'gitattributes', 'editorconfig']
+
+/** 能在团队里在线编辑的文本文件：常见代码与文本扩展名、.gitignore 这类点文件和 Makefile 等。 */
+export function isTextName(name: string) {
+  const lower = name.toLowerCase()
+  if (kindOf(lower) === 'text' || TEXT_NAMES.has(lower)) return true
+  const extension = lower.includes('.') ? lower.split('.').pop()! : ''
+  return (lower.startsWith('.') && !lower.slice(1).includes('.')) || TEXT_EXTRA.includes(extension)
+}
+
 export const previewable = (kind: FileKind) => ['image', 'video', 'audio', 'pdf', 'text'].includes(kind)
 
 /** 拆出扩展名（不含点），用于截断时保留后缀；以点开头或过长的后缀不算。 */

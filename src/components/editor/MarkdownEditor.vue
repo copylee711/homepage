@@ -19,6 +19,8 @@ import { Markdown } from '@tiptap/markdown'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { TableKit } from '@tiptap/extension-table'
 import { Embed, LegacyEmbed, SizedImage, Video } from './media'
+import { FileRef, fileRefs, refTarget } from './fileRef'
+import type { RefFile } from './fileRef'
 import { normalizeEmbed, parseVideoInput } from './embeds'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { BlockMath, InlineMath } from '@tiptap/extension-mathematics'
@@ -301,6 +303,7 @@ function build() {
       BlockMath.configure({ katexOptions: { throwOnError: false, displayMode: true }, onClick: (node, pos) => editMath('block', pos, node.attrs.latex) }),
       Placeholder.configure({ placeholder: props.placeholder }),
       TypingHabits,
+      FileRef,
       ...(collab ? [
         Collaboration.configure({ document: collab.doc }),
         ...(collab.provider ? [CollaborationCaret.configure({ provider: collab.provider, user: collab.user, render: renderCaret })] : []),
@@ -308,7 +311,7 @@ function build() {
     ],
     editorProps: {
       attributes: { class: 'prose md-content', spellcheck: 'false' },
-      handleKeyDown: (_, event) => slashKey(event),
+      handleKeyDown: (_, event) => fileKey(event) || slashKey(event),
       handlePaste: (_, event) => pasteImages(event.clipboardData?.files) || pasteMedia(event.clipboardData?.getData('text/plain')),
       handleDrop: (_, event) => pasteImages((event as DragEvent).dataTransfer?.files),
       // 与 Typora 一样：编辑时 Ctrl/⌘+点击打开链接，只读时直接点击打开。
@@ -322,13 +325,14 @@ function build() {
     onCreate: () => measure(),
     onUpdate: ({ editor: current }) => {
       updateSlash()
+      updateFileMenu()
       clearTimeout(measureTimer)
       measureTimer = window.setTimeout(measure, 200)
       if (props.collab) return
       clearTimeout(emitTimer)
       emitTimer = window.setTimeout(() => emit('update:modelValue', current.getMarkdown()), 120)
     },
-    onSelectionUpdate: () => updateSlash(),
+    onSelectionUpdate: () => { updateSlash(); updateFileMenu() },
     onFocus: () => { clearTimeout(blurTimer); focused.value = true; onViewport() },
     // 点工具栏时编辑区会短暂失焦，稍等再收起停靠的工具栏。
     onBlur: () => { blurTimer = window.setTimeout(() => { focused.value = false }, 150) },
@@ -678,6 +682,57 @@ function slashKey(event: KeyboardEvent) {
   if (event.key === 'Escape') { slash.value = null; return true }
   return false
 }
+
+// 团队文档：输入 [[ 弹出团队文件列表（![[ 嵌入图片），按名字或路径筛选。
+const fileMenu = ref<{ query: string; from: number; embed: boolean; left: number; top: number; index: number } | null>(null)
+const fileItems = computed(() => {
+  const query = fileMenu.value?.query.toLowerCase() ?? ''
+  const files = (fileRefs.value?.files ?? []).filter(file => !file.dir)
+  return files.filter(file => !query || file.path.toLowerCase().includes(query))
+    .sort((a, b) => Number(!a.name.toLowerCase().startsWith(query)) - Number(!b.name.toLowerCase().startsWith(query)) || a.path.localeCompare(b.path))
+    .slice(0, 30)
+})
+
+function updateFileMenu() {
+  const current = editor.value
+  if (!current || !current.isEditable || !fileRefs.value) { fileMenu.value = null; return }
+  const { $from, empty } = current.state.selection
+  const text = $from.parent.textBetween(0, $from.parentOffset, undefined, '￼')
+  const match = empty ? /(!?)\[\[([^[\]\n]{0,60})$/.exec(text) : null
+  if (!match) { fileMenu.value = null; return }
+  const coords = current.view.coordsAtPos($from.pos)
+  const box = current.view.dom.closest('.md-editor')!.getBoundingClientRect()
+  const height = Math.min(SLASH_HEIGHT, Math.max(fileItems.value.length, 1) * 42 + 12)
+  const bottom = (window.visualViewport?.height ?? innerHeight) - keyboard.value
+  const above = coords.bottom + 6 + height > bottom && coords.top - 6 - height > 0
+  fileMenu.value = { query: match[2]!, from: $from.pos - match[0].length, embed: match[1] === '!',
+                     left: Math.max(0, Math.min(coords.left - box.left, box.width - 310)),
+                     top: above ? coords.top - box.top - 6 - height : coords.bottom - box.top + 6,
+                     index: fileMenu.value?.query === match[2] ? fileMenu.value.index : 0 }
+}
+
+function pickFile(file: RefFile) {
+  const state = fileMenu.value
+  if (!state) return
+  editor.value!.chain().focus().deleteRange({ from: state.from, to: editor.value!.state.selection.from })
+    .insertContent([{ type: 'fileRef', attrs: { target: refTarget(file), embed: state.embed } }, { type: 'text', text: ' ' }]).run()
+  fileMenu.value = null
+}
+
+function fileKey(event: KeyboardEvent) {
+  const state = fileMenu.value
+  if (!state) return false
+  if (event.key === 'Escape') { fileMenu.value = null; return true }
+  if (!fileItems.value.length) return false
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    const count = fileItems.value.length
+    state.index = (state.index + (event.key === 'ArrowDown' ? 1 : count - 1)) % count
+    void nextTick(() => document.querySelector('.md-files button.on')?.scrollIntoView({ block: 'nearest' }))
+    return true
+  }
+  if (event.key === 'Enter' || event.key === 'Tab') { pickFile(fileItems.value[state.index]!); return true }
+  return false
+}
 </script>
 
 <template>
@@ -750,6 +805,12 @@ function slashKey(event: KeyboardEvent) {
       <div v-if="slash && slashItems.length" class="md-slash" :style="{ left: `${slash.left}px`, top: `${slash.top}px` }" role="listbox">
         <button v-for="(item, i) in slashItems" :key="item.id" type="button" role="option" :aria-selected="i === slash.index" :class="{ on: i === slash.index }" @mousedown.prevent="pick(item)" @mouseenter="slash.index = i">
           <span>{{ item.label }}</span><kbd>{{ item.hint }}</kbd>
+        </button>
+      </div>
+      <div v-if="fileMenu" class="md-slash md-files" :style="{ left: `${fileMenu.left}px`, top: `${fileMenu.top}px` }" role="listbox">
+        <p v-if="!fileItems.length" class="empty">团队里没有匹配的文件</p>
+        <button v-for="(file, i) in fileItems" :key="file.path" type="button" role="option" :aria-selected="i === fileMenu.index" :class="{ on: i === fileMenu.index }" :title="file.path" @mousedown.prevent="pickFile(file)" @mouseenter="fileMenu.index = i">
+          <span>{{ file.name }}</span><small>{{ file.path.slice(0, -file.name.length - 1) || '/' }}</small>
         </button>
       </div>
       <div v-if="math" class="md-math" :style="{ left: `${math.left}px`, top: `${math.top}px` }">

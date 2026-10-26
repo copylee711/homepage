@@ -84,7 +84,7 @@ onMounted(load)
             <strong>{{ doc.title }}</strong>
             <small>
               <template v-if="tab === 'shared'">{{ doc.owner?.name }} · {{ roleName[doc.role] }} · </template>
-              {{ timeAgo(doc.updated_at) }}更新<template v-if="doc.updated_by && doc.updated_by.id !== doc.owner?.id"> · {{ doc.updated_by.name }}</template>
+              <template v-if="doc.team">团队 {{ doc.team.name }} · </template>{{ timeAgo(doc.updated_at) }}更新<template v-if="doc.updated_by && doc.updated_by.id !== doc.owner?.id"> · {{ doc.updated_by.name }}</template>
               <template v-if="doc.link && doc.link.role !== 'none'"> · 链接{{ roleName[doc.link.role] }}</template>
             </small>
           </span>
