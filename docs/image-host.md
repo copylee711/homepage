@@ -2,7 +2,7 @@
 
 [项目首页](../README.md) · [开发指南](development.md) · [内容与接口](content.md) · [登录与安全](security.md) · [备份与恢复](maintenance.md) · [部署指南](../deploy/README.md)
 
-`image.copylee.cn` 是本站的图床。管理员不受配额限制。访客账户默认不能使用，需要在后台「用户与邮件」里逐个开启并设置配额。图床不复用 SFTPGo 的账户和 WebDAV/SFTP 协议：上传走 HTTP 接口，用户用自己生成的令牌鉴权，开关、配额和撤销都在本站后台管理。
+`image.copylee.cn` 是本站的图床。管理员不受配额限制。访客账户默认不能使用，需要在后台「用户与邮件」里逐个开启并设置配额。图床不走云盘的 WebDAV/SFTP 协议：上传走 HTTP 接口，用户用自己生成的令牌鉴权，开关、配额和撤销都在本站后台管理。
 
 ## 存储与地址
 

@@ -107,9 +107,6 @@ cloud.copylee.cn {
     import access_log cloud
     encode zstd gzip
     # 云盘：前端与主站共用同一份构建，接口转发到后端；不经过 ESA，大文件上传不受 CDN 限制。
-    # 旧 SFTPGo 的分享链接沿用原 id，跳到新的分享页。
-    @legacy_share path_regexp legacy ^/web/client/pubshares/([A-Za-z0-9]+)
-    redir @legacy_share /s/{re.legacy.1} 302
     # 发验证码与提交反馈只能经 ESA（带 AI 验证码）在主站完成。
     @esa_only {
         path /api/account/code /api/account/code/ /api/account/feedback
@@ -147,7 +144,7 @@ dav.copylee.cn {
         not header Authorization *
     }
     handle @browser {
-        root * /var/www/sftpgo-landing
+        root * /var/www/dav-landing
         rewrite * /dav.html
         header Cache-Control no-cache
         file_server

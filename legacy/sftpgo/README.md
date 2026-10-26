@@ -1,6 +1,8 @@
-# SFTPGo 部署
+# SFTPGo 部署（已停用）
 
-[项目首页](../../README.md) · [部署指南](../README.md)
+[项目首页](../../README.md) · [归档说明](../README.md)
+
+> 已由自研云盘取代，仅作存档。`landing/dav.html` 仍在使用，已移到 [deploy/dav/dav.html](../../deploy/dav/dav.html)。
 
 `cloud.copylee.cn` 背后的文件服务：网页文件管理、WebDAV、SFTP，本地硬盘存日常文件，大文件目录落在 OSS。
 
@@ -14,7 +16,7 @@
 
 - 公安备案号与隐私政策链接：SFTPGo 品牌配置只支持一个声明链接，[patch-login.sh](patch-login.sh) 把它们加入软件包的登录模板；[99copylee-sftpgo](99copylee-sftpgo) APT 钩子在每次软件包升级后重新执行该脚本（已修改过则跳过）。
 
-更新品牌或落地页：把本目录上传到服务器后以 root 执行 `bash install-branding.sh`（会重启 SFTPGo，中断数秒）。Caddy 配置见 [../Caddyfile.example](../Caddyfile.example)。
+更新品牌或落地页：把本目录上传到服务器后以 root 执行 `bash install-branding.sh`（会重启 SFTPGo，中断数秒）。Caddy 配置见 [deploy/Caddyfile.example](../../deploy/Caddyfile.example)。
 
 ## 日志
 
@@ -35,7 +37,7 @@ docker compose up -d
 然后：
 
 1. 轻量服务器防火墙放行 **TCP 2022**（SFTP）。80 / 443 等备案通过后再放行。
-2. Caddy 按 [../Caddyfile.example](../Caddyfile.example) 配好 `cloud.copylee.cn`。
+2. Caddy 按 [deploy/Caddyfile.example](../../deploy/Caddyfile.example) 配好 `cloud.copylee.cn`。
 3. 打开 `https://cloud.copylee.cn/web/admin` 用 `.env` 里的账号登录，建议立即在个人设置里开启两步验证。
 
 备案通过前域名和 HTTPS 不可用，网页和 WebDAV 暂时用不了，但 SFTP 可以直接用服务器 IP 加 2022 端口连接。

@@ -49,7 +49,8 @@ uv run uvicorn app.asgi:app --host 127.0.0.1 --port 8000
 | [部署指南](deploy/README.md) | 前后端部署、Caddy 与 GitHub Actions |
 | [内容后端](backend/README.md) | 后端目录与文档索引 |
 | [SCUT 通知索引](docs/scut.md) | 采集范围、阅读状态、初始化与运维 |
-| [SFTPGo 部署](deploy/sftpgo/README.md) | 配套文件服务 |
+| [云盘](docs/drive.md) | 网页、SFTP 与 WebDAV 云盘 |
+| [归档](legacy/README.md) | 已停用的 SFTPGo 部署与迁移工具 |
 
 ## 许可证
 

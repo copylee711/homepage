@@ -22,9 +22,9 @@
 | `/var/log/caddy/copylee.log` | 主站（含 www）访问日志：时间、IP、请求、状态码、UA、Referer | Caddy，50MiB 滚动并压缩 |
 | `/var/log/caddy/cloud.log`、`dav.log` | 云盘网页与 WebDAV 访问日志 | 同上 |
 | `/var/log/copylee/audit.log` | 访客注册/登录/退出/找回密码/改密/注销，管理员登录与退出 | 后端每日零点（UTC）滚动 |
-| `/var/log/sftpgo/sftpgo.log` | SFTPGo 登录、上传、下载、删除等操作 | SFTPGo，50MB 滚动并压缩 |
+| `/var/log/sftpgo/` | 已停用的 SFTPGo 的历史日志 | 不再写入；最后一条日志满 190 天后整个目录删除 |
 
-配置分别在 [Caddyfile.example](Caddyfile.example) 的 `access_log` 片段、[copylee-backend.service](backend/copylee-backend.service) 的 `LogsDirectory` 与 `COPYLEE_LOG_DIR`、[sftpgo.env](sftpgo/sftpgo.env)。日志含 IP 与邮箱，目录仅限 root 与对应服务用户读取。隐私政策页面为 `/privacy`，模板在 `backend/app/templates/privacy.html`。
+配置分别在 [Caddyfile.example](Caddyfile.example) 的 `access_log` 片段、[copylee-backend.service](backend/copylee-backend.service) 的 `LogsDirectory` 与 `COPYLEE_LOG_DIR`。日志含 IP 与邮箱，目录仅限 root 与对应服务用户读取。隐私政策页面为 `/privacy`，模板在 `backend/app/templates/privacy.html`。
 
 ## 文档与配置
 
@@ -34,7 +34,8 @@
 - [备份与恢复](../docs/maintenance.md)：快照格式、图片引用与恢复要求。
 - 经 ESA 代理的 `copylee.cn`、`www`、`image` 在源站使用 `tls internal`：Let's Encrypt 校验经 ESA 回源会超时，浏览器看到的是 ESA 边缘证书。改回「仅 DNS」前需先去掉 `tls internal`，让 Caddy 重新申请公开证书。`cloud`、`dav` 不经 ESA，仍由 Caddy 自动申请证书。
 - [图床](../docs/image-host.md)：`image.copylee.cn` 的 Caddy 站点、ESA 缓存规则与旧图片迁移。
-- [SFTPGo 部署](sftpgo/README.md)：配套文件管理、WebDAV 与 SFTP 服务。
+- [云盘](../docs/drive.md)：`cloud`、`dav` 与 SFTP 的部署；`dav.copylee.cn` 根路径的浏览器说明页为 [dav/dav.html](dav/dav.html)。
+- [归档](../legacy/README.md)：已停用的 SFTPGo 部署文件与一次性迁移工具。
 
 ## 邮箱发送接口的回源保护
 

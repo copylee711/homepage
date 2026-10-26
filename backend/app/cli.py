@@ -205,12 +205,6 @@ def main():
     load.add_argument("--target", type=Path, required=True)
     move = sub.add_parser("images-migrate", help="把文章与手写笔记中的 /media 图片迁移到图床")
     move.add_argument("--apply", action="store_true", help="实际执行；默认只统计")
-    drive = sub.add_parser("drive-import", help="从旧云盘（SFTPGo SQLite）导入账户、挂载点与分享")
-    drive.add_argument("--source-db", type=Path, required=True)
-    drive.add_argument("--map", action="append", required=True, metavar="旧用户名=站点邮箱")
-    drive.add_argument("--copy-files", action="store_true", help="同时复制旧主目录中的文件")
-    drive.add_argument("--create-missing", action="store_true", help="邮箱未注册时新建站点用户")
-    drive.add_argument("--apply", action="store_true", help="实际执行；默认只列出计划")
     scan = sub.add_parser("drive-rescan", help="重新统计云盘用量")
     scan.add_argument("--email", help="只统计这个用户；默认全部")
     args = parser.parse_args()
@@ -282,24 +276,6 @@ def main():
             print(f"引用的图片不存在，已跳过：/media/{name}")
         if not args.apply and result["images"]:
             print("确认无误后先执行 backup，再加 --apply 实际迁移")
-    elif args.action == "drive-import":
-        from .drive.importer import run
-
-        mapping = {}
-        for item in args.map:
-            name, _, email = item.partition("=")
-            if not name or "@" not in email:
-                parser.error(f"--map 格式应为 旧用户名=站点邮箱：{item}")
-            mapping[name] = email
-        engine = make_engine(settings)
-        try:
-            for line in run(settings, engine, args.source_db, mapping, args.apply,
-                            args.copy_files, args.create_missing):
-                print(line)
-        finally:
-            engine.dispose()
-        if not args.apply:
-            print("确认无误后先执行 backup，再加 --apply 实际导入")
     elif args.action == "drive-rescan":
         from sqlmodel import select
 

@@ -30,7 +30,7 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --username admin
 可选 TOTP、恢复码和 Passkey 在后台「登录安全」配置。HTTP 阶段仅在隧道的 localhost 验收；正式域名 HTTPS 启用后重新绑定 Passkey。`COPYLEE_SITE_URL` 必须为正式根地址且与浏览器地址完全一致。TOTP 的 `2fa.key` 属于持久数据，权限 0600，由在线备份工具一起备份；不上传 Git，不放入代码或前端目录。重置密码会保留登录因素；丢失设备可通过同一服务用户运行 `python -m app.cli reset-security --confirm` 清除因素并撤销所有会话。上线前由管理员亲自完成真实手机/电脑的绑定、登录与备用恢复码验收。
 
 6. 构建前端，将 `dist/` 上传到 `/var/www/copylee`（包括隐藏的 `.vite/manifest.json`）。将三个 systemd 文件安装到 `/etc/systemd/system/`，执行 daemon-reload，启用 `copylee-backend.service` 和 `copylee-backup.timer`。
-7. 验证 `curl --fail http://127.0.0.1:8000/api/health`。先备份当前 Caddyfile，再按 HTTP 示例合并主页路由；保留 cloud 和 dav 两个现有站点。先执行 `caddy validate`，通过后 reload，不重启 SFTPGo。
+7. 验证 `curl --fail http://127.0.0.1:8000/api/health`。先备份当前 Caddyfile，再按 HTTP 示例合并主页路由；保留 cloud 和 dav 两个现有站点。先执行 `caddy validate`，通过后 reload。
 
 ## HTTP 阶段验收
 

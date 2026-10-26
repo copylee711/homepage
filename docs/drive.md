@@ -1,6 +1,6 @@
 # 云盘（cloud.copylee.cn / dav.copylee.cn）
 
-自研云盘，替代原先部署的 SFTPGo。网页、SFTP、WebDAV 访问同一份文件，账户就是站点账户，
+自研云盘，已替代原先部署的 SFTPGo（旧部署文件见 [legacy/](../legacy/README.md)）。网页、SFTP、WebDAV 访问同一份文件，账户就是站点账户，
 配额与图床共用。代码位于 `backend/app/drive/`，前端位于 `src/components/drive/`。
 
 ## 独立实现说明
@@ -9,7 +9,7 @@
 
 - 参考的只是 SFTPGo 的**产品功能**（多协议访问、虚拟目录、配额、分享链接等）以及
   `openapi.yaml` 中的字段含义；没有阅读、复制或翻译其 Go 源码、测试或 Web UI。
-- 迁移命令 `drive-import` 只读取线上 `sftpgo.db` 的**数据**（表结构由实际数据库得到），
+- 已归档的迁移工具 `drive-import` 只读取线上 `sftpgo.db` 的**数据**（表结构由实际数据库得到），
   不依赖 SFTPGo 的任何程序。
 - 协议实现依赖下列第三方库，许可证均可用于 MIT 项目，发布时保留其版权声明：
 
@@ -59,25 +59,24 @@ runuser -u copylee -- .venv/bin/python -m app.cli set-admin --email you@example.
 
 1. `/etc/copylee/backend.env` 增加 `deploy/backend/.env.example` 中“云盘”一节的变量，
    `COPYLEE_ALLOWED_ORIGINS` 加入 `https://cloud.copylee.cn`。
-2. 主机密钥放在 `/var/lib/copylee/ssh/`（从旧服务复制 `/etc/sftpgo/id_*` 可保持指纹不变），
+2. 主机密钥放在 `/var/lib/copylee/ssh/`（迁移时沿用了旧服务的密钥，指纹未变；重装时从备份恢复这些文件），
    属主 `copylee`，权限 0600。
 3. 安装 `deploy/backend/copylee-drive.service` 到 `/etc/systemd/system/` 并启用；
    `deploy.sh` 会在迁移时一起停止、在切换后一起启动它。修改 `deploy.sh` 后需重新安装为
    `/usr/local/sbin/copylee-deploy`。
 4. Caddy：`cloud.copylee.cn` 按 `deploy/Caddyfile.example` 改为前端 + `/api` 反代；
-   `dav.copylee.cn` 保持反代 `127.0.0.1:10080`。
+   `dav.copylee.cn` 反代 `127.0.0.1:10080`，浏览器直接打开根路径时显示
+   `deploy/dav/dav.html`（安装到 `/var/www/dav-landing/`）。
 5. 意见反馈接口与邮箱验证码一样受 ESA AI 验证码保护：ESA 控制台的 AI 验证码规则与回源请求头
    规则都要覆盖 `copylee.cn/api/account/feedback` 的 POST，`/etc/caddy/email-code-origin.caddy`
    按示例放行该路径。
 
-## 从 SFTPGo 迁移
+## 用量统计
 
-```bash
-# 先只列出计划
-runuser -u copylee -- .venv/bin/python -m app.cli drive-import --source-db /path/sftpgo.db \
-  --map copy=you@example.com --map HK=hk@example.com --create-missing
-# 确认后执行备份，再加 --apply；--copy-files 需要能读取旧主目录（以 root 运行后再 chown）
-```
+直接改动磁盘文件后用 `drive-rescan` 重新统计用量。
 
-导入保留原登录名、bcrypt 密码、SSH 公钥与分享 id；OSS 挂载点沿用原对象前缀，对象不需要搬动。
-命令可重复执行。直接改动磁盘文件后用 `drive-rescan` 重新统计用量。
+## 迁移遗留
+
+从 SFTPGo 导入的账户可能仍带旧的 bcrypt 密码（`legacy_hash`），SFTP/WebDAV 登录时继续接受，
+用户可在云盘设置里移除。旧系统的分享链接已不再跳转，需要时重新创建分享。
+导入命令本身已归档到 [legacy/drive-import](../legacy/drive-import/)。

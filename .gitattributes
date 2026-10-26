@@ -4,5 +4,5 @@
 *.service text eol=lf
 *.timer text eol=lf
 deploy/Caddyfile* text eol=lf
-deploy/sftpgo/99copylee-sftpgo text eol=lf
+legacy/sftpgo/99copylee-sftpgo text eol=lf
 *.png binary
