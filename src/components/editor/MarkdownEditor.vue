@@ -9,13 +9,14 @@
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { Editor, EditorContent, Extension, InputRule, VueNodeViewRenderer } from '@tiptap/vue-3'
 import { Plugin } from '@tiptap/pm/state'
+import type { Schema } from '@tiptap/pm/model'
 import { ySyncPluginKey } from '@tiptap/y-tiptap'
 import { BubbleMenu } from '@tiptap/vue-3/menus'
 import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from '@tiptap/markdown'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { TableKit } from '@tiptap/extension-table'
-import { Embed, SizedImage, Video } from './media'
+import { Embed, LegacyEmbed, SizedImage, Video } from './media'
 import { normalizeEmbed, parseVideoInput } from './embeds'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { BlockMath, InlineMath } from '@tiptap/extension-mathematics'
@@ -75,6 +76,13 @@ function lossy(markdown: string) {
 const INLINE_MATH = /(?:^|[^$\\\w])\$([^\s$￼](?:[^$\n￼]*[^\s$￼])?)\$(?!\$)/g
 // 行内代码 `…`：前后不是反引号（避免误伤 ``` 代码块围栏）。
 const INLINE_CODE = /(?:^|[^`])`([^`\n\uFFFC]+)`(?!`)/g
+// Markdown \u94FE\u63A5 [\u6587\u5B57](\u5730\u5740)\uFF1B\u524D\u9762\u662F ! \u7684\u662F\u56FE\u7247\uFF0C\u4E0D\u5904\u7406\u3002
+const INLINE_LINK = /(?:^|[^!\\])\[([^\]\n\uFFFC]*)\]\(([^)\s\uFFFC]+)\)/g
+// \u6CA1\u5199\u534F\u8BAE\u7684\u5730\u5740\uFF08\u5982 github.com\uFF09\u8865\u4E0A https://\uFF1B\u7AD9\u5185\u8DEF\u5F84\u3001\u951A\u70B9\u4E0E mailto: \u7B49\u4FDD\u6301\u539F\u6837\u3002
+const fullHref = (url: string) => (/^([a-z][\w+.-]*:|\/|#)/i.test(url) ? url : `https://${url}`)
+// \u94FE\u63A5\u6587\u5B57\u4E3A\u7A7A\u65F6\u663E\u793A\u5730\u5740\u672C\u8EAB\u3002
+const linkText = (schema: Schema, text: string, url: string) =>
+  schema.text(text || url, [schema.marks.link.create({ href: fullHref(url) })])
 const TypingHabits = Extension.create({
   name: 'typingHabits',
   addInputRules() {
@@ -83,6 +91,13 @@ const TypingHabits = Extension.create({
       handler: ({ state, range, match }) => {
         const start = range.from + match[0].indexOf('$')
         state.tr.replaceWith(start, range.to, state.schema.nodes.inlineMath.create({ latex: match[1] }))
+      },
+    }), new InputRule({
+      // [文字](地址) 敲下右括号时变成链接；![…](…) 是图片，由图片扩展处理。
+      find: /(?:^|[^!\\])\[([^\]\n]*)\]\(([^)\s]+)\)$/,
+      handler: ({ state, range, match }) => {
+        const start = range.from + match[0].indexOf('[')
+        state.tr.replaceWith(start, range.to, linkText(state.schema, match[1], match[2]))
       },
     })]
   },
@@ -151,20 +166,24 @@ const TypingHabits = Extension.create({
           const media = block.type.name === 'paragraph' && !(head > before && head < before + block.nodeSize)
             ? mediaFromHtml(text) : null
           if (media) {
-            found.push({ from: before + 1, to: before + block.nodeSize - 1, node: state.schema.nodeFromJSON(media) as ReturnType<typeof state.schema.text> })
+            // 嵌入块替换整个段落；图片、视频是行内节点，替换段落里的文字。
+            const whole = media.type === 'videoEmbed'
+            found.push({ from: whole ? before : before + 1, to: whole ? before + block.nodeSize : before + block.nodeSize - 1,
+                         node: state.schema.nodeFromJSON(media) as ReturnType<typeof state.schema.text> })
             continue
           }
           // 先找行内代码：反引号里的 $ 不算公式。
           for (const [pattern, mark, make] of [
-            [INLINE_CODE, '`', (inner: string) => state.schema.text(inner, [code.create()])],
-            [INLINE_MATH, '$', (inner: string) => state.schema.nodes.inlineMath.create({ latex: inner })],
+            [INLINE_CODE, '`', (match: RegExpMatchArray) => state.schema.text(match[1], [code.create()])],
+            [INLINE_LINK, '[', (match: RegExpMatchArray) => linkText(state.schema, match[1], match[2])],
+            [INLINE_MATH, '$', (match: RegExpMatchArray) => state.schema.nodes.inlineMath.create({ latex: match[1] })],
           ] as const) {
             for (const match of text.matchAll(pattern)) {
               const from = before + 1 + match.index + match[0].indexOf(mark)
               const to = before + 1 + match.index + match[0].length
               if ((head >= from && head <= to) || overlaps(from, to)) continue
               if (state.doc.rangeHasMark(from, to, code)) continue
-              found.push({ from, to, node: make(match[1]) as ReturnType<typeof state.schema.text> })
+              found.push({ from, to, node: make(match) as ReturnType<typeof state.schema.text> })
             }
           }
         }
@@ -211,6 +230,7 @@ function build() {
       SizedImage,
       Video,
       Embed,
+      LegacyEmbed,
       CodeBlockLowlight.extend({ addNodeView: () => VueNodeViewRenderer(CodeBlockView) }).configure({ lowlight, defaultLanguage: null }),
       // 分开配置：Mathematics 会把同一份 katexOptions 给行内与块级，块级公式就不是 displayMode 了。
       InlineMath.configure({ katexOptions: { throwOnError: false }, onClick: (node, pos) => editMath('inline', pos, node.attrs.latex) }),
@@ -354,12 +374,24 @@ const active = (name: string, attrs?: Record<string, unknown>) => editor.value?.
 const run = () => editor.value!.chain().focus()
 const inTable = computed(() => active('table'))
 
+// 与 Typora 一致：没选中文字时把地址作为链接文字插入；选中文字时给它加链接；光标在链接里时修改或移除。
 async function setLink() {
-  const previous = editor.value?.getAttributes('link').href as string | undefined
-  const url = await promptDialog({ title: previous ? '编辑链接' : '插入链接', message: '留空则移除链接。', value: previous ?? '', input: { placeholder: 'https://…' }, confirmText: '确定' })
+  const current = editor.value
+  if (!current) return
+  const inLink = current.isActive('link')
+  const empty = current.state.selection.empty
+  const previous = inLink ? current.getAttributes('link').href as string : ''
+  const url = await promptDialog({
+    title: inLink ? '编辑链接' : '插入链接',
+    message: inLink ? '留空则移除链接。' : empty ? '没有选中文字时，链接地址会作为文字插入。' : undefined,
+    value: previous, input: { placeholder: 'https://…' }, confirmText: '确定',
+  })
   if (url === null) return
-  if (!url) run().extendMarkRange('link').unsetLink().run()
-  else run().extendMarkRange('link').setLink({ href: url }).run()
+  if (!url) { if (inLink) run().extendMarkRange('link').unsetLink().run(); return }
+  const href = fullHref(url)
+  if (inLink) run().extendMarkRange('link').setLink({ href }).run()
+  else if (empty) run().insertContent({ type: 'text', text: url, marks: [{ type: 'link', attrs: { href } }] }).run()
+  else run().setLink({ href }).run()
 }
 
 async function insertVideo() {
@@ -395,7 +427,7 @@ function mediaFromHtml(raw: string): Record<string, unknown> | null {
   const text = raw.trim()
   if (/^<iframe\b[\s\S]*<\/iframe>$/i.test(text)) {
     const target = parseVideoInput(text)
-    return target?.kind === 'embed' ? { type: 'embed', attrs: { src: target.src } } : null
+    return target?.kind === 'embed' ? { type: 'videoEmbed', attrs: { src: target.src } } : null
   }
   const video = /^<video\b([^>]*)>([\s\S]*?)<\/video>$/i.exec(text)
   if (video) {

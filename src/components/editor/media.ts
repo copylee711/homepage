@@ -1,11 +1,12 @@
-import { Node, ResizableNodeView, mergeAttributes } from '@tiptap/core'
+import { InputRule, Node, ResizableNodeView, mergeAttributes } from '@tiptap/core'
 import Image from '@tiptap/extension-image'
 import { normalizeEmbed, providerOf } from './embeds'
 
 /**
  * 可拖动缩放的图片、网络视频与视频站嵌入。
  *
- * 两者都是行内节点：Markdown 里的 <img>、<video> 属于行内 HTML，解析时只保留行内节点。
+ * 图片与视频是行内节点：Markdown 里的 <img>、<video> 属于行内 HTML，解析时只保留行内节点；
+ * 视频站嵌入的 <iframe> 是块级 HTML，做成块节点。
  * 设置过宽度的图片保存为 <img width>，否则仍是 ![]()；视频始终保存为 <video>。
  * 发布页的渲染白名单允许这些标签与 width 属性（backend/app/rendering.py）。
  */
@@ -18,6 +19,16 @@ const width = (value: unknown) => {
 const RESIZE = { directions: ['left', 'right', 'bottom-left', 'bottom-right'] as const, preserveAspectRatio: true }
 
 export const SizedImage = Image.extend({
+  // 自带的输入规则在生成图片后会把最后敲的“)”再插回去，这里换成自己的：![说明](地址 "标题")。
+  addInputRules() {
+    return [new InputRule({
+      find: /(?:^|[^\\])!\[([^\]\n]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)$/,
+      handler: ({ state, range, match }) => {
+        const start = range.from + match[0].indexOf('!')
+        state.tr.replaceWith(start, range.to, this.type.create({ alt: match[1] || null, src: match[2], title: match[3] || null }))
+      },
+    })]
+  },
   renderMarkdown: node => {
     const { src, alt, title } = node.attrs ?? {}
     const size = width(node.attrs?.width)
@@ -46,9 +57,9 @@ declare module '@tiptap/core' {
  * 保存为 <iframe src width height>，高度按 16:9 由宽度算出。
  */
 export const Embed = Node.create({
-  name: 'embed',
-  group: 'inline',
-  inline: true,
+  name: 'videoEmbed',
+  // <iframe> 在 Markdown 里是块级 HTML，嵌入块独占一段；做成行内节点时，前后会多出一行，光标高度异常。
+  group: 'block',
   atom: true,
   draggable: true,
 
@@ -200,4 +211,17 @@ export const Video = Node.create({
       })
     }
   },
+})
+
+/**
+ * 早期版本把嵌入做成了段落里的行内节点（名为 embed）。协作文档的 Yjs 数据按节点名保存，
+ * 直接改成块节点会让旧文档里的这些段落不符合结构而被丢弃，所以保留这个旧节点用来显示与保存，
+ * 新插入的都是块节点 videoEmbed。
+ */
+export const LegacyEmbed = Embed.extend({
+  name: 'embed',
+  group: 'inline',
+  inline: true,
+  parseHTML: () => [],
+  addCommands: () => ({}),
 })
