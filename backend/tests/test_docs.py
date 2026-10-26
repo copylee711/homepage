@@ -15,7 +15,7 @@ from starlette.websockets import WebSocketDisconnect
 from test_accounts import signup, site  # noqa: F401
 from test_content import ORIGIN
 from test_drive import enable
-from test_images import user_id
+from test_images import agree, user_id
 
 from app import docs
 
@@ -291,3 +291,79 @@ def test_pasted_images(people, tmp_path):
     assert any(folder.iterdir())
     owner.delete(url, headers=owner_headers)
     assert not folder.exists() and stranger.get(image).status_code == 404
+
+
+def test_image_targets_site_and_custom(people, site, monkeypatch):  # noqa: F811
+    from app import imagehost
+
+    app, (owner, owner_headers), (other, other_headers), _ = people
+    client = site[0]
+    doc = create(owner, owner_headers)
+    url = f"/api/docs/{doc['id']}"
+    upload = {**owner_headers, "Content-Type": "image/png"}
+    settings_url = "/api/docs-settings/images"
+    assert owner.get(settings_url).json()["target"] == "builtin"
+
+    # 本站图床：未开通时给出明确错误，开通后返回图床地址并计入配额。
+    assert owner.put(settings_url, headers=owner_headers, json={"target": "site"}).status_code == 200
+    assert owner.post(f"{url}/images", headers=upload, content=png_bytes()).status_code == 403
+    uid = user_id(owner, owner_headers)
+    enable(client, uid, images=True)
+    agree(owner, uid)
+    saved = owner.post(f"{url}/images", headers=upload, content=png_bytes()).json()
+    assert saved["target"] == "site" and "/api/docs/" not in saved["url"]
+
+    # 第三方图床：令牌只在服务器上，读取时显示掩码，保存掩码值时沿用原值。
+    config = {"name": "测试图床", "url": "https://img.example.com/api/upload", "field": "image",
+              "headers": {"Authorization": "Bearer secret-token-1234"}, "form": {"album": "docs"},
+              "url_path": "data.links.url"}
+    assert owner.put(settings_url, headers=owner_headers,
+                     json={"target": "custom", "custom": config}).status_code == 200
+    shown = owner.get(settings_url).json()["custom"]
+    assert "secret" not in str(shown) and shown["headers"]["Authorization"].endswith("1234")
+    owner.put(settings_url, headers=owner_headers, json={"target": "custom", "custom": shown})
+
+    sent = []
+
+    async def fake_resolve(host, port):
+        import ipaddress
+        return ipaddress.ip_address("93.184.216.34")
+
+    async def fake_post(target, address, headers, files, data):
+        sent.append((target, address, headers, list(files), data))
+        return 200, b'{"data": {"links": {"url": "https://img.example.com/i/abc.png"}}}'
+
+    monkeypatch.setattr(imagehost, "resolve", fake_resolve)
+    monkeypatch.setattr(imagehost, "post", fake_post)
+    saved = owner.post(f"{url}/images", headers=upload, content=png_bytes()).json()
+    assert saved == {"url": "https://img.example.com/i/abc.png", "target": "custom"}
+    target, address, headers, fields, data = sent[-1]
+    assert target == "https://img.example.com/api/upload" and address == "93.184.216.34"
+    assert headers["Authorization"] == "Bearer secret-token-1234"
+    assert fields == ["image"] and data == {"album": "docs"}
+    assert owner.post(f"{settings_url}/test", headers=owner_headers,
+                      json={"target": "custom", "custom": shown}).json()["url"].endswith("abc.png")
+
+    # 所有者为文档指定去处后，其他编辑者的图片也按所有者的配置上传。
+    owner.post(f"{url}/members", headers=owner_headers, json={"email": OTHER, "role": "edit"})
+    assert other.put(f"{url}/image-settings", headers=other_headers,
+                     json={"target": "builtin"}).status_code == 403
+    assert owner.put(f"{url}/image-settings", headers=owner_headers,
+                     json={"target": "custom", "custom": config}).json()["target"] == "custom"
+    saved = other.post(f"{url}/images", headers={**other_headers, "Content-Type": "image/png"},
+                       content=png_bytes()).json()
+    assert saved["target"] == "custom" and len(sent) == 3
+
+
+def test_image_host_refuses_private_addresses(people):
+    _, (owner, owner_headers), _, _ = people
+    doc = create(owner, owner_headers)
+    for address in ("http://127.0.0.1:8000/upload", "https://localhost/upload", "http://10.0.0.5/up"):
+        owner.put("/api/docs-settings/images", headers=owner_headers,
+                  json={"target": "custom", "custom": {"url": address}})
+        response = owner.post(f"/api/docs/{doc['id']}/images",
+                              headers={**owner_headers, "Content-Type": "image/png"}, content=png_bytes())
+        assert response.status_code == 400 and "内网" in response.json()["detail"], address
+    bad = owner.put("/api/docs-settings/images", headers=owner_headers,
+                    json={"target": "custom", "custom": {"url": "ftp://example.com/x"}})
+    assert bad.status_code == 400

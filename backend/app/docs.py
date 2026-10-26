@@ -27,7 +27,7 @@ from pycrdt import YMessageType, YSyncMessageType, create_sync_message, handle_s
 from sqlalchemy import delete, func
 from sqlmodel import Session, select
 
-from . import audit, images, storage
+from . import audit, imagehost, images, storage
 from .accounts import (
     USER_COOKIE,
     client_ip,
@@ -39,8 +39,16 @@ from .accounts import (
 )
 from .auth import check_origin, digest
 from .drive.shares import secret_key
-from .models import Doc, DocMember, DocVersion, User, UserSession
-from .schemas import DocCreate, DocLinkWrite, DocMemberWrite, DocUnlock, DocUpdate, DocVersionCreate
+from .models import Doc, DocImageSetting, DocMember, DocVersion, User, UserSession
+from .schemas import (
+    DocCreate,
+    DocLinkWrite,
+    DocMemberWrite,
+    DocUnlock,
+    DocUpdate,
+    DocVersionCreate,
+    ImageTargetWrite,
+)
 
 router = APIRouter()
 ID_ALPHABET = string.ascii_letters + string.digits
@@ -312,6 +320,7 @@ def purge_user(session: Session, user_id: str, data_dir: Path | None = None):
     """注销账户时删除其文档与参与记录；调用方负责提交。"""
     purge(session, list(session.exec(select(Doc.id).where(Doc.user_id == user_id)).all()), data_dir)
     session.exec(delete(DocMember).where(DocMember.user_id == user_id))
+    session.exec(delete(DocImageSetting).where(DocImageSetting.user_id == user_id))
 
 
 # —— 成员 ——
@@ -477,13 +486,32 @@ def image_dir(settings, doc_id: str) -> Path:
     return settings.data_dir / "doc-images" / doc_id
 
 
-@router.post("/api/docs/{doc_id}/images", status_code=201)
-async def upload_image(doc_id: str, request: Request, link: str = Query(default="", max_length=64)):
-    settings = request.app.state.settings
-    with Session(request.app.state.engine) as session:
-        require_editor(request, session, doc_id, link, write=True)
-    payload = await images.read_upload(request, IMAGE_MAX)
-    extension, _, _ = await asyncio.to_thread(images.inspect, payload)
+def image_target(session: Session, doc: Doc, uploader: User) -> tuple[str, str, dict | None]:
+    """决定这次上传存到哪里，返回（去处、计入哪个账户、第三方配置）。
+
+    所有者为文档指定了去处时，所有编辑者的图片都按它存放，本站图床计入所有者的配额、
+    第三方图床使用所有者的配置；否则按上传者自己的默认设置。
+    """
+    if doc.image_target:
+        return doc.image_target, doc.user_id, doc.image_custom
+    setting = session.get(DocImageSetting, uploader.id)
+    if setting is None:
+        return "builtin", uploader.id, None
+    return setting.target, uploader.id, setting.custom
+
+
+async def store_image(settings, engine, doc_id: str, target: str, account: str, custom: dict | None,
+                      payload: bytes, extension: str) -> str:
+    if target == "site":
+        def save_site() -> str:
+            with Session(engine) as session:
+                row, _ = images.store(session, settings, account, payload)
+                return images.url(settings, row.path)
+        return await asyncio.to_thread(save_site)
+    if target == "custom":
+        if not custom:
+            raise HTTPException(400, "还没有配置第三方图床")
+        return await imagehost.upload(custom, payload, extension)
     folder = image_dir(settings, doc_id)
 
     def save() -> str:
@@ -497,8 +525,99 @@ async def upload_image(doc_id: str, request: Request, link: str = Query(default=
         temporary.replace(folder / name)
         return name
 
-    name = await asyncio.to_thread(save)
-    return {"url": f"/api/docs/{doc_id}/images/{name}"}
+    return f"/api/docs/{doc_id}/images/{await asyncio.to_thread(save)}"
+
+
+@router.post("/api/docs/{doc_id}/images", status_code=201)
+async def upload_image(doc_id: str, request: Request, link: str = Query(default="", max_length=64)):
+    settings, engine = request.app.state.settings, request.app.state.engine
+    with Session(engine) as session:
+        doc, _, user = require_editor(request, session, doc_id, link, write=True)
+        target, account, custom = image_target(session, doc, user)
+    payload = await images.read_upload(request, IMAGE_MAX)
+    extension, _, _ = await asyncio.to_thread(images.inspect, payload)
+    url = await store_image(settings, engine, doc_id, target, account, custom, payload, extension)
+    return {"url": url, "target": target}
+
+
+# —— 图片去处设置 ——
+
+def test_png() -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.new("RGB", (8, 8), (59, 110, 245)).save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+def target_view(target: str, custom: dict | None) -> dict:
+    return {"target": target, "custom": imagehost.masked(custom)}
+
+
+def checked_custom(body: ImageTargetWrite, previous: dict | None) -> dict | None:
+    if body.target != "custom":
+        return previous
+    if body.custom is None:
+        raise HTTPException(400, "请填写第三方图床的配置")
+    config = imagehost.merge(body.custom.model_dump(), previous)
+    imagehost.validate(config)
+    return config
+
+
+@router.get("/api/docs-settings/images")
+def get_image_settings(request: Request, session: Session = Depends(database)):
+    user, _ = current_user(request, session)
+    setting = session.get(DocImageSetting, user.id)
+    return {**target_view(setting.target if setting else "builtin", setting.custom if setting else None),
+            "site_available": user.is_admin or storage.plan(session, user.id).images_enabled}
+
+
+@router.put("/api/docs-settings/images")
+def put_image_settings(body: ImageTargetWrite, request: Request, session: Session = Depends(database)):
+    user, _ = current_user(request, session, write=True)
+    if body.target == "inherit":
+        raise HTTPException(400, "默认设置不能选择“跟随上传者”")
+    setting = session.get(DocImageSetting, user.id) or DocImageSetting(user_id=user.id)
+    setting.custom = checked_custom(body, setting.custom)
+    setting.target, setting.updated_at = body.target, time.time()
+    session.add(setting)
+    session.commit()
+    return target_view(setting.target, setting.custom)
+
+
+@router.post("/api/docs-settings/images/test")
+async def test_image_settings(body: ImageTargetWrite, request: Request):
+    """用一张 1×1 的图片试传，确认配置可用；未保存的掩码值沿用已保存的配置。"""
+    with Session(request.app.state.engine) as session:
+        user, _ = current_user(request, session, write=True)
+        setting = session.get(DocImageSetting, user.id)
+        config = checked_custom(body, setting.custom if setting else None)
+    if body.target != "custom" or not config:
+        raise HTTPException(400, "只有第三方图床需要测试")
+    return {"url": await imagehost.upload(config, test_png(), "png")}
+
+
+@router.get("/api/docs/{doc_id}/image-settings")
+def get_doc_image_settings(doc_id: str, request: Request, session: Session = Depends(database)):
+    doc, access, _ = require(request, session, doc_id)
+    if access.role != "owner":
+        raise HTTPException(403, "只有所有者可以设置")
+    return target_view(doc.image_target or "inherit", doc.image_custom)
+
+
+@router.put("/api/docs/{doc_id}/image-settings")
+def put_doc_image_settings(doc_id: str, body: ImageTargetWrite, request: Request,
+                           session: Session = Depends(database)):
+    doc, access, _ = require(request, session, doc_id, write=True)
+    if access.role != "owner":
+        raise HTTPException(403, "只有所有者可以设置")
+    doc.image_custom = checked_custom(body, doc.image_custom)
+    doc.image_target = "" if body.target == "inherit" else body.target
+    session.add(doc)
+    session.commit()
+    return target_view(doc.image_target or "inherit", doc.image_custom)
 
 
 @router.get("/api/docs/{doc_id}/images/{name}")

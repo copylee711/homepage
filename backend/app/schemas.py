@@ -437,3 +437,20 @@ class DocVersionCreate(StrictModel):
 
 class DocUnlock(StrictModel):
     password: str = Field(max_length=128)
+
+
+class ImageHostConfig(StrictModel):
+    """第三方图床：以 multipart 上传图片，从返回的 JSON 中按路径取出图片地址。"""
+
+    name: str = Field(default="", max_length=40)
+    url: str = Field(min_length=8, max_length=500)
+    field: str = Field(default="file", min_length=1, max_length=40)
+    headers: dict[str, str] = Field(default_factory=dict, max_length=10)
+    form: dict[str, str] = Field(default_factory=dict, max_length=10)
+    url_path: str = Field(default="data.url", max_length=100)
+
+
+class ImageTargetWrite(StrictModel):
+    # inherit 只用于文档：跟随上传者自己的默认设置。
+    target: Literal["inherit", "builtin", "site", "custom"]
+    custom: ImageHostConfig | None = None

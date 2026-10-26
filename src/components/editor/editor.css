@@ -132,3 +132,19 @@
 .md-content :is(h1,h2,h3,h4,h5,h6) { scroll-margin-top:calc(var(--header-h) + 130px); }
 
 .ProseMirror[contenteditable=false] .code-block .lang, .ProseMirror[contenteditable=true] .code-block .lang-static { display:none; }
+
+/* 可缩放的图片与视频：选中或悬停时显示两侧与下角的拖动柄，拖动时保持比例 */
+.md-content [data-resize-container] { display:inline-block; position:relative; max-width:100%; line-height:0; vertical-align:bottom; }
+.md-content [data-resize-wrapper] { position:relative; display:inline-block; max-width:100%; }
+.md-content [data-resize-wrapper] > img, .md-content [data-resize-wrapper] > video { display:block; max-width:100%; height:auto; margin:0; border-radius:8px; }
+.md-content video { display:block; max-width:100%; height:auto; border-radius:8px; background:#000; }
+.md-content [data-resize-handle] { z-index:2; opacity:0; transition:opacity .15s ease; }
+.md-content [data-resize-container]:hover [data-resize-handle], .md-content .ProseMirror-selectednode [data-resize-handle], .md-content [data-resize-state=true] [data-resize-handle] { opacity:1; }
+.md-content [data-resize-handle=left], .md-content [data-resize-handle=right] { top:50% !important; bottom:auto !important; width:6px; height:44px; margin-top:-22px; border-radius:3px; background:var(--accent); box-shadow:0 0 0 2px var(--surface); cursor:ew-resize; }
+.md-content [data-resize-handle=left] { left:-3px !important; }
+.md-content [data-resize-handle=right] { right:-3px !important; }
+.md-content [data-resize-handle=bottom-left], .md-content [data-resize-handle=bottom-right] { width:12px; height:12px; border-radius:3px; background:var(--accent); box-shadow:0 0 0 2px var(--surface); }
+.md-content [data-resize-handle=bottom-left] { left:-5px !important; bottom:-5px !important; cursor:nesw-resize; }
+.md-content [data-resize-handle=bottom-right] { right:-5px !important; bottom:-5px !important; cursor:nwse-resize; }
+.md-content .ProseMirror-selectednode [data-resize-wrapper] > img, .md-content .ProseMirror-selectednode [data-resize-wrapper] > video, .md-content img.ProseMirror-selectednode { outline:2px solid var(--accent); outline-offset:2px; }
+.md-content [data-resize-state=true] { user-select:none; }

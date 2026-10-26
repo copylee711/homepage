@@ -15,7 +15,7 @@ import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from '@tiptap/markdown'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { TableKit } from '@tiptap/extension-table'
-import Image from '@tiptap/extension-image'
+import { SizedImage, Video } from './media'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { BlockMath, InlineMath } from '@tiptap/extension-mathematics'
 import { Placeholder } from '@tiptap/extensions'
@@ -60,7 +60,9 @@ const slash = ref<{ query: string; from: number; left: number; top: number; inde
 // （编辑器会把它拆成独立的公式块）。遇到时默认进入源码模式，避免保存时改变原文。
 const LOSSY = /<\/?[a-zA-Z][\w-]*(\s[^>]*)?>|^\[\^?[^\]]+\]:\s|[^\s$][^\S\n]*\$\$[^$\n]+\$\$/m
 function lossy(markdown: string) {
-  return LOSSY.test(markdown.replace(/```[\s\S]*?```|`[^`\n]*`/g, ''))
+  // <img>、<video>（含 <source>）编辑器能原样保留，不算可能丢失的内容。
+  const media = /<\/?(?:img|video|source)\b[^>]*>/gi
+  return LOSSY.test(markdown.replace(/```[\s\S]*?```|`[^`\n]*`/g, '').replace(media, ''))
 }
 
 // 贴近 Typora 的输入习惯：$公式$ 即时变成行内公式（首尾不能是空格，避免把“$5 到 $6”当成公式），
@@ -196,7 +198,8 @@ function build() {
       TaskList,
       TaskItem.configure({ nested: true }),
       TableKit.configure({ table: { resizable: false } }),
-      Image,
+      SizedImage,
+      Video,
       CodeBlockLowlight.extend({ addNodeView: () => VueNodeViewRenderer(CodeBlockView) }).configure({ lowlight, defaultLanguage: null }),
       // 分开配置：Mathematics 会把同一份 katexOptions 给行内与块级，块级公式就不是 displayMode 了。
       InlineMath.configure({ katexOptions: { throwOnError: false }, onClick: (node, pos) => editMath('inline', pos, node.attrs.latex) }),
@@ -348,6 +351,13 @@ async function setLink() {
   else run().extendMarkRange('link').setLink({ href: url }).run()
 }
 
+async function insertVideo() {
+  const url = await promptDialog({ title: '插入视频', message: '填写视频文件的网络地址（如 .mp4、.webm），插入后可拖动边缘调整大小。', value: 'https://', input: { placeholder: 'https://example.com/video.mp4' } })
+  if (!url) return
+  if (!/^https?:\/\//.test(url)) { notice.value = '视频地址需要以 http:// 或 https:// 开头'; return }
+  run().setVideo({ src: url }).run()
+}
+
 async function insertImage() {
   if (props.upload) {
     const input = document.createElement('input')
@@ -460,6 +470,7 @@ const commands: Command[] = [
   { id: 'table', label: '表格', hint: '3 × 3', keys: 'table bg', action: () => run().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run() },
   { id: 'math', label: '公式', hint: '$$', keys: 'math latex gs', action: () => insertMath(true) },
   { id: 'image', label: '图片', hint: props.upload ? '上传' : '链接', keys: 'image picture tp', action: () => insertImage() },
+  { id: 'video', label: '视频', hint: '链接', keys: 'video movie sp', action: () => insertVideo() },
   { id: 'hr', label: '分割线', hint: '---', keys: 'divider hr line fgx', action: () => run().setHorizontalRule().run() },
 ]
 const slashItems = computed(() => {
@@ -536,7 +547,8 @@ function slashKey(event: KeyboardEvent) {
         <span class="sep" />
         <button type="button" title="表格 (Ctrl+Alt+T)" @click="run().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 10h16M4 14.5h16M10 5v14" /></svg></button>
         <button type="button" title="公式块 (Ctrl+M)；行内公式 Ctrl+Shift+E 或输入 $公式$" @click="insertMath(true)"><svg viewBox="0 0 24 24"><path d="M17 5H7l5 7-5 7h10" /></svg></button>
-        <button type="button" title="图片" @click="insertImage"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 16l5-5 4 4 2-2 5 5M15 9h.01" /></svg></button>
+        <button type="button" title="图片（可粘贴或拖入）" @click="insertImage"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 16l5-5 4 4 2-2 5 5M15 9h.01" /></svg></button>
+        <button type="button" title="视频（网络地址）" @click="insertVideo"><svg viewBox="0 0 24 24"><path d="M4 6h11v12H4zM15 10l5-3v10l-5-3" /></svg></button>
         <button type="button" title="分割线" @click="run().setHorizontalRule().run()"><svg viewBox="0 0 24 24"><path d="M4 12h16" /></svg></button>
         <template v-if="inTable">
           <span class="sep" />

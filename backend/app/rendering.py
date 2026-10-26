@@ -49,10 +49,15 @@ def render_markdown(source: str) -> str:
             "summary",
             "span",
             "div",
+            "video",
+            "source",
         },
         attributes={
             "a": {"href", "title"},
-            "img": {"src", "alt", "title"},
+            "img": {"src", "alt", "title", "width", "height"},
+            # 网络视频：只保留播放所需的属性，不允许 autoplay 等打扰读者的属性。
+            "video": {"src", "controls", "width", "height", "poster", "preload", "playsinline", "loop", "muted"},
+            "source": {"src", "type"},
             "ol": {"start"},
             "code": {"class"},
         },

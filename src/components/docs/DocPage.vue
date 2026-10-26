@@ -13,6 +13,8 @@ import { useTheme } from '../../composables/useTheme'
 import MarkdownEditor from '../editor/MarkdownEditor.vue'
 import DocHistory from './DocHistory.vue'
 import DocShare from './DocShare.vue'
+import ImageSettings from './ImageSettings.vue'
+import { DropdownMenuContent, DropdownMenuItem, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuSeparator, DropdownMenuTrigger } from 'reka-ui'
 
 // /doc/<id> 直接打开；/d/<token> 是链接分享，先解析出文档再按链接权限打开。
 const match = /^\/(doc|d)\/([A-Za-z0-9]+)\/?$/.exec(location.pathname)!
@@ -28,7 +30,8 @@ const session = shallowRef<ReturnType<typeof connect>>()
 const status = ref<'connecting' | 'connected' | 'disconnected'>('connecting')
 const synced = ref(false)
 const peers = ref<{ id: number; name: string; color: string }[]>([])
-const sharing = ref(false), history = ref(false)
+const sharing = ref(false), history = ref(false), menuOpen = ref(false)
+const imageSettings = ref<'doc' | 'user' | null>(null)
 // 大纲：宽屏默认显示在正文左侧，记住用户的选择。
 // 宽屏记住用户的选择（默认展开）；窄屏是盖在正文上的抽屉，默认收起。
 const wide = () => matchMedia('(min-width: 1101px)').matches
@@ -212,11 +215,36 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
           <span v-if="peers.length > 5" class="peer more">+{{ peers.length - 5 }}</span>
         </div>
         <div class="actions">
-          <button v-if="canEdit" class="d-btn mode-toggle" :class="{ on: reading }" type="button" :aria-pressed="reading" :title="reading ? '回到编辑' : '只读预览，避免误修改（只影响当前页面）'" @click="reading = !reading">{{ reading ? '编辑' : '阅读' }}</button>
-          <button class="d-btn outline-toggle" :class="{ on: outlineOpen }" type="button" :aria-pressed="outlineOpen" @click="toggleOutline">大纲</button>
-          <button v-if="canEdit" class="d-btn" type="button" @click="history = true">历史</button>
-          <button v-if="doc.can_copy" class="d-btn" type="button" @click="exportMarkdown">导出</button>
-          <button v-if="doc.can_share" class="d-btn primary" type="button" @click="sharing = true">分享</button>
+          <!-- 宽屏：常用操作是无边框图标按钮；导出、图片存储等收进“更多”。窄屏只留分享与“更多”。 -->
+          <button v-if="canEdit" class="tool wide-only mode-toggle" :class="{ on: reading }" type="button" :aria-pressed="reading" :aria-label="reading ? '回到编辑' : '阅读模式'" :data-tip="reading ? '回到编辑' : '阅读模式（只影响当前页面）'" @click="reading = !reading">
+            <svg v-if="reading" viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4ZM13.5 6.5l4 4" /></svg>
+            <svg v-else viewBox="0 0 24 24"><path d="M12 6.5C10.5 5 8 4.5 4 4.5v13c4 0 6.5.5 8 2 1.5-1.5 4-2 8-2v-13c-4 0-6.5.5-8 2Zm0 0v13" /></svg>
+          </button>
+          <button class="tool wide-only outline-toggle" :class="{ on: outlineOpen }" type="button" :aria-pressed="outlineOpen" aria-label="大纲" data-tip="大纲" @click="toggleOutline">
+            <svg viewBox="0 0 24 24"><path d="M5 6h14M9 12h10M13 18h6M5 12h.01M5 18h.01M9 18h.01" /></svg>
+          </button>
+          <button v-if="canEdit" class="tool wide-only" type="button" aria-label="版本历史" data-tip="版本历史" @click="history = true">
+            <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.6L4 8.7M4 4v4.7h4.7M12 8v4.5l3 2" /></svg>
+          </button>
+          <DropdownMenuRoot v-model:open="menuOpen">
+            <DropdownMenuTrigger class="tool" aria-label="更多操作" data-tip="更多">
+              <svg viewBox="0 0 24 24"><path d="M6 12h.01M12 12h.01M18 12h.01" /></svg>
+            </DropdownMenuTrigger>
+            <DropdownMenuPortal>
+              <DropdownMenuContent class="doc-menu" align="end" :side-offset="8" :collision-padding="12">
+                <DropdownMenuItem v-if="canEdit" class="doc-menu-item narrow-only" @select="reading = !reading">{{ reading ? '回到编辑' : '阅读模式' }}</DropdownMenuItem>
+                <DropdownMenuItem class="doc-menu-item narrow-only" @select="toggleOutline">{{ outlineOpen ? '收起大纲' : '大纲' }}</DropdownMenuItem>
+                <DropdownMenuItem v-if="canEdit" class="doc-menu-item narrow-only" @select="history = true">版本历史</DropdownMenuItem>
+                <DropdownMenuItem v-if="doc.can_copy" class="doc-menu-item" @select="exportMarkdown">导出 Markdown</DropdownMenuItem>
+                <DropdownMenuSeparator v-if="doc.role === 'owner' || account" class="doc-menu-sep" />
+                <DropdownMenuItem v-if="doc.role === 'owner'" class="doc-menu-item" @select="imageSettings = 'doc'">这篇文档的图片存储</DropdownMenuItem>
+                <DropdownMenuItem v-if="account" class="doc-menu-item" @select="imageSettings = 'user'">我的默认图片存储</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenuPortal>
+          </DropdownMenuRoot>
+          <button v-if="doc.can_share" class="share-btn" type="button" @click="sharing = true">
+            <svg viewBox="0 0 24 24"><path d="M12 15V4m0 0L8 8m4-4 4 4M5 13v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5" /></svg>分享
+          </button>
         </div>
         <div class="corner">
           <button class="icon-btn" type="button" :aria-label="theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'" @click="toggleTheme"><AppIcon :name="theme === 'dark' ? 'moon' : 'sun'" /></button>
@@ -249,6 +277,7 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
           <MarkdownEditor v-if="collab" :key="`${doc.role}-${session?.doc.guid}`" ref="editor" :collab="collab" :editable="editable" :upload="editable && account ? uploadImage : undefined" />
         </article>
       </div>
+      <ImageSettings v-if="imageSettings" :doc-id="imageSettings === 'doc' ? doc.id : undefined" @close="imageSettings = null" />
       <DocShare v-if="sharing" :doc="doc" @close="sharing = false" @changed="value => doc = { ...doc!, ...value }" />
       <DocHistory v-if="history" :doc-id="doc.id" :link="link" @close="history = false" @restore="restore" />
     </template>
@@ -286,7 +315,27 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
 .peers { display:flex; }
 .peer { display:grid; place-items:center; width:28px; height:28px; margin-left:-6px; border:2px solid var(--bg); border-radius:50%; color:#fff; font-size:12px; font-weight:600; }
 .peer.more { background:var(--muted); }
-.actions { display:flex; gap:8px; }
+.actions { display:flex; align-items:center; gap:2px; }
+.tool { position:relative; display:grid; place-items:center; width:36px; height:36px; border:0; border-radius:10px; background:none; color:var(--muted); cursor:pointer; transition:background .2s,color .2s; }
+.tool:hover, .tool[data-state=open] { background:color-mix(in srgb,var(--text) 6%,transparent); color:var(--text); }
+.tool.on { background:var(--accent-soft); color:var(--accent); }
+.tool svg, .share-btn svg { width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+/* 悬停提示：比原生 title 更快出现，样式与站点一致 */
+.tool[data-tip]::after { content:attr(data-tip); position:absolute; top:calc(100% + 8px); left:50%; z-index:30; padding:4px 8px; border-radius:6px; background:var(--btn-bg); color:var(--btn-fg); font:12px/1.4 var(--font); white-space:nowrap; opacity:0; transform:translate(-50%,-2px); pointer-events:none; transition:opacity .15s ease .3s,transform .15s ease .3s; }
+.tool[data-tip]:hover::after { opacity:1; transform:translate(-50%,0); }
+.tool[data-state=open]::after { display:none; }
+.share-btn { display:inline-flex; align-items:center; gap:6px; height:36px; margin-left:8px; padding:0 14px 0 12px; border:0; border-radius:10px; background:var(--btn-bg); color:var(--btn-fg); font:500 14px var(--font); cursor:pointer; transition:filter .2s,transform .2s var(--ease); }
+.share-btn:hover { filter:brightness(1.12); }
+.share-btn:active { transform:scale(.97); }
+:global(.doc-menu) { z-index:60; min-width:190px; padding:5px; border:1px solid var(--line); border-radius:12px; background:var(--surface); color:var(--text); box-shadow:0 16px 40px -12px rgba(17,24,39,.3); transform-origin:var(--reka-dropdown-menu-content-transform-origin); animation:menu-select-in .2s var(--ease); }
+:global(.doc-menu-item) { padding:9px 12px; border-radius:8px; color:var(--text-2); font:14px var(--font); cursor:pointer; outline:none; }
+:global(.doc-menu-item[data-highlighted]) { background:var(--accent-soft); color:var(--accent); }
+:global(.doc-menu-sep) { height:1px; margin:5px 6px; background:var(--line); }
+:global(.doc-menu .narrow-only) { display:none; }
+@media (max-width:760px) {
+  .wide-only { display:none; }
+  :global(.doc-menu .narrow-only) { display:block; }
+}
 .readonly { max-width:860px; margin:16px auto 0; padding:10px 14px; border-radius:10px; background:var(--accent-soft); color:var(--text-2); font-size:13px; }
 .readonly a { margin-left:8px; color:var(--accent); }
 .doc-body { display:grid; grid-template-columns:0 minmax(0,1fr); }
@@ -323,7 +372,7 @@ onBeforeUnmount(() => { clearTimeout(titleTimer); close() })
   .meta .d-muted, .brand, .icon-btn { display:none; }
   .status { font-size:0; gap:0; }
   .corner { margin-left:0; padding-left:8px; }
-  .actions .d-btn { padding:7px 10px; }
+  .share-btn { margin-left:4px; padding:0 12px; }
   .paper { padding-top:24px; }
 }
 </style>

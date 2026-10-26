@@ -6,12 +6,14 @@ import '../../styles/drive.css'
 import { confirmDialog, promptDialog } from '../../composables/useConfirm'
 import { docUrl, docsApi, roleName, timeAgo } from '../../docs'
 import type { DocItem } from '../../docs'
+import ImageSettings from './ImageSettings.vue'
 
 const owned = ref<DocItem[]>([])
 const shared = ref<DocItem[]>([])
 const canCreate = ref(false)
 const loading = ref(true), error = ref('')
 const tab = ref<'owned' | 'shared'>('owned')
+const imageSettings = ref(false)
 const items = computed(() => tab.value === 'owned' ? owned.value : shared.value)
 
 async function load() {
@@ -58,7 +60,10 @@ onMounted(load)
   <section v-else class="docs">
     <header>
       <div><h2>文档</h2><p class="d-muted">支持 Markdown 的在线文档，可以邀请他人实时协作。</p></div>
-      <button v-if="canCreate" class="d-btn primary" type="button" @click="create">＋ 新建文档</button>
+      <div class="head-actions">
+        <button class="d-btn" type="button" @click="imageSettings = true">图片存储</button>
+        <button v-if="canCreate" class="d-btn primary" type="button" @click="create">＋ 新建文档</button>
+      </div>
     </header>
     <div class="tabs" role="tablist">
       <button type="button" role="tab" :aria-selected="tab === 'owned'" :class="{ on: tab === 'owned' }" @click="tab = 'owned'">我的文档<span>{{ owned.length }}</span></button>
@@ -90,10 +95,12 @@ onMounted(load)
         </div>
       </li>
     </ul>
+    <ImageSettings v-if="imageSettings" @close="imageSettings = false" />
   </section>
 </template>
 
 <style scoped>
+.head-actions { display:flex; gap:8px; flex:none; }
 .signin { display:grid; justify-items:start; gap:12px; }
 header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
 h2 { font-size:20px; }

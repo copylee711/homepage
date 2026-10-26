@@ -386,6 +386,9 @@ class Doc(SQLModel, table=True):
     link_expires_at: float = 0
     # 只读成员与只读链接能否复制、导出正文；所有者与可编辑成员不受限制。
     allow_copy: bool = True
+    # 粘贴图片的去处：空字符串表示按上传者自己的默认设置；builtin | site | custom 由所有者统一指定。
+    image_target: str = ""
+    image_custom: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
     created_at: float
     updated_at: float
     updated_by: str = ""
@@ -412,3 +415,13 @@ class DocVersion(SQLModel, table=True):
     auto: bool = True
     created_at: float = Field(index=True)
     created_by: str = ""
+
+
+class DocImageSetting(SQLModel, table=True):
+    """用户的默认图片去处：builtin（文档内置存储）、site（本站图床）或 custom（第三方图床）。"""
+
+    __tablename__ = "doc_image_setting"
+    user_id: str = Field(primary_key=True)
+    target: str = "builtin"
+    custom: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
+    updated_at: float = 0
