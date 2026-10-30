@@ -30,6 +30,10 @@ components:
 
 # Copy Lee Design System
 
+## TwinFile 产品页
+
+`public/twinfile/` 是 TwinFile 仓库 `website/` 的静态部署镜像，维护源在 `D:/Projects/twinfile`。`assets/site-tokens.css` 原样镜像本项目 `src/styles/tokens.css`，使用相同的颜色、字体、间距和滚动条变量。版式消费变量，采用近白背景、蓝色网格、黑色主按钮、灰色细线链接及语义化导航；不改变主站 Vue 应用的行为。截图仅保留应用区域。网站包含无需脚本即可访问的介绍页、隐私政策与服务条款。更新时同步维护源与部署镜像，并验证下载资源及 OAuth 开放状态文案。
+
 ## Overview
 
 以既有主页为视觉基准。读者浏览个人项目、文章及华南理工大学通知；英文栏目名与中文内容沿用现有网站语气。首页与文章属于内容网站，SCUT 提供本地索引筛选。此次覆盖公开页面，管理后台的表单流程不在此次重设计范围内。
