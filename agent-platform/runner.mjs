@@ -6,6 +6,7 @@ import { body, equal, fail, json, required } from './shared.mjs';
 import { publicProviders, saveProvider, activeProvider, testProvider, proxyEnvironment, loadProviders } from './providers.mjs';
 import { sandbox } from './sandbox-client.mjs';
 import { sessionCapacity } from './session-limits.mjs';
+import { prepareSessionCwd } from './session-cwd.mjs';
 
 const secret = required('RUNNER_SECRET');
 const sessions = new Map();
@@ -18,6 +19,7 @@ class Pi {
     const cwd = `/tmp/pi/${this.user}`;
     await mkdir(cwd, { recursive: true, mode: 0o700 });
     await mkdir(`/data/sessions/${this.user}`, { recursive: true, mode: 0o700 });
+    await prepareSessionCwd(`/data/sessions/${this.user}/${this.thread}.jsonl`, cwd);
     const config = await activeProvider();
     this.secrets = [(process.env.OPENCODE_API_KEY || ''), ...(await loadProviders()).providers.map(item => item.apiKey || '')].filter(key => key.length >= 8);
     this.lease = (await sandbox('/lease', this.user)).token;
