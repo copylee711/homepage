@@ -1,0 +1,5 @@
+# Same locked, credential-free toolchain; no Pi process runs in this container.
+FROM copylee-agent-runner:latest
+COPY agent-platform/sandbox-worker.py /sandbox-worker.py
+WORKDIR /workspace
+ENTRYPOINT ["python3", "/sandbox-worker.py"]

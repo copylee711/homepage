@@ -1,12 +1,12 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-let admin = true;
+let admin = true, granted = false;
 const homepage = createServer(async (req, res) => {
   assert.equal(req.headers['x-agent-client-secret'], 'a'.repeat(64));
   res.setHeader('Content-Type', 'application/json');
   if (req.url.endsWith('/exchange')) res.end(JSON.stringify({ token: 't'.repeat(64), expires_at: Date.now() / 1000 + 3600 }));
-  else res.end(JSON.stringify({ user: { id: 'user-1', name: 'Tester' }, can_execute: admin, admin }));
+  else res.end(JSON.stringify({ user: { id: 'user-1', name: 'Tester' }, can_execute: admin || granted, admin }));
 });
 await new Promise(resolve => homepage.listen(0, '127.0.0.1', resolve));
 process.env.HOMEPAGE_URL = `http://127.0.0.1:${homepage.address().port}`;
@@ -45,4 +45,21 @@ test('server authorization and CSRF protect execution and provider settings', as
   assert.equal(me.status, 200);
   assert.equal((await me.json()).csrf.length > 20, true);
   assert.equal(me.headers.get('referrer-policy'), 'no-referrer');
+});
+
+test('an execution grant never grants provider or user-management privileges', async () => {
+  admin = false; granted = true;
+  const cookie = 'copylee_ai=' + 't'.repeat(64);
+  const me = await (await fetch(base + '/api/me', { headers: { cookie } })).json();
+  assert.equal(me.can_execute, true); assert.equal(me.admin, false);
+  for (const path of ['/api/providers', '/api/grants']) {
+    assert.equal((await fetch(base + path, { headers: { cookie } })).status, 403);
+  }
+  for (const path of ['/api/providers/save', '/api/providers/test', '/api/grants/save']) {
+    assert.equal((await fetch(base + path, { method: 'POST', headers: { cookie,
+      Origin: 'http://127.0.0.1', 'X-CSRF-Token': me.csrf }, body: JSON.stringify({ user_id: 'other', days: 30 }) })).status, 403);
+  }
+  granted = false;
+  assert.equal((await fetch(base + '/api/chats', { headers: { cookie } })).status, 403);
+  admin = true;
 });

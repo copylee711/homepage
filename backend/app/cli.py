@@ -172,6 +172,8 @@ def restore(source: Path, target: Path):
             tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if "agent_session" in tables:
                 connection.execute("DELETE FROM agent_session")
+            if "agent_grant" in tables:
+                connection.execute("DELETE FROM agent_grant")
             if "user_session" in tables:
                 connection.execute("DELETE FROM user_session")
                 connection.execute("DELETE FROM email_code")

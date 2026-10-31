@@ -13,7 +13,7 @@ async function api(path, data) {
 function setBusy(value) {
   busy = value; $('send').hidden = value; $('stop').hidden = !value;
   $('new-chat').disabled = value || !auth?.can_execute; $('settings-button').disabled = value;
-  $('task-state').textContent = value ? 'Pi 正在处理任务…' : auth?.can_execute ? '管理员工作区' : '尚未开通执行权限';
+  $('task-state').textContent = value ? 'Pi 正在处理任务…' : auth?.can_execute ? '独立沙箱 · 无网络' : '尚未开通执行权限';
   $('chats').querySelectorAll('button').forEach(button => { button.disabled = value; });
 }
 function mobile(open) { document.querySelector('.shell').classList.toggle('sidebar-open', open); $('sidebar-shade').hidden = !open; $('menu-toggle').setAttribute('aria-expanded', String(open)); $('sidebar').inert = matchMedia('(max-width:680px)').matches && !open; }
@@ -134,12 +134,62 @@ $('test-provider').onclick = () => providerAction(false);
 $('provider-form').onsubmit = event => { event.preventDefault(); void providerAction(true); };
 (async () => {
   try {
-    auth = await api('/api/me'); $('user-name').textContent = auth.user.name; $('avatar').textContent = auth.user.name.slice(0, 1); $('settings-button').hidden = !auth.can_execute;
-    $('role-label').textContent = auth.can_execute ? '管理员 · 独立 Agent 会话' : '已登录 · 暂无执行权限'; $('prompt').disabled = $('send').disabled = $('new-chat').disabled = !auth.can_execute;
+    auth = await api('/api/me'); $('user-name').textContent = auth.user.name; $('avatar').textContent = auth.user.name.slice(0, 1); $('settings-button').hidden = !auth.admin; $('grants-button').hidden = !auth.admin;
+    $('role-label').textContent = auth.admin ? '管理员 · 独立沙箱' : auth.can_execute ? '已授权 · ' + new Date(auth.grant_expires_at * 1000).toLocaleDateString('zh-CN') + ' 到期' : '已登录 · 暂无执行权限'; $('prompt').disabled = $('send').disabled = $('new-chat').disabled = !auth.can_execute;
     document.querySelectorAll('[data-prompt]').forEach(button => { button.disabled = !auth.can_execute; });
-    $('task-state').textContent = auth.can_execute ? '管理员工作区' : '尚未开通执行权限';
-    if (!auth.can_execute) { notice('当前仅向管理员开放 Agent 工作区。你的账户已完成登录，尚未获得执行权限。'); $('chats').replaceChildren(); return; }
-    await loadProviders(); const id = new URLSearchParams(location.search).get('chat');
+    $('task-state').textContent = auth.can_execute ? '独立沙箱 · 无网络' : '尚未开通执行权限';
+    if (!auth.can_execute) { notice('此账户尚未获得执行授权，请联系管理员开通。已有授权可能已过期或被撤销。'); $('chats').replaceChildren(); return; }
+    if (auth.admin) await loadProviders(); const id = new URLSearchParams(location.search).get('chat');
     if (id && /^[a-f0-9-]{36}$/.test(id)) await selectChat(id); else { newChat(); await listChats(); }
   } catch (error) { notice(error.message || '无法读取账户，请刷新重试。', true); }
 })();
+
+let grantUsers = [], grantsEnabled = false, grantsBusy = false;
+function renderGrants() {
+  const query = $('grant-search').value.trim().toLocaleLowerCase();
+  const users = grantUsers.filter(user => (user.name + ' ' + user.email).toLocaleLowerCase().includes(query));
+  $('grant-users').replaceChildren();
+  if (!users.length) { const empty = document.createElement('p'); empty.className = 'muted'; empty.textContent = '没有符合条件的账户。'; $('grant-users').append(empty); }
+  for (const user of users) {
+    const row = document.createElement('section'); row.className = 'grant-user';
+    const name = document.createElement('strong'); name.textContent = user.name;
+    const email = document.createElement('small'); email.textContent = user.email;
+    const state = document.createElement('p'); state.className = 'hint';
+    const active = user.expires_at > Date.now() / 1000;
+    state.textContent = user.disabled ? '账户已停用' : user.admin ? '管理员 · 已有执行权限' : active ? '已授权至 ' + new Date(user.expires_at * 1000).toLocaleString('zh-CN') : user.expires_at ? '授权已过期' : '未授权';
+    row.append(name, email, state);
+    if (!user.admin && !user.disabled) {
+      const actions = document.createElement('div'); actions.className = 'dialog-actions';
+      const label = document.createElement('label'); label.textContent = '授权期限';
+      const duration = document.createElement('select');
+      for (const days of [1, 7, 30]) { const option = document.createElement('option'); option.value = days; option.textContent = days + ' 天'; duration.append(option); }
+      duration.value = '7'; label.append(duration);
+      const save = document.createElement('button'); save.type = 'button'; save.className = 'primary'; save.textContent = active ? '续期授权' : '授予执行权限'; save.disabled = grantsBusy || !grantsEnabled;
+      save.onclick = () => changeGrant(user, Number(duration.value)); actions.append(label, save);
+      if (active) { const revoke = document.createElement('button'); revoke.type = 'button'; revoke.className = 'secondary'; revoke.textContent = '撤销授权'; revoke.disabled = grantsBusy; revoke.onclick = () => changeGrant(user, 0); actions.append(revoke); }
+      row.append(actions);
+    }
+    $('grant-users').append(row);
+  }
+}
+async function refreshGrants() {
+  $('grant-status').textContent = '正在读取账户…'; $('reload-grants').disabled = true;
+  try { const result = await api('/api/grants'); grantUsers = result.users; grantsEnabled = result.enabled; renderGrants(); $('grant-status').textContent = result.enabled ? '独立沙箱已启用；普通用户需要单独授权。' : '权限测试尚未放行，新增授权已关闭。'; }
+  catch (error) { $('grant-status').textContent = error.message + '。可刷新重试。'; }
+  finally { $('reload-grants').disabled = false; }
+}
+async function changeGrant(user, days) {
+  if (grantsBusy) return; grantsBusy = true;
+  // Keep the selected row/focus in place while the request is pending.
+  $('grant-users').querySelectorAll('button, select').forEach(control => { control.disabled = true; });
+  $('close-grants').disabled = $('reload-grants').disabled = true;
+  $('grant-status').textContent = days ? '正在授予执行权限…' : '正在撤销授权并停止任务…';
+  try { await api('/api/grants/save', { user_id: user.id, days }); await refreshGrants(); $('grant-status').textContent = days ? user.name + ' 已获得 ' + days + ' 天执行权限。' : user.name + ' 的执行授权已撤销。'; }
+  catch (error) { $('grant-status').textContent = error.message + '。请刷新列表核对当前状态后重试。'; }
+  finally { grantsBusy = false; $('close-grants').disabled = $('reload-grants').disabled = false; renderGrants(); $('grant-search').focus(); }
+}
+$('grants-button').onclick = () => { $('grants').showModal(); void refreshGrants(); };
+$('close-grants').onclick = () => $('grants').close();
+$('grants').addEventListener('cancel', event => { if (grantsBusy) event.preventDefault(); });
+$('grant-search').oninput = renderGrants;
+$('reload-grants').onclick = refreshGrants;

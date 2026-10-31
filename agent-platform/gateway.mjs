@@ -31,7 +31,11 @@ async function sso(path, value) {
       body: JSON.stringify(value), signal: AbortSignal.timeout(10000), redirect: 'error',
     });
   } catch { fail(503, '账户服务暂时不可用，请稍后重试'); }
-  if (!response.ok) fail(response.status === 401 ? 401 : 502, '登录验证失败，请重新登录');
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    fail([401, 403, 404, 409, 422].includes(response.status) ? response.status : 502,
+      typeof error.detail === 'string' ? error.detail : '账户服务请求失败，请重试');
+  }
   return response.json();
 }
 async function identity(req) {
@@ -92,14 +96,28 @@ export const server = createServer(async (req, res) => {
     }
     const auth = await identity(req);
     if (url.pathname === '/api/me' && req.method === 'GET') {
-      return json(res, 200, { user: auth.user, can_execute: auth.can_execute, csrf: csrf(auth.token), model: process.env.PI_MODEL || 'opencode-go/deepseek-v4.1-flash' });
+      return json(res, 200, { user: auth.user, admin: auth.admin, can_execute: auth.can_execute,
+        grant_expires_at: auth.grant_expires_at, csrf: csrf(auth.token), model: process.env.PI_MODEL || 'opencode-go/deepseek-v4.1-flash' });
     }
     if (url.pathname === '/auth/logout' && req.method === 'POST') {
       writeAccess(req, auth); await sso('/revoke', { token: auth.token });
       res.setHeader('Set-Cookie', cookie(cookieName, '', 0)); return json(res, 200, { ok: true });
     }
     if (url.pathname.startsWith('/api/')) {
+      if (url.pathname.startsWith('/api/grants')) {
+        if (!auth.admin) fail(403, '仅管理员可管理执行授权');
+        if (url.pathname === '/api/grants' && req.method === 'GET') return json(res, 200, await sso('/grants/list', { token: auth.token }));
+        if (url.pathname === '/api/grants/save' && req.method === 'POST') {
+          writeAccess(req, auth); const input = await body(req);
+          const result = await sso('/grants/save', { token: auth.token, user_id: input.user_id, days: input.days });
+          // SSO commit is authoritative; active gateways also recheck on each heartbeat.
+          if (input.days === 0) await runner('/cancel', input.user_id, {});
+          return json(res, 200, result);
+        }
+        fail(404, '接口不存在');
+      }
       if (!auth.can_execute) fail(403, '此账户尚未获得 Agent 执行权限');
+      if (url.pathname.startsWith('/api/providers') && !auth.admin) fail(403, '仅管理员可管理供应商');
       if (url.pathname === '/api/chats' && req.method === 'GET') {
         const response = await runner('/chats', auth.user.id, {}); return json(res, 200, await response.json());
       }
@@ -123,17 +141,21 @@ export const server = createServer(async (req, res) => {
         if (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 20000) fail(422, '请输入 1–20000 个字符的任务');
         const abort = new AbortController();
         res.once('close', () => abort.abort());
+        let checking = false;
         const timer = setInterval(async () => {
+          if (checking) return; checking = true;
           try {
             const current = await identity(req);
             if (!current.can_execute) abort.abort();
+            else await runner('/renew', auth.user.id, {});
           } catch { abort.abort(); }
-        }, 15000);
+          finally { checking = false; }
+        }, 5000);
         try {
           const response = await runner('/prompt', auth.user.id, { message: input.message, thread: input.thread }, abort.signal);
           res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Accel-Buffering': 'no' });
           await pipeline(Readable.fromWeb(response.body), res);
-        } finally { clearInterval(timer); }
+        } finally { clearInterval(timer); await runner('/cancel', auth.user.id, {}).catch(() => {}); }
         return;
       }
       fail(404, '接口不存在');

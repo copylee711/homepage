@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from test_content import ADMIN_EMAIL, ORIGIN, PASSWORD
 
 from app.auth import digest
-from app.models import AgentSession, User, UserChallenge
+from app.models import AgentGrant, AgentSession, User, UserChallenge, UserSession
 
 SECRET = "test-agent-client-secret-at-least-32-characters"
 PRIVATE = {"X-Agent-Client-Secret": SECRET}
@@ -129,3 +129,61 @@ def test_revoke_requires_app_key(agent):
     assert client.post('/api/agent/revoke', json={'token': token}).status_code == 401
     assert client.post('/api/agent/revoke', headers=PRIVATE, json={'token': token}).status_code == 200
     assert introspect(client, token).status_code == 401
+
+
+def test_explicit_grants_gate_expiry_revoke_and_admin_only(agent):
+    client, app, settings = agent
+    login(client)
+    token = exchange(client, authorize(client)).json()['token']
+    with Session(app.state.engine) as session:
+        session.add(User(id='ordinary', email='ordinary@example.test', name='普通用户',
+                         password_hash='unused', created_at='2026-01-01'))
+        session.commit()
+    data = {'token': token, 'user_id': 'ordinary', 'days': 7}
+    assert client.post('/api/agent/grants/save', headers=PRIVATE, json=data).status_code == 409
+    settings.agent_user_execution_enabled = True
+    assert client.post('/api/agent/grants/save', headers=PRIVATE, json=data).status_code == 200
+    result = client.post('/api/agent/grants/list', headers=PRIVATE, json={'token': token})
+    assert result.status_code == 200 and result.json()['enabled']
+    with Session(app.state.engine) as session:
+        # A distinct ordinary-user session retains its own parent binding.
+        row = session.get(AgentSession, digest(token))
+        session.add(UserSession(token_hash='ordinary-parent', user_id='ordinary',
+                                csrf='test', expires_at=time.time() + 3600))
+        session.flush()
+        row.user_id = 'ordinary'
+        row.parent_hash = 'ordinary-parent'
+        session.add(row)
+        session.commit()
+    assert introspect(client, token).json()['can_execute'] is True
+    assert introspect(client, token).json()['admin'] is False
+    assert client.post('/api/agent/grants/list', headers=PRIVATE, json={'token': token}).status_code == 403
+    assert client.post('/api/agent/grants/save', headers=PRIVATE, json=data).status_code == 403
+    settings.agent_user_execution_enabled = False
+    assert introspect(client, token).json()['can_execute'] is False
+    settings.agent_user_execution_enabled = True
+    with Session(app.state.engine) as session:
+        grant = session.get(AgentGrant, 'ordinary')
+        grant.expires_at = time.time() - 1
+        session.add(grant)
+        session.commit()
+    assert introspect(client, token).json()['can_execute'] is False
+
+
+def test_grants_validation_and_revocation(agent):
+    client, app, settings = agent
+    login(client)
+    token = exchange(client, authorize(client)).json()['token']
+    settings.agent_user_execution_enabled = True
+    data = {'token': token, 'user_id': 'ordinary', 'days': 7}
+    assert client.post('/api/agent/grants/save', headers=PRIVATE, json=data).status_code == 404
+    with Session(app.state.engine) as session:
+        session.add(User(id='ordinary', email='ordinary@example.test', name='普通用户',
+                         password_hash='unused', created_at='2026-01-01'))
+        session.commit()
+    assert client.post('/api/agent/grants/save', headers=PRIVATE, json={**data, 'days': 31}).status_code == 422
+    assert client.post('/api/agent/grants/save', json=data).status_code == 401
+    assert client.post('/api/agent/grants/save', headers=PRIVATE, json=data).status_code == 200
+    assert client.post('/api/agent/grants/save', headers=PRIVATE, json={**data, 'days': 0}).status_code == 200
+    with Session(app.state.engine) as session:
+        assert session.get(AgentGrant, 'ordinary') is None

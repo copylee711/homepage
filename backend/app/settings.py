@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     # Dedicated first-party Agent SSO; never share the Homepage cookie with new apps.
     agent_url: str = ""
     agent_client_secret: str = ""
+    agent_user_execution_enabled: bool = False
     session_hours: int = 12
     # 审计日志目录；留空时写入 data_dir/logs
     log_dir: Path | None = None

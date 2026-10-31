@@ -159,6 +159,15 @@ class UserSession(SQLModel, table=True):
     expires_at: float
 
 
+class AgentGrant(SQLModel, table=True):
+    """Explicit expiring execution permission, independent of login."""
+    __tablename__ = "agent_grant"
+    user_id: str = Field(primary_key=True, foreign_key="user.id", ondelete="CASCADE")
+    expires_at: float
+    granted_by: str
+    updated_at: float
+
+
 class AgentSession(SQLModel, table=True):
     __tablename__ = "agent_session"
     token_hash: str = Field(primary_key=True)

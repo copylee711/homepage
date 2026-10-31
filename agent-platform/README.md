@@ -12,9 +12,11 @@ Homepage 不给新应用扩大主站 Cookie 的域或路径。
 Caddy 转发至 xa 时只保留两个 ai 专属 Cookie，剥离既有 Cloud 兼容会话 Cookie，避免把主站会话交给 Agent 服务。
 
 每次访问重新检查原会话、账户停用状态与当前角色。退出原会话、修改密码撤销会话、删除账户时，
-关联 Agent 会话级联失效。任务流每 15 秒重新检查权限，失败即中止。应用退出只撤销当前 Agent 会话。
-第一阶段仅管理员执行任务；普通用户能完成登录，但没有执行、供应商设置或连接测试权限。
-后续普通用户授权须同时完成独立容器隔离，不能直接给共用 runner 开放权限。QQ Bot 不属于此服务。
+关联 Agent 会话级联失效。任务流每 5 秒重新检查权限，失败即中止。应用退出只撤销当前 Agent 会话。
+管理员在侧栏“用户执行授权”按账户授予 1、7 或 30 天权限，或撤销授权。普通用户默认无权限；
+登录、绑定 GitHub 均不会自动授予执行权限。供应商配置、连接测试和用户授权管理始终仅管理员可用。
+后端 `COPYLEE_AGENT_USER_EXECUTION_ENABLED` 默认 false；必须完成本文权限和沙箱测试后才设为 true。
+关闭此开关立即拒绝新的普通用户执行请求，已有任务在权限复检/租约失效后停止。QQ Bot 不属于此服务。
 
 ## 目录与敏感数据
 
@@ -25,24 +27,42 @@ Caddy 转发至 xa 时只保留两个 ai 专属 Cookie，剥离既有 Cloud 兼�
 - `.env.example`、`Caddyfile.example`、`*.service.example`：配置模板；必须按实际环境生成。
 - 服务器 `.env`：客户端密钥、内部 runner 密钥、OpenCode Go 密钥，root 0600，禁止提交。
 - `data/providers.json`、`data/agent/models.json`：管理员保存的供应商密钥，服务用户 0600；不回显给浏览器。
-- `data/sessions/<用户哈希>/<对话 UUID>.jsonl`：Pi 会话；`workspace/<用户哈希>/`：持久化工作区。
+- `data/sessions/<用户哈希>/<对话 UUID>.jsonl`：Pi 会话；`/var/lib/copylee-sandboxes/<用户哈希>.img`：256 MiB 持久化工作区（主机端，不在 runner 中）。
   两者以及 `secrets/` 均被 Git 和 Docker 构建上下文忽略。备份这些目录时按敏感数据处理。
 
-runner 使用 UID 1000、只读根文件系统、全部 capability 删除、no-new-privileges、2 CPU、2 GiB 内存
-及进程数限制。管理员 Agent 可执行容器内命令，有当前模型的访问权限；隔离范围是容器，不是额外的
-虚拟机。首次部署不要挂载个人 SSH、GitHub、云服务或生产数据库密钥。
+Pi 在受信 runner 中调用模型；禁用默认内置工具和自动扩展，只注册固定 `sandbox-extension.ts` 的
+read/write/edit/bash。runner 不挂载任何用户工作区，模型不能通过工具读写 runner 文件。
+扩展的所有文件和命令操作均经 host broker 转发进用户自己的临时 Docker 容器，四种工具没有本地回退。
+沙箱容器 network=none、UID 1000、只读根、cap_drop ALL、no-new-privileges、256 MiB 内存、0.5 CPU、
+48 PIDs；不含模型密钥、服务密钥、执行租约、Docker socket、宿主机配置或其他用户挂载。
+每次工具调用结束删除整个容器，后台/脱离进程也会终止；只有 /workspace 持久化。单条命令最多 60 秒，
+输出/单次文件读取最多 1 MiB，临时目录 16 MiB。沙箱没有网络，无法下载依赖或访问外部 API。
+每个用户的工作区是独立的 256 MiB ext4 镜像，同时限制数据量与 inode 数；最多 16 个用户镜像（约 4 GiB）。
+最多同时运行 4 个工具，同用户并行工具自动串行，每用户同时只允许一个任务。
+
+broker 是主机 root 控制面，拥有有限的固定 Docker 操作和 loop mount 权限。不能把它或 Docker socket
+挂进 runner/sandbox；仅监听 Compose 私有网关，校验网段和服务密钥。Pi 只拿到绑定用户的随机短期租约，
+不能指定用户、镜像、容器参数、主机路径或网络。网关每 5 秒重新鉴权并续租，租约最多 20 秒；撤权、
+停用、登出和账户服务故障停止续租，broker 独立杀掉过期工具。撤销按钮还会主动取消该用户所有任务。
+容器仍共享主机内核，并非虚拟机级隔离。
 
 ## 部署
 
 在 xa 将仓库放到 `/opt/homepage`，复制 `.env.example` 为 `.env`，填入独立随机密钥和模型密钥。
 在 gz `/etc/copylee/backend.env` 设置 `COPYLEE_AGENT_URL=https://ai.copylee.cn` 以及相同的
-`COPYLEE_AGENT_CLIENT_SECRET`，部署并迁移 Homepage 后端（迁移 0019）。
+`COPYLEE_AGENT_CLIENT_SECRET`，部署并迁移 Homepage 后端（迁移 0020）。测试放行前保持 `COPYLEE_AGENT_USER_EXECUTION_ENABLED=false`。
 
 ```sh
 cd /opt/homepage/agent-platform
-install -d -o 1000 -g 1000 -m 700 data workspace
+install -d -o 1000 -g 1000 -m 700 data
 chmod 600 .env
 docker compose build
+docker build -t copylee-agent-sandbox:latest -f Dockerfile.sandbox ..
+# 安装 agent-sandbox.service.example；将 sandbox.env.example 生成为
+# /etc/copylee-agent-sandbox.env，root 0600，与 Compose 共用独立 SANDBOX_SECRET。
+# 需要主机已有 docker、python3、e2fsprogs、mount；不向用户沙箱提供这些主机权限。
+systemctl daemon-reload
+systemctl enable --now agent-sandbox
 docker compose up -d
 docker compose ps
 ```
@@ -83,7 +103,7 @@ Gemini 协议。未填写密钥表示保留原值，修改地址时必须重新�
 
 “测试连接”调用 `/api/providers/test`，实际发送短模型请求，返回 HTTP 状态、耗时与直连/Mihomo
 路线；不返回上游错误正文或密钥。HTTP 成功但响应格式不匹配也算失败。测试可能消耗少量用量。
-只有已提供密钥的供应商才能完成实际调用验证，预设本身不代表已验证账户权限。
+只有管理员可调用这些接口；执行授权不包含模型配置权限。只有已提供密钥的供应商才能完成实际调用验证，预设本身不代表已验证账户权限。
 
 代理勾选后只影响对应供应商的 Pi 进程和连接测试。`agent-proxy.service.example` 将私有 Compose
 网段 `192.168.84.0/24` 的 `192.168.84.1:17890` 转发到宿主机回环 Mihomo `127.0.0.1:7890`；
@@ -105,3 +125,22 @@ cd backend && uv run pytest tests/test_agent_sso.py -q
 参考：[Pi RPC](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md)、
 [OpenCode 的 Pi 配置](https://opencode.ai/console/harnesses/pi)、
 [Caddy forward_auth](https://caddyserver.com/docs/caddyfile/directives/forward_auth)。
+
+
+## 沙箱上线放行与迁移
+
+先保持普通用户执行开关 false，在候选 runner 中运行下列真实容器验收（会产生两个独立测试工作区）：
+
+```sh
+docker exec -i RUNNER_CONTAINER node --input-type=module < tests/sandbox-live.mjs
+```
+
+验收覆盖 broker 认证、用户伪造、跨用户访问、凭据与 socket 缺失、禁网、capabilities、UID、资源和磁盘
+配额、撤权杀掉脱离子进程、20 秒租约超时。还须实测 Pi 四个工具、会话恢复，以及网关普通用户越权、
+授权/撤权/到期和任务中途撤权。在上述测试通过后才启用普通用户开关，仍然需要逐个账户授权。
+
+从旧共用 runner 升级时，先停止活动任务，将旧 `workspace/<hash>/` 的文件复制到对应镜像挂载点
+（保留符号链接本身，不跟随链接），保留旧目录作备份；新 runner 不再挂载旧目录。
+重启后 broker 按需重新挂载镜像，工作区文件保留。备份时先停止任务、卸载镜像或使用一致性快照；
+不能直接复制正在写入的 ext4 镜像。撤权保留文件，不会自动删除镜像；容量回收必须核对账户哈希后由
+运维停止任务、卸载对应挂载点，再归档/删除对应镜像。不要递归操作用户控制的路径。

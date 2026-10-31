@@ -4,6 +4,7 @@ import { mkdir, readdir, stat, open } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { body, equal, fail, json, required } from './shared.mjs';
 import { publicProviders, saveProvider, activeProvider, testProvider, proxyEnvironment, loadProviders } from './providers.mjs';
+import { sandbox } from './sandbox-client.mjs';
 
 const secret = required('RUNNER_SECRET');
 const sessions = new Map();
@@ -12,14 +13,21 @@ const model = process.env.PI_MODEL || 'opencode-go/deepseek-v4.1-flash';
 class Pi {
   constructor(user, thread) { this.user = user; this.thread = thread; this.key = user + ':' + thread; this.pending = new Map(); this.busy = false; this.buffer = ''; }
   async start() {
-    const cwd = `/workspace/${this.user}`;
+    // Never mount or load instructions/extensions from an untrusted tool workspace.
+    const cwd = `/tmp/pi/${this.user}`;
     await mkdir(cwd, { recursive: true, mode: 0o700 });
     await mkdir(`/data/sessions/${this.user}`, { recursive: true, mode: 0o700 });
     const config = await activeProvider();
     this.secrets = [(process.env.OPENCODE_API_KEY || ''), ...(await loadProviders()).providers.map(item => item.apiKey || '')].filter(key => key.length >= 8);
-    const env = proxyEnvironment(config.proxy); delete env.RUNNER_SECRET;
+    this.lease = (await sandbox('/lease', this.user)).token;
+    const env = proxyEnvironment(config.proxy); delete env.RUNNER_SECRET; delete env.SANDBOX_SECRET;
+    env.SANDBOX_URL = process.env.SANDBOX_URL || 'http://192.168.84.1:18082';
+    env.SANDBOX_LEASE = this.lease;
+    // Private broker traffic must never use the model's Mihomo proxy.
+    env.NO_PROXY = env.no_proxy = '127.0.0.1,localhost,192.168.84.1';
     this.proc = spawn('pi', ['--mode', 'rpc', '--model', config.id + '/' + config.model, '--session', `/data/sessions/${this.user}/${this.thread}.jsonl`,
-      '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+      '--no-builtin-tools', '--no-extensions', '-e', '/opt/pi/sandbox-extension.ts',
+      '--no-skills', '--no-prompt-templates', '--no-themes'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
     this.proc.stderr.on('data', () => {}); // Diagnostics can contain provider details; never log them.
     this.proc.stdout.setEncoding('utf8');
     this.proc.stdout.on('data', chunk => {
@@ -68,9 +76,10 @@ class Pi {
   }
   async prompt(res, message) {
     if (this.busy) fail(409, '当前任务尚未结束，请先停止或等待完成');
+    if ([...sessions.values()].some(entry => entry.pi !== this && entry.pi.user === this.user && entry.pi.busy)) fail(409, '每个用户同时只能运行一个任务');
     this.busy = true; this.output = res;
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
-    const abort = () => { if (this.busy && this.output === res) void this.command('abort').catch(() => {}); };
+    const abort = () => { if (this.busy && this.output === res) void cancel(this.user).catch(() => this.proc?.kill()); };
     res.once('close', abort);
     this.deadline = setTimeout(abort, 10 * 60000);
     try { await this.command('prompt', { message }); }
@@ -81,6 +90,11 @@ async function instance(user, thread) {
   if (configuring) fail(409, '正在更新供应商，请稍后重试');
   const key = user + ':' + thread;
   let entry = sessions.get(key);
+  if (entry) {
+    await entry.ready;
+    try { await sandbox('/renew', user, entry.pi.lease); }
+    catch { entry.pi.proc?.kill(); sessions.delete(key); entry = undefined; }
+  }
   if (!entry) {
     if (sessions.size >= 4) {
       const idle = [...sessions.values()].filter(item => !item.pi.busy).sort((a, b) => a.touched - b.touched)[0];
@@ -93,6 +107,13 @@ async function instance(user, thread) {
   }
   entry.touched = Date.now();
   await entry.ready; return entry.pi;
+}
+async function cancel(user) {
+  // Kill model generation AND every tool descendant, including detached processes.
+  for (const [key, entry] of sessions) {
+    if (entry.pi.user === user) { sessions.delete(key); entry.pi.proc?.kill(); }
+  }
+  await sandbox('/cancel', user);
 }
 async function chats(user) {
   const directory = `/data/sessions/${user}`;
@@ -125,6 +146,13 @@ export const server = createServer(async (req, res) => {
     if (req.method !== 'POST') fail(405, '请求方法不支持');
     const input = await body(req);
     if (!/^[a-f0-9]{64}$/.test(input.user || '')) fail(422, '用户标识无效');
+    if (req.url === '/cancel') { await cancel(input.user); return json(res, 200, { ok: true }); }
+    if (req.url === '/renew') {
+      for (const entry of sessions.values()) {
+        if (entry.pi.user === input.user && entry.pi.busy) await sandbox('/renew', input.user, entry.pi.lease);
+      }
+      return json(res, 200, { ok: true });
+    }
     if (req.url === '/providers') return json(res, 200, await publicProviders());
     if (req.url === '/providers/test') return json(res, 200, await testProvider(input.config));
     if (req.url === '/providers/save') {
@@ -145,7 +173,7 @@ export const server = createServer(async (req, res) => {
       const result = await pi.command('get_messages');
       return json(res, 200, { messages: JSON.parse(pi.mask(JSON.stringify(result.messages || []))), busy: pi.busy });
     }
-    if (req.url === '/abort') { await pi.command('abort'); return json(res, 200, { ok: true }); }
+    if (req.url === '/abort') { await cancel(input.user); return json(res, 200, { ok: true }); }
     if (req.url === '/prompt') {
       if (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 20000) fail(422, '任务内容无效');
       return await pi.prompt(res, input.message);

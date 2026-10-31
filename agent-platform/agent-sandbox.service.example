@@ -1,0 +1,18 @@
+[Unit]
+Description=Copy Lee restricted sandbox broker
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/copylee-agent-sandbox.env
+ExecStart=/usr/bin/python3 /opt/homepage/agent-platform/sandbox-broker.py
+Restart=always
+RestartSec=3
+UMask=0077
+# Keep the host mount namespace: Docker must see the bounded ext4 workspaces.
+# This privileged control plane is never mounted or reachable from tool sandboxes.
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

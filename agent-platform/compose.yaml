@@ -41,10 +41,10 @@ services:
     environment:
       RUNNER_SECRET: ${RUNNER_SECRET:?set RUNNER_SECRET}
       OPENCODE_API_KEY: ${OPENCODE_GO_API_KEY:?set OPENCODE_GO_API_KEY}
+      SANDBOX_SECRET: ${SANDBOX_SECRET:?set SANDBOX_SECRET}
       PI_MODEL: ${PI_MODEL:-opencode-go/deepseek-v4.1-flash}
     volumes:
       - ./data:/data
-      - ./workspace:/workspace
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
