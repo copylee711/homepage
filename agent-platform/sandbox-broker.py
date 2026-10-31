@@ -22,6 +22,10 @@ slots = threading.BoundedSemaphore(4)
 CAPACITY = 16
 
 
+class Conflict(ValueError):
+    """The user must explicitly confirm before an existing file is replaced."""
+
+
 def docker(*args, **kwargs):
     return subprocess.run(["docker", *args], capture_output=True, timeout=90, **kwargs)
 
@@ -52,11 +56,16 @@ def workspace(user):
 
 
 def run_tool(user, value, lease):
-    if value.get("op") not in {"read", "write", "mkdir", "access", "bash"}:
+    if value.get("op") not in {"read", "write", "mkdir", "access", "bash", "list", "file-read", "file-write"}:
         raise ValueError("工具不支持")
     lock = locks.setdefault(user, threading.Lock())
+    browsing = value.get("op") in {"list", "file-read", "file-write"}
     # Pi may issue parallel tool calls; serialize them within the user's workspace.
-    if not lock.acquire(timeout=65):
+    # File browsing never waits behind a long model tool and never cancels it.
+    if browsing:
+        if not lock.acquire(blocking=False):
+            raise ValueError("工作区正在执行任务，请稍后刷新")
+    elif not lock.acquire(timeout=65):
         raise ValueError("等待当前用户的工具执行超时")
     if not slots.acquire(blocking=False):
         lock.release()
@@ -86,6 +95,8 @@ def run_tool(user, value, lease):
                 raise ValueError("工具输出超限")
             result = json.loads(output)
             if "error" in result:
+                if result["error"].startswith("文件已存在"):
+                    raise Conflict(result["error"])
                 raise ValueError(result["error"])
             return result
         except (subprocess.TimeoutExpired, json.JSONDecodeError):
@@ -107,7 +118,7 @@ class Handler(BaseHTTPRequestHandler):
             if ipaddress.ip_address(self.client_address[0]) not in ipaddress.ip_network("192.168.84.0/24"):
                 return self.reply(403, {"error": "来源无效"})
             size = int(self.headers.get("Content-Length", 0))
-            if not 0 < size <= 65536:
+            if not 0 < size <= 512 * 1024:
                 return self.reply(413, {"error": "请求过大"})
             value = json.loads(self.rfile.read(size))
             token = self.headers.get("Authorization", "").removeprefix("Bearer ")
@@ -141,6 +152,8 @@ class Handler(BaseHTTPRequestHandler):
                     cancel(user)
                     return self.reply(200, {"ok": True})
             return self.reply(404, {"error": "接口不存在"})
+        except Conflict as error:
+            self.reply(409, {"error": str(error)[:500]})
         except ValueError as error:
             self.reply(400, {"error": str(error)[:500]})
         except Exception:

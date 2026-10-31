@@ -1,8 +1,378 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Agent · Copy Lee</title><link rel="stylesheet" href="/tokens.css"><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head><body>
-<div class="shell"><aside id="sidebar" class="sidebar" aria-label="对话导航"><a class="brand" href="https://copylee.cn"><span class="brand-mark">CL</span><span>Copy Lee <small>AGENT</small></span></a><button id="new-chat" class="new-chat" type="button">＋ 新对话</button><p class="section-label">最近对话</p><nav id="chats" class="chats" aria-label="最近对话"><p class="muted">正在读取…</p></nav><div class="sidebar-bottom"><button id="grants-button" type="button" hidden>用户执行授权 ↗</button><button id="settings-button" type="button" hidden>供应商设置 ↗</button><div class="account"><span id="avatar" class="avatar">·</span><div><strong id="user-name">读取账户…</strong><small id="role-label">Homepage 统一登录</small></div><button id="logout" type="button" aria-label="退出 Agent 登录">↪</button></div></div></aside><button id="sidebar-shade" class="sidebar-shade" type="button" aria-label="收起对话导航" hidden></button>
-<main class="main"><header class="topbar"><button id="menu-toggle" type="button" class="icon-button" aria-label="展开对话导航" aria-expanded="false" aria-controls="sidebar">☰</button><div><span class="eyebrow">PI WORKSPACE</span><span id="model-name" class="model-name">DeepSeek V4.1 Flash</span></div><button id="theme" type="button" class="icon-button" aria-label="切换深浅主题">◐</button></header><p id="notice" class="notice" role="status" hidden></p>
-<div id="conversation" class="conversation" aria-label="对话内容"><section id="welcome" class="welcome"><span class="welcome-mark" aria-hidden="true">✳</span><p class="eyebrow">A LITTLE SPACE TO MAKE THINGS</p><h1>今天想完成什么？</h1><p>把想法变成下一步。Pi 可以在你的工作区内<br>读写文件、运行命令，并保留每一次对话。</p><div class="suggestions"><button type="button" data-prompt="查看当前工作区，告诉我目录结构和可以开始的工作。">探索工作区<span>从已有文件开始 ↗</span></button><button type="button" data-prompt="帮我写一个简洁的 Python 脚本，在当前工作区生成一份示例 Markdown 项目说明。">写一个小工具<span>把想法落成文件 ↗</span></button><button type="button" data-prompt="先帮我梳理任务计划，等我确认具体目标后再修改文件。">一起理清思路<span>先讨论，再动手 ↗</span></button></div></section><div id="messages" class="messages"></div></div>
-<footer class="composer-area"><form id="prompt-form" class="composer"><label class="sr-only" for="prompt">给 Pi 的任务</label><textarea id="prompt" rows="3" maxlength="20000" placeholder="描述任务，或接着聊…" required></textarea><div class="composer-actions"><span id="task-state">管理员工作区</span><button id="send" class="send" type="submit" aria-label="发送任务">↑</button><button id="stop" class="stop" type="button" hidden>停止生成 ■</button></div></form><p class="composer-note">Pi 可在隔离的工作区执行命令。请在重要操作后检查结果。<span>Shift + Enter 换行</span></p></footer></main></div>
-<dialog id="settings" class="settings-dialog" aria-labelledby="settings-title"><div class="dialog-heading"><div><p class="eyebrow">MODEL CONNECTIONS</p><h2 id="settings-title">供应商设置</h2></div><button id="close-settings" type="button" class="icon-button" aria-label="关闭供应商设置">×</button></div><p class="muted">选择常见供应商，或接入兼容 API。保存后用于后续任务。</p><form id="provider-form"><label>供应商<select id="provider-select"></select></label><div class="field-grid"><label>配置标识<input id="provider-id" required maxlength="40" pattern="[a-z][a-z0-9-]{0,39}" placeholder="my-provider"></label><label>显示名称<input id="provider-name" required maxlength="60"></label></div><label>API 协议<select id="provider-api"><option value="openai-completions">OpenAI Chat Completions 兼容</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic Messages</option><option value="google-generative-ai">Google Gemini</option></select></label><label>API 地址<input id="provider-url" type="url" required placeholder="https://api.example.com/v1"></label><label>模型 ID<input id="provider-model" required maxlength="160" placeholder="填写供应商提供的模型 ID"></label><label>API 密钥<input id="provider-key" type="password" autocomplete="off" maxlength="1024" placeholder="填写新密钥，留空保留已保存的密钥"></label><button id="show-key" type="button" class="text-button" aria-pressed="false">显示密钥</button><p id="key-help" class="hint">密钥仅保存在服务端，不会回显，也不会保存到浏览器。</p><label class="check"><input id="provider-proxy" type="checkbox">通过 xa 的 Mihomo 代理连接</label><p class="hint">“测试连接”会发送一条短消息，验证网络、密钥与模型权限，可能消耗少量用量。</p><p id="provider-status" class="provider-status" role="status"></p><div class="dialog-actions"><button id="test-provider" type="button" class="secondary">测试连接</button><button id="save-provider" type="submit" class="primary">保存并使用</button></div></form></dialog>
-<dialog id="grants" class="settings-dialog" aria-labelledby="grants-title"><div class="dialog-heading"><div><p class="eyebrow">WORKSPACE ACCESS</p><h2 id="grants-title">用户执行授权</h2></div><button id="close-grants" type="button" class="icon-button" aria-label="关闭用户执行授权">×</button></div><p class="muted">仅向你信任的账户授权。每个用户拥有独立工作区；授权不会开放供应商设置。</p><label>搜索账户<input id="grant-search" type="search" placeholder="昵称或邮箱" maxlength="160"></label><p id="grant-status" role="status"></p><div id="grant-users" class="grant-users"></div><p class="hint">最多显示最近 500 个账户。撤销会停止该用户的任务，保留对话与工作区文件。</p><button id="reload-grants" type="button" class="secondary">刷新账户列表</button></dialog></body></html>
+<html lang="zh-CN" data-theme="light" data-sidebar="open">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Copy Lee Agent：在独立沙箱中完成文件与代码任务。">
+  <title>Agent — Copy Lee</title>
+  <script src="/js/theme-init.js"></script>
+  <script type="module" src="/js/main.js"></script>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/tokens.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#prompt">跳到任务输入</a>
+  <div id="app" class="app">
+    <aside id="sidebar" class="sidebar" aria-label="对话导航">
+      <div class="sidebar-head">
+        <a class="brand" href="/" aria-label="Copy Lee Agent 首页">
+          <span class="brand-mark" aria-hidden="true">CL</span>
+          <span class="brand-text"><span class="brand-name">Copy Lee</span><span class="brand-sub">Agent</span></span>
+        </a>
+        <button id="sidebar-collapse" type="button" class="icon-button" aria-label="收起对话导航" title="收起导航">
+          <span data-icon="panel-left"></span>
+        </button>
+      </div>
+
+      <button id="new-chat" type="button" class="new-chat" disabled>
+        <span data-icon="plus" data-size="18"></span>
+        <span>新对话</span>
+      </button>
+
+      <div class="sidebar-search">
+        <span class="search-icon" data-icon="search" data-size="16" aria-hidden="true"></span>
+        <label class="sr-only" for="chat-search">搜索对话</label>
+        <input id="chat-search" type="search" placeholder="搜索对话" autocomplete="off" spellcheck="false" maxlength="80">
+        <button id="clear-chat-search" type="button" class="search-clear" aria-label="清除搜索" title="清除搜索" hidden>
+          <span data-icon="x" data-size="14"></span>
+        </button>
+      </div>
+
+      <div class="chat-tabs" role="group" aria-label="对话筛选">
+        <button id="view-active" type="button" class="chat-tab" aria-pressed="true">对话</button>
+        <button id="view-archived" type="button" class="chat-tab" aria-pressed="false">已归档</button>
+      </div>
+
+      <nav id="chat-list" class="chat-list" aria-label="对话列表">
+        <div class="list-state"><span class="spinner" aria-hidden="true"></span><span>正在读取对话…</span></div>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="account">
+          <span id="account-avatar" class="account-avatar" aria-hidden="true">·</span>
+          <span class="account-copy">
+            <strong id="account-name">读取账户…</strong>
+            <small id="account-role">Homepage 统一登录</small>
+          </span>
+          <button id="logout" type="button" class="icon-button" aria-label="退出 Agent 登录" title="退出登录">
+            <span data-icon="logout"></span>
+          </button>
+        </div>
+        <div class="sidebar-links">
+          <button id="shortcuts-button" type="button" class="text-link">
+            <span data-icon="keyboard" data-size="15"></span><span>快捷键</span>
+          </button>
+          <button id="grants-button" type="button" class="text-link" hidden>
+            <span data-icon="users" data-size="15"></span><span>执行授权</span>
+          </button>
+          <button id="settings-button" type="button" class="text-link" hidden>
+            <span data-icon="settings" data-size="15"></span><span>供应商</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <div id="scrim" class="scrim" hidden aria-hidden="true"></div>
+
+    <main id="main" class="main">
+      <header class="topbar">
+        <button id="menu-toggle" type="button" class="icon-button" aria-label="收起对话导航" aria-expanded="true" aria-controls="sidebar" title="显示或收起导航">
+          <span data-icon="menu"></span>
+        </button>
+        <div class="chat-heading">
+          <h1 id="chat-title">新对话</h1>
+          <p id="chat-subtitle">独立沙箱 · 无网络</p>
+        </div>
+        <div class="topbar-actions">
+          <span id="model-chip" class="model-chip">Pi 模型</span>
+          <button id="chat-menu" type="button" class="icon-button" aria-label="对话操作" aria-haspopup="menu" aria-expanded="false" title="对话操作" disabled>
+            <span data-icon="more-horizontal"></span>
+          </button>
+          <button id="theme-toggle" type="button" class="icon-button" aria-label="切换深浅主题" title="切换深浅主题">
+            <span data-icon="moon"></span>
+          </button>
+          <button id="workspace-toggle" type="button" class="icon-button" aria-label="显示工作区" aria-expanded="false" aria-controls="workspace" title="工作区" hidden>
+            <span data-icon="panel-right"></span>
+          </button>
+        </div>
+      </header>
+
+      <div id="connection-banner" class="connection-banner" role="status" hidden>
+        <span data-icon="alert-circle" data-size="15"></span>
+        <span>网络已断开。已发送的任务可能仍在沙箱中运行。</span>
+      </div>
+
+      <div id="notice" class="notice" role="status" hidden>
+        <span data-icon="info" data-size="16" aria-hidden="true"></span>
+        <span id="notice-text" class="notice-text"></span>
+        <button id="notice-action" type="button" class="text-button" hidden></button>
+        <button id="notice-close" type="button" class="notice-close" aria-label="关闭提示" title="关闭提示">
+          <span data-icon="x" data-size="14"></span>
+        </button>
+      </div>
+
+      <div class="stage">
+        <div id="conversation" class="conversation" tabindex="0" aria-label="对话内容">
+          <section id="welcome" class="welcome" aria-labelledby="welcome-title">
+            <span class="welcome-mark" aria-hidden="true"><span data-icon="sparkle" data-size="22"></span></span>
+            <h2 id="welcome-title">开始一段新对话</h2>
+            <p id="welcome-text">Pi 在隔离的工作区中读写文件、运行命令。沙箱没有网络，任务最长运行 10 分钟。</p>
+            <div id="starters" class="starters">
+              <button type="button" class="starter" data-prompt="查看当前工作区，说明目录结构和可以开始的工作。">
+                <span class="starter-icon" data-icon="folder" data-size="17" aria-hidden="true"></span>
+                <span class="starter-title">查看工作区</span>
+                <span class="starter-hint">先了解已有文件</span>
+              </button>
+              <button type="button" class="starter" data-prompt="帮我写一个简洁的 Python 脚本，在当前工作区生成一份示例 Markdown 项目说明。">
+                <span class="starter-icon" data-icon="terminal" data-size="17" aria-hidden="true"></span>
+                <span class="starter-title">创建示例文件</span>
+                <span class="starter-hint">把想法落成一个文件</span>
+              </button>
+              <button type="button" class="starter" data-prompt="先帮我梳理任务计划，等我确认具体目标后再修改文件。">
+                <span class="starter-icon" data-icon="message" data-size="17" aria-hidden="true"></span>
+                <span class="starter-title">先梳理计划</span>
+                <span class="starter-hint">讨论清楚再动手</span>
+              </button>
+            </div>
+          </section>
+          <div id="messages" class="messages" aria-label="消息记录"></div>
+        </div>
+
+        <button id="jump-latest" type="button" class="jump-latest" hidden>
+          <span data-icon="arrow-down" data-size="15"></span><span>回到最新</span>
+        </button>
+
+        <aside id="workspace" class="workspace" aria-label="工作区文件" hidden inert>
+          <header class="workspace-head">
+            <div class="workspace-title">
+              <h2>工作区</h2>
+              <p>仅你的沙箱 <code>/workspace</code></p>
+            </div>
+            <div class="workspace-actions">
+              <button id="ws-upload" type="button" class="icon-button" aria-label="上传文本文件" title="上传文本文件，最大 256 KiB">
+                <span data-icon="upload"></span>
+              </button>
+              <button id="ws-refresh" type="button" class="icon-button" aria-label="刷新文件列表" title="刷新">
+                <span data-icon="refresh"></span>
+              </button>
+              <button id="workspace-close" type="button" class="icon-button" aria-label="关闭工作区" title="关闭工作区">
+                <span data-icon="x"></span>
+              </button>
+            </div>
+          </header>
+          <div class="workspace-toolbar">
+            <button id="ws-up" type="button" class="icon-button small" aria-label="返回上级文件夹" title="上一级" disabled>
+              <span data-icon="chevron-left"></span>
+            </button>
+            <nav id="ws-crumb" class="breadcrumb" aria-label="当前目录">
+              <button type="button" class="crumb">工作区</button>
+            </nav>
+          </div>
+          <div id="ws-status" class="workspace-status" role="status"></div>
+          <div id="ws-list" class="file-list" aria-label="文件列表"></div>
+          <input id="ws-file-input" type="file" accept=".txt,.md,.markdown,.json,.csv,.tsv,.yaml,.yml,.toml,.ini,.conf,.log,.py,.js,.mjs,.cjs,.ts,.tsx,.jsx,.css,.html,.xml,.svg,.sh,.sql,.rs,.go,.java,.c,.h,.cpp,.rb,.php,.env.example" hidden>
+          <section id="ws-preview" class="workspace-preview" aria-labelledby="ws-preview-title" hidden>
+            <header class="preview-head">
+              <div class="preview-title">
+                <h3 id="ws-preview-title">文件</h3>
+                <p id="ws-preview-meta"></p>
+              </div>
+              <button id="ws-close-preview" type="button" class="icon-button small" aria-label="关闭文件预览" title="关闭预览">
+                <span data-icon="x" data-size="16"></span>
+              </button>
+            </header>
+            <pre id="ws-preview-body" class="preview-body"></pre>
+            <p id="ws-preview-note" class="preview-note" hidden></p>
+            <footer class="preview-actions">
+              <button id="ws-insert" type="button" class="btn btn-quiet">插入路径</button>
+              <button id="ws-download" type="button" class="btn btn-quiet">
+                <span data-icon="download" data-size="15"></span><span>下载</span>
+              </button>
+            </footer>
+          </section>
+          <footer class="workspace-foot">
+            <p>只读取你的私有工作区。文件浏览不会停止正在运行的模型任务。</p>
+            <p>支持 UTF-8 文本预览；单文件下载上限 1 MiB，上传上限 256 KiB。</p>
+          </footer>
+        </aside>
+      </div>
+
+      <footer class="composer-area">
+        <form id="prompt-form" class="composer" novalidate>
+          <label class="sr-only" for="prompt">给 Pi 的任务</label>
+          <textarea id="prompt" rows="1" maxlength="20000" placeholder="描述任务，或接着聊…" aria-describedby="composer-note"></textarea>
+          <div class="composer-bar">
+            <span id="composer-count" class="composer-count" aria-live="polite"></span>
+            <span id="task-state" class="task-state">正在读取账户…</span>
+            <button id="send" type="submit" class="send" aria-label="发送任务" title="发送任务" disabled>
+              <span data-icon="arrow-up" data-size="17"></span>
+              <span class="send-label">发送</span>
+            </button>
+            <button id="stop" type="button" class="stop" hidden>
+              <span data-icon="square" data-size="14"></span>
+              <span>停止</span>
+            </button>
+          </div>
+        </form>
+        <p id="composer-note" class="composer-note">
+          <span>Pi 可在隔离沙箱中执行命令，请在重要操作后检查结果。</span>
+          <span>Enter 发送 · Shift+Enter 换行</span>
+        </p>
+      </footer>
+    </main>
+
+    <div id="toasts" class="toasts" aria-label="通知"></div>
+    <div id="sr-status" class="sr-only" role="status" aria-live="polite"></div>
+  </div>
+
+  <dialog id="settings-dialog" class="dialog" aria-labelledby="settings-title">
+    <div class="dialog-heading">
+      <div>
+        <h2 id="settings-title">供应商设置</h2>
+        <p>选择常见供应商，或接入兼容 API。保存后用于后续任务。</p>
+      </div>
+      <button id="close-settings" type="button" class="icon-button" aria-label="关闭供应商设置" title="关闭">
+        <span data-icon="x"></span>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <form id="provider-form" novalidate>
+        <label class="field">
+          <span class="field-label">供应商</span>
+          <select id="provider-select"></select>
+        </label>
+        <div class="field-grid">
+          <label class="field">
+            <span class="field-label">配置标识</span>
+            <input id="provider-id" maxlength="40" placeholder="my-provider" autocomplete="off" spellcheck="false" aria-describedby="provider-id-error">
+            <span id="provider-id-error" class="field-error" hidden></span>
+          </label>
+          <label class="field">
+            <span class="field-label">显示名称</span>
+            <input id="provider-name" maxlength="60" autocomplete="off" aria-describedby="provider-name-error">
+            <span id="provider-name-error" class="field-error" hidden></span>
+          </label>
+        </div>
+        <label class="field">
+          <span class="field-label">API 协议</span>
+          <select id="provider-api">
+            <option value="openai-completions">OpenAI Chat Completions 兼容</option>
+            <option value="openai-responses">OpenAI Responses</option>
+            <option value="anthropic-messages">Anthropic Messages</option>
+            <option value="google-generative-ai">Google Gemini</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label">API 地址</span>
+          <input id="provider-url" type="url" inputmode="url" placeholder="https://api.example.com/v1" autocomplete="off" spellcheck="false" aria-describedby="provider-url-error">
+          <span id="provider-url-error" class="field-error" hidden></span>
+        </label>
+        <label class="field">
+          <span class="field-label">模型 ID</span>
+          <input id="provider-model" maxlength="160" placeholder="填写供应商提供的模型 ID" autocomplete="off" spellcheck="false" aria-describedby="provider-model-error">
+          <span id="provider-model-error" class="field-error" hidden></span>
+        </label>
+        <div class="field">
+          <label class="field-label" for="provider-key">API 密钥</label>
+          <div class="key-row">
+            <input id="provider-key" type="password" maxlength="1024" placeholder="填写新密钥，留空保留已保存的密钥" autocomplete="new-password" spellcheck="false" aria-describedby="key-help provider-key-error">
+            <button id="show-key" type="button" class="btn btn-quiet" aria-pressed="false">显示密钥</button>
+          </div>
+          <p id="key-help" class="hint">密钥仅保存在服务端，不会回显，也不会写入浏览器存储。</p>
+          <span id="provider-key-error" class="field-error" hidden></span>
+        </div>
+        <label class="check">
+          <input id="provider-proxy" type="checkbox">
+          <span>通过 xa 的 Mihomo 代理连接</span>
+        </label>
+        <p class="hint">“测试连接”会发送一条短消息，验证网络、密钥与模型权限，可能消耗少量用量。</p>
+        <p id="provider-status" class="provider-status" role="status"></p>
+        <div class="dialog-actions">
+          <button id="test-provider" type="button" class="btn btn-quiet">测试连接</button>
+          <button id="save-provider" type="submit" class="btn btn-solid">保存并使用</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <dialog id="grants-dialog" class="dialog" aria-labelledby="grants-title">
+    <div class="dialog-heading">
+      <div>
+        <h2 id="grants-title">用户执行授权</h2>
+        <p>仅向你信任的账户授权。每个用户拥有独立工作区；授权不会开放供应商设置。</p>
+      </div>
+      <button id="close-grants" type="button" class="icon-button" aria-label="关闭用户执行授权" title="关闭">
+        <span data-icon="x"></span>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <div class="search-field">
+        <span data-icon="search" data-size="16" aria-hidden="true"></span>
+        <label class="sr-only" for="grant-search">搜索账户</label>
+        <input id="grant-search" type="search" placeholder="昵称或邮箱" autocomplete="off" maxlength="160">
+        <button id="clear-grant-search" type="button" class="search-clear" aria-label="清除搜索" title="清除搜索" hidden>
+          <span data-icon="x" data-size="14"></span>
+        </button>
+      </div>
+      <p id="grant-status" class="hint" role="status"></p>
+      <div id="grant-users" class="grant-users"></div>
+      <p class="hint">最多显示最近 500 个账户。撤销会停止该用户正在运行的任务，保留对话与工作区文件。</p>
+      <div class="dialog-actions">
+        <button id="reload-grants" type="button" class="btn btn-quiet">刷新账户列表</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="rename-dialog" class="dialog dialog-small" aria-labelledby="rename-title">
+    <div class="dialog-heading">
+      <div><h2 id="rename-title">重命名对话</h2><p>标题仅保存在你的账户下。</p></div>
+      <button id="close-rename" type="button" class="icon-button" aria-label="关闭重命名" title="关闭">
+        <span data-icon="x"></span>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <form id="rename-form">
+        <label class="field">
+          <span class="field-label">对话标题</span>
+          <input id="rename-input" maxlength="80" autocomplete="off" aria-describedby="rename-error">
+          <span id="rename-error" class="field-error" hidden></span>
+        </label>
+        <div class="dialog-actions">
+          <button id="cancel-rename" type="button" class="btn btn-quiet">取消</button>
+          <button id="save-rename" type="submit" class="btn btn-solid">保存</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <dialog id="confirm-dialog" class="dialog dialog-small" aria-labelledby="confirm-title">
+    <div class="dialog-heading">
+      <div><h2 id="confirm-title">确认操作</h2><p id="confirm-body"></p></div>
+      <span class="dialog-symbol" aria-hidden="true"><span data-icon="alert-triangle" data-size="20"></span></span>
+    </div>
+    <div class="dialog-body">
+      <div class="dialog-actions">
+        <button id="confirm-cancel" type="button" class="btn btn-quiet">取消</button>
+        <button id="confirm-action" type="button" class="btn btn-danger">确认</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="shortcuts-dialog" class="dialog dialog-small" aria-labelledby="shortcuts-title">
+    <div class="dialog-heading">
+      <div><h2 id="shortcuts-title">键盘快捷键</h2><p>在输入框外也可以使用。</p></div>
+      <button id="close-shortcuts" type="button" class="icon-button" aria-label="关闭快捷键" title="关闭">
+        <span data-icon="x"></span>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <div id="shortcut-list" class="shortcut-list"></div>
+    </div>
+  </dialog>
+
+  <noscript><p class="noscript">Agent 需要 JavaScript 才能运行。请启用后刷新页面。</p></noscript>
+</body>
+</html>

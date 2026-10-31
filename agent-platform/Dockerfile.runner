@@ -9,6 +9,7 @@ WORKDIR /app
 COPY agent-platform/runner.mjs agent-platform/shared.mjs ./
 COPY agent-platform/providers.mjs agent-platform/provider-test.mjs ./
 COPY agent-platform/sandbox-client.mjs agent-platform/session-limits.mjs agent-platform/session-cwd.mjs ./
+COPY agent-platform/conversations.mjs agent-platform/workspace.mjs ./
 COPY agent-platform/sandbox-extension.ts /opt/pi/sandbox-extension.ts
 USER 1000:1000
 CMD ["node", "runner.mjs"]

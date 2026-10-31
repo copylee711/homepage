@@ -1,17 +1,24 @@
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdir, readdir, stat, open } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { body, equal, fail, json, required } from './shared.mjs';
+import { body, equal, fail, json, modelLabel, required } from './shared.mjs';
 import { publicProviders, saveProvider, activeProvider, testProvider, proxyEnvironment, loadProviders } from './providers.mjs';
 import { sandbox } from './sandbox-client.mjs';
 import { sessionCapacity } from './session-limits.mjs';
 import { prepareSessionCwd } from './session-cwd.mjs';
+import { ChatStore } from './conversations.mjs';
+import { listWorkspace, previewWorkspace, downloadWorkspace, uploadWorkspace } from './workspace.mjs';
 
 const secret = required('RUNNER_SECRET');
 const sessions = new Map();
+const chats = new ChatStore({ sessionsRoot: '/data/sessions', metaRoot: '/data/chat-meta' });
 let configuring = false;
 const model = process.env.PI_MODEL || 'opencode-go/deepseek-v4.1-flash';
+async function secretValues() {
+  return [(process.env.OPENCODE_API_KEY || ''), ...(await loadProviders()).providers.map(item => item.apiKey || '')]
+    .filter(key => key.length >= 8);
+}
 class Pi {
   constructor(user, thread) { this.user = user; this.thread = thread; this.key = user + ':' + thread; this.pending = new Map(); this.busy = false; this.buffer = ''; }
   async start() {
@@ -21,7 +28,7 @@ class Pi {
     await mkdir(`/data/sessions/${this.user}`, { recursive: true, mode: 0o700 });
     await prepareSessionCwd(`/data/sessions/${this.user}/${this.thread}.jsonl`, cwd);
     const config = await activeProvider();
-    this.secrets = [(process.env.OPENCODE_API_KEY || ''), ...(await loadProviders()).providers.map(item => item.apiKey || '')].filter(key => key.length >= 8);
+    this.secrets = await secretValues();
     this.lease = (await sandbox('/lease', this.user)).token;
     const env = proxyEnvironment(config.proxy); delete env.RUNNER_SECRET; delete env.SANDBOX_SECRET;
     env.SANDBOX_URL = process.env.SANDBOX_URL || 'http://192.168.84.1:18082';
@@ -131,36 +138,12 @@ async function cancel(user) {
   }
   await sandbox('/cancel', user);
 }
-async function chats(user) {
-  const directory = `/data/sessions/${user}`;
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  const result = [];
-  for (const file of (await readdir(directory)).filter(file => /^[a-f0-9-]{36}\.jsonl$/.test(file))) {
-    const handle = await open(directory + '/' + file, 'r');
-    try {
-      const buffer = Buffer.alloc(65536), read = await handle.read(buffer, 0, buffer.length, 0);
-      let title = '新对话';
-      for (const line of buffer.subarray(0, read.bytesRead).toString().split('\n')) {
-        try {
-          const item = JSON.parse(line);
-          if (item.message?.role === 'user') {
-            const content = item.message.content;
-            title = (typeof content === 'string' ? content : content.filter(item => item.type === 'text').map(item => item.text).join(' ')).slice(0, 70);
-            break;
-          }
-        } catch {}
-      }
-      result.push({ id: file.slice(0, -6), title, updated: (await stat(directory + '/' + file)).mtimeMs });
-    } finally { await handle.close(); }
-  }
-  return result.sort((a, b) => b.updated - a.updated).slice(0, 100);
-}
 export const server = createServer(async (req, res) => {
   try {
     if (req.url === '/healthz' && req.method === 'GET') return json(res, 200, { ok: true, model });
     if (!equal(req.headers['x-runner-secret'], secret)) fail(401, '服务认证失败');
     if (req.method !== 'POST') fail(405, '请求方法不支持');
-    const input = await body(req);
+    const input = req.url === '/files/upload' ? await body(req, 512 * 1024) : await body(req);
     if (!/^[a-f0-9]{64}$/.test(input.user || '')) fail(422, '用户标识无效');
     if (req.url === '/cancel') { await cancel(input.user); return json(res, 200, { ok: true }); }
     if (req.url === '/renew') {
@@ -168,6 +151,10 @@ export const server = createServer(async (req, res) => {
         if (entry.pi.user === input.user && entry.pi.busy) await sandbox('/renew', input.user, entry.pi.lease);
       }
       return json(res, 200, { ok: true });
+    }
+    if (req.url === '/model') {
+      const config = await activeProvider().catch(() => undefined);
+      return json(res, 200, { label: modelLabel(config?.model || model.split('/').pop()) });
     }
     if (req.url === '/providers') return json(res, 200, await publicProviders());
     if (req.url === '/providers/test') return json(res, 200, await testProvider(input.config));
@@ -182,7 +169,16 @@ export const server = createServer(async (req, res) => {
         return json(res, 200, result);
       } finally { configuring = false; }
     }
-    if (req.url === '/chats') return json(res, 200, { chats: await chats(input.user) });
+    if (req.url === '/chats') return json(res, 200, { chats: await chats.list(input.user) });
+    if (req.url === '/chats/rename') return json(res, 200, await chats.rename(input.user, input.thread, input.title));
+    if (req.url === '/chats/pin') return json(res, 200, await chats.setPinned(input.user, input.thread, input.pinned));
+    if (req.url === '/chats/archive') return json(res, 200, await chats.setArchived(input.user, input.thread, input.archived));
+    if (req.url === '/chats/export') return json(res, 200, await chats.export(input.user, input.thread, input.format, await secretValues()));
+    // Workspace calls use an independent short lease; they never cancel model work.
+    if (req.url === '/files/list') return json(res, 200, await listWorkspace(input.user, input.path));
+    if (req.url === '/files/preview') return json(res, 200, await previewWorkspace(input.user, input.path, input.limit));
+    if (req.url === '/files/download') return json(res, 200, await downloadWorkspace(input.user, input.path));
+    if (req.url === '/files/upload') return json(res, 200, await uploadWorkspace(input.user, input.path, input.content, input.overwrite === true));
     if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(input.thread || '')) fail(422, '对话标识无效');
     const pi = await instance(input.user, input.thread);
     if (req.url === '/session') {

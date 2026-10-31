@@ -3,7 +3,7 @@ import { createHmac, createHash, randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { body, equal, fail, json, required } from './shared.mjs';
+import { body, equal, fail, json, modelLabel, required } from './shared.mjs';
 
 const publicURL = new URL(required('PUBLIC_URL')).origin;
 const homepage = new URL(required('HOMEPAGE_URL')).origin;
@@ -58,15 +58,54 @@ async function runner(path, user, payload, signal) {
   }
   return response;
 }
-const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']],
-  ['/style.css', ['style.css', 'text/css']], ['/tokens.css', ['tokens.css', 'text/css']]]);
+const assets = new Map([['/', ['index.html', 'text/html']], ['/style.css', ['style.css', 'text/css']],
+  ['/tokens.css', ['tokens.css', 'text/css']], ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
+  ['/fonts/outfit-latin.woff2', ['fonts/outfit-latin.woff2', 'font/woff2']]]);
+const modelCache = { label: '', expires: 0 };
+async function modelName(user) {
+  if (Date.now() < modelCache.expires) return modelCache.label;
+  try {
+    const response = await runner('/model', user, {}, AbortSignal.timeout(2000));
+    const value = await response.json();
+    if (typeof value.label === 'string' && value.label) modelCache.label = value.label;
+  } catch {}
+  if (!modelCache.label) modelCache.label = modelLabel(process.env.PI_MODEL || '');
+  modelCache.expires = Date.now() + 30000;
+  return modelCache.label;
+}
+function filePath(url) {
+  const value = url.searchParams.get('path') || '';
+  if (value.length > 1024 || /[\u0000\r\n]/.test(value)) fail(422, '工作区路径无效');
+  return value;
+}
+function downloadName(value) {
+  const name = String(value || '').replace(/[\\/\u0000-\u001f\u007f"]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 120);
+  return name && !/^[. ]+$/.test(name) ? name : 'agent-export';
+}
+function attachment(name) {
+  const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+function sendFile(res, file) {
+  const buffer = Buffer.from(file.data || '', 'base64');
+  res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': buffer.length,
+    'Content-Disposition': attachment(downloadName(file.name)) });
+  res.end(buffer);
+}
+function sendExport(res, value) {
+  const name = downloadName(value.filename);
+  const content = Buffer.from(String(value.content || ''), 'utf8');
+  res.writeHead(200, { 'Content-Type': value.contentType || 'application/octet-stream; charset=utf-8',
+    'Content-Length': content.length, 'Content-Disposition': attachment(name) });
+  res.end(content);
+}
 
 export const server = createServer(async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   try {
     const url = new URL(req.url, publicURL);
     if (url.pathname === '/healthz' && req.method === 'GET') return json(res, 200, { ok: true });
@@ -97,7 +136,7 @@ export const server = createServer(async (req, res) => {
     const auth = await identity(req);
     if (url.pathname === '/api/me' && req.method === 'GET') {
       return json(res, 200, { user: auth.user, admin: auth.admin, can_execute: auth.can_execute,
-        grant_expires_at: auth.grant_expires_at, csrf: csrf(auth.token), model: process.env.PI_MODEL || 'opencode-go/deepseek-v4.1-flash' });
+        grant_expires_at: auth.grant_expires_at, csrf: csrf(auth.token), model: await modelName(auth.user.id) });
     }
     if (url.pathname === '/auth/logout' && req.method === 'POST') {
       writeAccess(req, auth); await sso('/revoke', { token: auth.token });
@@ -121,6 +160,22 @@ export const server = createServer(async (req, res) => {
       if (url.pathname === '/api/chats' && req.method === 'GET') {
         const response = await runner('/chats', auth.user.id, {}); return json(res, 200, await response.json());
       }
+      if (url.pathname === '/api/chats/export' && req.method === 'GET') {
+        const response = await runner('/chats/export', auth.user.id, { thread: url.searchParams.get('chat'),
+          format: url.searchParams.get('format') === 'json' ? 'json' : 'md' });
+        return sendExport(res, await response.json());
+      }
+      if (url.pathname === '/api/files' && req.method === 'GET') {
+        const response = await runner('/files/list', auth.user.id, { path: filePath(url) }); return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/files/preview' && req.method === 'GET') {
+        const response = await runner('/files/preview', auth.user.id, { path: filePath(url), limit: Number(url.searchParams.get('limit')) || 65536 });
+        return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/files/download' && req.method === 'GET') {
+        const response = await runner('/files/download', auth.user.id, { path: filePath(url) });
+        return sendFile(res, await response.json());
+      }
       if (url.pathname === '/api/providers' && req.method === 'GET') {
         const response = await runner('/providers', auth.user.id, {}); return json(res, 200, await response.json());
       }
@@ -129,9 +184,23 @@ export const server = createServer(async (req, res) => {
       }
       if (req.method !== 'POST') fail(405, '请求方法不支持');
       writeAccess(req, auth);
+      if (url.pathname === '/api/files/upload') {
+        const input = await body(req, 512 * 1024);
+        if (typeof input.path !== 'string' || !input.path || input.path.length > 1024 || /[\u0000\r\n]/.test(input.path)) fail(422, '工作区路径无效');
+        if (typeof input.content !== 'string') fail(422, '请选择文本文件');
+        if (Buffer.byteLength(input.content, 'utf8') > 256 * 1024) fail(413, '上传文件不能超过 256 KiB');
+        if (input.content.includes('\u0000')) fail(422, '暂不支持上传二进制文件');
+        const response = await runner('/files/upload', auth.user.id, { path: input.path, content: input.content, overwrite: input.overwrite === true });
+        return json(res, 200, await response.json());
+      }
       const input = await body(req);
       if (['/api/providers/test', '/api/providers/save'].includes(url.pathname)) {
         const response = await runner(url.pathname.replace('/api', ''), auth.user.id, { config: input.config });
+        if (url.pathname === '/api/providers/save') modelCache.expires = 0;
+        return json(res, 200, await response.json());
+      }
+      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive'].includes(url.pathname)) {
+        const response = await runner(url.pathname.replace('/api', ''), auth.user.id, input);
         return json(res, 200, await response.json());
       }
       if (url.pathname === '/api/abort') {
@@ -160,10 +229,15 @@ export const server = createServer(async (req, res) => {
       }
       fail(404, '接口不存在');
     }
-    const asset = assets.get(url.pathname);
+    let asset = assets.get(url.pathname);
+    if (!asset && /^\/js\/[a-z0-9-]+\.js$/.test(url.pathname)) asset = [url.pathname.slice(1), 'text/javascript'];
     if (!asset || req.method !== 'GET') fail(404, '页面不存在');
-    res.writeHead(200, { 'Content-Type': asset[1] + '; charset=utf-8' });
-    res.end(await readFile(new URL('./web/' + asset[0], import.meta.url)));
+    let data;
+    try { data = await readFile(new URL('./web/' + asset[0], import.meta.url)); }
+    catch (error) { if (error.code === 'ENOENT') fail(404, '页面不存在'); throw error; }
+    const type = asset[1];
+    res.writeHead(200, { 'Content-Type': type.startsWith('text/') ? type + '; charset=utf-8' : type });
+    res.end(data);
   } catch (error) {
     if (res.headersSent) return res.destroy();
     if (error.status === 401 && !req.url.startsWith('/api/')) return redirect(res, '/auth/login');

@@ -40,3 +40,30 @@ Errors are text, never executable markup. Provider keys are never returned to br
 or passed to tool containers. New task, cancellation, authorization and service failures
 must remain distinguishable in feedback. Mobile dialogs scroll within the viewport;
 Escape closes idle dialogs and focus returns to their trigger.
+
+
+## Conversation and file workflows
+
+- The sidebar groups pinned chats and recent dates, filters titles locally, and offers
+  rename, pin/unpin, archive/unarchive and Markdown/JSON export. Metadata is server-side
+  in `/data/chat-meta/<user hash>.json`; Pi history is preserved. Archive does not free
+  storage quota. Export omits provider replay metadata and masks known service model keys.
+- Menus support arrows/Home/End/Escape. Native dialogs keep focus; asynchronous mutations
+  disable repeat submission, preserve entered values on error and announce outcomes.
+- Retry resends the last user task; continue appends an explicit instruction. Neither
+  silently replaces history. Tools and thinking are expandable, with real lifecycle states.
+  Message/code copy operates only on the visible selected content.
+- Streaming follows the bottom while the reader stays nearby; scrolling up pauses follow
+  and exposes “回到最新”. A premature stream close is an error rather than a completed task.
+- Workspace files are listed, previewed, uploaded and downloaded through the user's sandbox.
+  Preview is UTF-8 text (first 64 KiB), including valid empty/truncated text. Stale responses
+  cannot replace a more recently selected preview. Paths can be inserted into the composer.
+  Upload cap is 256 KiB; duplicate uploads require explicit overwrite confirmation. Downloads
+  over 1 MiB are rejected, never silently truncated. Browsing never cancels an active task;
+  a busy sandbox reports that the reader should refresh later.
+- Model connection settings remain admin-only; an execution grant exposes no provider keys.
+  Failure to refresh identity disables execution and offers reload/sign-in recovery.
+- Harmless theme/sidebar/panel preferences may be stored locally. Message text, provider keys
+  and history are never written to localStorage. Opening/closing drawers, menus and messages
+  is animated; repeated streaming deltas do not replay entry effects. Reduced motion disables
+  nonessential transitions. Mobile panels remain within the viewport without page overflow.

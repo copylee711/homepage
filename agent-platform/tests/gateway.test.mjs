@@ -1,7 +1,18 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 let admin = true, granted = false;
+let lastRunner;
+const runner = createServer(async (req, res) => {
+  let raw = ''; for await (const chunk of req) raw += chunk;
+  lastRunner = { path: req.url, value: JSON.parse(raw) };
+  assert.equal(req.headers['x-runner-secret'], 'b'.repeat(64));
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify(req.url === '/model' ? { label: 'DeepSeek V4.1 Flash' } : { ok: true, entries: [] }));
+});
+await new Promise(resolve => runner.listen(0, '127.0.0.1', resolve));
+process.env.RUNNER_URL = `http://127.0.0.1:${runner.address().port}`;
 const homepage = createServer(async (req, res) => {
   assert.equal(req.headers['x-agent-client-secret'], 'a'.repeat(64));
   res.setHeader('Content-Type', 'application/json');
@@ -18,7 +29,7 @@ process.env.NODE_ENV = 'test';
 const { server } = await import('../gateway.mjs');
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
-after(async () => { await Promise.all([new Promise(resolve => server.close(resolve)), new Promise(resolve => homepage.close(resolve))]); });
+after(async () => { await Promise.all([new Promise(resolve => server.close(resolve)), new Promise(resolve => homepage.close(resolve)), new Promise(resolve => runner.close(resolve))]); });
 test('anonymous access redirects and a callback needs the original signed browser flow', async () => {
   const root = await fetch(base, { redirect: 'manual' });
   assert.equal(root.status, 302);
@@ -61,5 +72,27 @@ test('an execution grant never grants provider or user-management privileges', a
   }
   granted = false;
   assert.equal((await fetch(base + '/api/chats', { headers: { cookie } })).status, 403);
+  admin = true;
+});
+
+test('new file/chat endpoints enforce CSRF and derive tenant identity; local modules stay authenticated', async () => {
+  const cookie = 'copylee_ai=' + 't'.repeat(64);
+  admin = false; granted = true;
+  const me = await (await fetch(base + '/api/me', { headers: { cookie } })).json();
+  const headers = { cookie, Origin: 'http://127.0.0.1', 'X-CSRF-Token': me.csrf };
+  assert.equal((await fetch(base + '/api/files', { headers })).status, 200);
+  assert.equal(lastRunner.value.user, createHash('sha256').update('user-1').digest('hex'));
+  for (const path of ['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/files/upload']) {
+    const value = JSON.stringify({ user: 'forged', thread: '11111111-1111-4111-8111-111111111111', title: 'test', content: 'test', path: 'test.txt' });
+    assert.equal((await fetch(base + path, { method: 'POST', headers: { cookie }, body: value })).status, 403);
+    assert.equal((await fetch(base + path, { method: 'POST', headers, body: value })).status, 200);
+    assert.notEqual(lastRunner.value.user, 'forged');
+  }
+  assert.equal((await fetch(base + '/js/main.js', { headers })).status, 200);
+  assert.equal((await fetch(base + '/js/missing.js', { headers })).status, 404);
+  assert.equal((await fetch(base + '/js/main.js', { redirect: 'manual' })).status, 302);
+  granted = false;
+  assert.equal((await fetch(base + '/api/files', { headers })).status, 403);
+  assert.equal((await fetch(base + '/api/chats/export', { headers })).status, 403);
   admin = true;
 });
