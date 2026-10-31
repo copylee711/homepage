@@ -184,6 +184,8 @@ try:
     output = json.dumps(main(value), ensure_ascii=False)
     sys.stdout.buffer.write((output + "\n").encode("utf-8"))
 except Exception as error:
-    message = json.dumps({"error": str(error)[:500]}, ensure_ascii=False)
+    detail = ("文件或目录不存在" if isinstance(error, FileNotFoundError) else
+              "没有权限访问此文件或目录" if isinstance(error, PermissionError) else str(error)[:500])
+    message = json.dumps({"error": detail}, ensure_ascii=False)
     sys.stdout.buffer.write((message + "\n").encode("utf-8"))
     sys.exit(1)
