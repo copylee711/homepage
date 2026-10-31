@@ -1,0 +1,6 @@
+# gz: /etc/systemd/system/caddy.service.d/agent-acme-proxy.conf
+# The tunnel also forwards gz 127.0.0.1:17891 to xa 127.0.0.1:7890.
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:17891"
+Environment="HTTPS_PROXY=http://127.0.0.1:17891"
+Environment="NO_PROXY=localhost,127.0.0.1,::1,copylee.cn,.copylee.cn"

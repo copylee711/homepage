@@ -58,13 +58,18 @@ xa 外网下载慢时，可手动运行 GitHub Actions 的 `Build Agent images`�
 校验并固定 gz 的 SSH host key。gz 端公钥限制：
 
 ```text
-restrict,port-forwarding,permitlisten="127.0.0.1:18081",command="/bin/false" ssh-ed25519 PUBLIC_KEY
+restrict,port-forwarding,permitlisten="127.0.0.1:18081",permitlisten="127.0.0.1:17891",command="/bin/false" ssh-ed25519 PUBLIC_KEY
 ```
 
-sshd 再限制该用户仅允许 remote forwarding、`PermitListen 127.0.0.1:18081`、禁用密码、TTY、
+sshd 再限制该用户仅允许 remote forwarding、`PermitListen 127.0.0.1:18081 127.0.0.1:17891`、禁用密码、TTY、
 agent forwarding、X11 和 GatewayPorts。隧道仅监听 gz 的回环地址。验证 Caddy 配置再 reload，
 将 `Caddyfile.example` 中 ai 块合入现有配置，不覆盖其他站点。共享日志 filter 须删除
 `X-Agent-Client-Secret`，并将 URL 的 `code`、`state` 值替换为 `REDACTED`。
+
+gz 到 ACME 的直连可能在域名验证成功后仍卡在证书下载。`caddy-acme-proxy.conf.example` 是可选
+systemd drop-in，让 Caddy 的证书签发/续期等出站请求通过 gz 回环 `17891` 经隧道使用 xa Mihomo。
+本机与 copylee 域名通过 `NO_PROXY` 排除，现有本机反代不走代理；加载环境变量需重启一次 Caddy。
+两个反向监听均仅允许回环地址，不能设置 GatewayPorts 或公开代理端口。
 
 ## 模型与 Mihomo
 
