@@ -11,10 +11,20 @@ const password = ref(''), otp = ref(''), keyName = ref('我的设备'), needOtp 
 const enrollment = ref<{ secret: string; qr: string }>(), recoveryCodes = ref<string[]>([])
 const busy = ref(false), error = ref(''), message = ref('')
 const canPasskey = computed(() => passkeyAvailable())
+const github = ref<{ enabled: boolean; login: string | null }>()
+const githubError = ref(false)
 // 开启两步验证后，除绑定步骤外的修改都需要验证码。
 const askOtp = computed(() => needOtp.value || !!enrollment.value || !!security.value?.totp_enabled)
 
-async function load() { security.value = await accountApi<SecurityState>('/security') }
+async function load() {
+  security.value = await accountApi<SecurityState>('/security')
+  await loadGithub()
+}
+async function loadGithub() {
+  githubError.value = false
+  try { github.value = await accountApi('/github') }
+  catch { githubError.value = true }
+}
 async function run(work: () => Promise<void>) {
   if (busy.value) return
   busy.value = true; error.value = ''; message.value = ''
@@ -50,6 +60,19 @@ const removePasskey = (id: string, name: string) => run(async () => {
   security.value = await accountApi<SecurityState>(`/security/passkeys/${encodeURIComponent(id)}/remove`, 'POST', proof())
   done('Passkey 已撤销，其他设备上的登录已退出。')
 })
+const linkGithub = () => run(async () => {
+  requirePassword()
+  const result = await accountApi<{ url: string }>('/github/start', 'POST', { ...proof(), link: true })
+  password.value = ''; otp.value = ''
+  location.assign(result.url)
+})
+const unlinkGithub = () => run(async () => {
+  requirePassword()
+  if (!await confirmDialog({ title: '解除 GitHub 绑定？', message: '解除后可继续用邮箱密码或 Passkey 登录。其他设备上的登录将退出。', confirmText: '解除绑定', danger: true })) return
+  await accountApi('/github/disconnect', 'POST', proof())
+  await loadGithub()
+  password.value = ''; done('GitHub 绑定已解除，其他设备上的登录已退出。')
+})
 const when = (seconds: number) => new Date(seconds * 1000).toLocaleDateString()
 
 onMounted(() => { void load().catch(() => {}) })
@@ -65,6 +88,18 @@ onMounted(() => { void load().catch(() => {}) })
       <div class="confirm">
         <label>当前密码<input v-model="password" type="password" autocomplete="current-password" maxlength="128"></label>
         <label v-if="askOtp">{{ enrollment ? '验证器中的 6 位验证码' : '两步验证码或恢复码' }}<input v-model="otp" autocomplete="one-time-code" maxlength="80" inputmode="numeric"></label>
+      </div>
+
+      <div class="block">
+        <div class="row"><strong>GitHub</strong><span class="badge" :class="{ on: github?.login }">{{ github?.login ? '已绑定' : '未绑定' }}</span></div>
+        <p v-if="githubError" role="alert">暂时无法读取 GitHub 绑定。<button type="button" @click="loadGithub">重试</button></p>
+        <template v-else-if="github">
+          <p>{{ github.login ? `已绑定 @${github.login}。GitHub 登录仍需通过本站已开启的两步验证。` : '绑定后可使用 GitHub 登录同一个账户，收藏、Cloud 权限与个人资料保持一致。' }}</p>
+          <button v-if="github.login" class="danger" type="button" @click="unlinkGithub">解除 GitHub 绑定</button>
+          <button v-else-if="github.enabled" type="button" @click="linkGithub">绑定 GitHub</button>
+          <p v-else>GitHub 登录尚未开放。</p>
+        </template>
+        <p v-else role="status">正在读取 GitHub 绑定…</p>
       </div>
 
       <div class="block">

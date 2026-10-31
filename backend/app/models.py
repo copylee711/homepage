@@ -143,6 +143,14 @@ class User(SQLModel, table=True):
     recovery_hashes: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
 
 
+class GitHubIdentity(SQLModel, table=True):
+    __tablename__ = "github_identity"
+    github_id: str = Field(primary_key=True)
+    user_id: str = Field(unique=True, index=True, foreign_key="user.id", ondelete="CASCADE")
+    login: str
+    created_at: str
+
+
 class UserSession(SQLModel, table=True):
     __tablename__ = "user_session"
     token_hash: str = Field(primary_key=True)

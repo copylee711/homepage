@@ -1,5 +1,33 @@
 # 登录与安全
 
+## GitHub OAuth 登录与绑定
+
+服务端环境变量 `COPYLEE_GITHUB_CLIENT_ID` 与 `COPYLEE_GITHUB_CLIENT_SECRET` 同时配置后，
+账户页显示 GitHub 登录。密钥保存在服务器 `/etc/copylee/backend.env`（root、0600），
+不能写入仓库或前端构建变量。回调地址固定为 `COPYLEE_SITE_URL/account/auth`，正式站为
+`https://copylee.cn/account/auth`，与 GitHub OAuth App 的 Redirect URI 保持一致。
+独立的 `COPYLEE_GITHUB_TOKEN` 仍只用于仓库同步。
+
+- 已有用户先用邮箱密码或 Passkey 登录，在账户设置的「登录安全」中输入当前密码及已开启的
+  两步验证码后绑定 GitHub。绝不根据邮箱、用户名或 GitHub 昵称自动合并、授予管理员权限。
+- GitHub 用户数字 ID 是稳定身份，绑定表 `github_identity` 一对一关联本站用户 ID；
+  收藏、存储权限、管理员标记、密码与既有 Cloud Cookie 行为均继续使用原账户。
+- 未绑定身份仅在开放注册时可注册，必须提供 GitHub 已验证且符合邮箱域名规则的邮箱，
+  确认账户说明并设置至少 8 位本站密码，用于现有客户端与安全设置。邮箱冲突要求先登录绑定。
+- GitHub 登录仍要求本站已开启的 TOTP 或恢复码。未通过验证不签发会话。
+- OAuth 使用随机 state、独立的 HttpOnly 浏览器 Cookie、S256 PKCE 和 10 分钟的数据库挑战；
+  授权码交换只能领取一次，重复回调拒绝，后续注册或两步验证无需再次交换授权码。
+  只申请 `user:email`，不申请仓库权限、不存储 GitHub 访问令牌。
+- 绑定与解绑需要当前会话 CSRF、当前密码与已开启的 TOTP，成功时撤销其他会话及挑战。
+  删除用户级联删除 GitHub 绑定；备份包含绑定，恢复时清除一次性挑战。
+- 返回目标只接受本站相对路径、配置的主站与 Cloud 精确来源；不将未来 AI 平台加入 Cookie
+  或重定向信任范围。未来 SSO 和沙箱权限管理另行实施。
+
+Caddy 必须为 `/account/auth` 提供 SPA 页面，并返回 `Cache-Control: no-store`、
+`Referrer-Policy: no-referrer`；访问日志通过 query filter 隐去 `code`、`state` 的值，
+页面初始化后立即清除地址栏授权参数。部署示例已包含相关设置；CDN 同样应禁止缓存回调与认证 API。
+验证：`cd backend && uv run pytest tests/test_github_oauth.py -q`。
+
 ## 邮箱验证码与 ESA
 
 生产的注册和找回密码共用 `POST /api/account/code`。账户页动态加载阿里云官方 SDK，

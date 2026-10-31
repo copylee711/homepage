@@ -25,7 +25,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, select
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import accounts, audit, feedback, games, images, storage, teams, user_security
+from . import accounts, audit, feedback, games, github_oauth, images, storage, teams, user_security
 from .accounts import current_user, profile
 from .auth import (
     COOKIE,
@@ -125,7 +125,7 @@ from .settings import Settings
 
 HERE = Path(__file__).parent
 logger = logging.getLogger(__name__)
-PRIVACY_EFFECTIVE = "2026 年 10 月 24 日"
+PRIVACY_EFFECTIVE = "2026 年 10 月 31 日"
 PLAIN_404_PREFIXES = ("/api/", "/media/", "/images/", "/content-assets/", "/assets/")
 
 
@@ -187,7 +187,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        if request.url.path.startswith(("/api/", "/admin")):
+        if request.url.path.rstrip("/") == "/account/auth":
+            response.headers["Referrer-Policy"] = "no-referrer"
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["X-Robots-Tag"] = "noindex"
+        elif request.url.path.startswith(("/api/", "/admin")):
             response.headers["Cache-Control"] = "no-store"
         elif request.url.path.startswith(("/posts", "/notes", "/sitemap", "/robots", "/feed", "/content-assets/")):
             response.headers["Cache-Control"] = "no-cache"
@@ -223,6 +227,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(teams.router)
     app.include_router(friends_router)
     app.include_router(messages_router)
+    app.include_router(github_oauth.router)
 
     @app.get("/api/health")
     def health(session: Session = Depends(database)):
@@ -315,7 +320,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/account/config")
     def account_config(session: Session = Depends(database)):
-        return {**accounts.public_config(session), "captcha": {
+        return {**accounts.public_config(session), "githubEnabled": github_oauth.enabled(settings),
+                "captcha": {
             "enabled": settings.email_captcha_enabled,
             "prefix": settings.email_captcha_prefix,
             "sceneId": settings.email_captcha_scene_id,
@@ -1081,6 +1087,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/scut", response_class=HTMLResponse)
     @app.get("/scut/", response_class=HTMLResponse)
     @app.get("/account", response_class=HTMLResponse)
+    @app.get("/account/auth", response_class=HTMLResponse)
     @app.get("/admin", response_class=HTMLResponse)
     @app.get("/admin/{path:path}", response_class=HTMLResponse)
     @app.get("/drive", response_class=HTMLResponse)

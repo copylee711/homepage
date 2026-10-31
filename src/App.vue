@@ -47,7 +47,7 @@ const isShare = /^\/s\/[A-Za-z0-9]+\/?$/.test(location.pathname)
 const isDrive = !isShare && (/^\/drive(\/|$)/.test(location.pathname) || (onCloud && location.pathname === '/'))
 const isAdmin = location.pathname === '/admin' || location.pathname.startsWith('/admin/')
 const isScut = location.pathname.replace(/\/$/, '') === '/scut'
-const isAccount = location.pathname.replace(/\/$/, '') === '/account'
+const isAccount = /^\/account(?:\/auth)?\/?$/.test(location.pathname)
 const isGames = /^\/games(\/|$)/.test(location.pathname)
 let stop: (() => void) | undefined
 let stopScut: (() => void) | undefined

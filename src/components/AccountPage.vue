@@ -39,8 +39,19 @@ const OTP_REQUIRED = '请输入两步验证码或恢复码'
 const otp = ref(''), otpStep = ref(false)
 const canPasskey = passkeyAvailable()
 const cooldown = ref(0)
-interface AccountConfig { registrationOpen: boolean; allowedDomains: string[]; captcha: EmailCaptchaConfig & { feedbackSceneId?: string } }
+interface AccountConfig { registrationOpen: boolean; allowedDomains: string[]; githubEnabled: boolean; captcha: EmailCaptchaConfig & { feedbackSceneId?: string } }
 const config = ref<AccountConfig>()
+// Capture the callback in memory, then remove authorization parameters before other requests.
+const githubCallback = location.pathname.replace(/\/$/, '') === '/account/auth'
+const githubParams = githubCallback ? new URLSearchParams(location.search) : new URLSearchParams()
+const githubState = githubParams.get('state') ?? ''
+let githubCode = githubParams.get('code') ?? ''
+const githubPending = ref(githubCallback)
+const githubRegistration = ref<{ email: string; name: string }>()
+const githubOtp = ref(false)
+const githubSubmitted = ref(false), showGithubPassword = ref(false)
+const githubPasswordInput = ref<HTMLInputElement>(), githubConsentInput = ref<HTMLInputElement>()
+if (githubCallback) window.history.replaceState(null, '', '/account/auth')
 const captchaBusy = ref(false)
 const favorites = ref<AccountEntry[]>([]), history = ref<AccountEntry[]>([])
 const gameBests = ref<Partial<Record<GameId, GameBest | null>>>({})
@@ -129,6 +140,45 @@ const passkeyLogin = () => run(async () => {
     throw err
   }
 })
+const startGithub = () => run(async () => {
+  const result = await accountApi<{ url: string }>('/github/start', 'POST', { next })
+  location.assign(result.url)
+})
+const completeGithub = () => run(async () => {
+  if (githubRegistration.value) {
+    githubSubmitted.value = true
+    if (password.value.length < 8) {
+      githubPasswordInput.value?.focus()
+      throw new Error('请设置至少 8 个字符的本站密码')
+    }
+    if (!agree.value) {
+      githubConsentInput.value?.focus()
+      throw new Error('请先阅读并确认账户说明')
+    }
+  }
+  try {
+    const result = await accountApi<{ user?: AccountUser; csrf?: string; next?: string; linked?: boolean; registration_required?: boolean; email?: string; name?: string }>('/github/complete', 'POST', {
+      state: githubState, code: githubCode, otp: otp.value,
+      password: githubRegistration.value ? password.value : '', consent: agree.value,
+    })
+    githubCode = ''
+    if (result.registration_required) {
+      githubRegistration.value = { email: result.email!, name: result.name! }
+      message.value = '请设置本站密码并确认账户说明，完成 GitHub 注册。'
+      return
+    }
+    password.value = ''; otp.value = ''
+    if (result.user && result.csrf) signedIn({ user: result.user, csrf: result.csrf })
+    location.replace(result.next || '/account')
+  } catch (err) {
+    if (err instanceof Error && err.message === OTP_REQUIRED) {
+      githubCode = ''; githubOtp.value = true
+      message.value = '请填写本站的两步验证码或恢复码，完成 GitHub 登录。'
+      return
+    }
+    throw err
+  }
+})
 
 async function loadLists() {
   const [fav, hist] = await Promise.all([accountApi<{ items: AccountEntry[] }>('/favorites'), accountApi<{ items: AccountEntry[] }>('/history')])
@@ -200,6 +250,12 @@ onMounted(async () => {
   const params = new URLSearchParams(location.search)
   if (params.get('mode') === 'register') mode.value = 'register'
   await loadAccount()
+  if (githubCallback) {
+    if (githubParams.has('error')) error.value = 'GitHub 授权已取消或未完成，请重新开始。'
+    else if (!githubState || !githubCode) error.value = 'GitHub 回调信息不完整，请重新开始。'
+    else await completeGithub()
+    return
+  }
   // 已登录时直接回到来源页面（例如从云盘跳来登录）。
   if (account.value && next) { location.href = next; return }
   const wanted = params.get('tab')
@@ -219,7 +275,26 @@ onBeforeUnmount(() => { clearInterval(timer); clearTimeout(warmup); captchaLifet
     <div class="container">
       <p v-if="error" class="feedback error" role="alert">{{ error }}</p>
       <p v-if="message" class="feedback ok" role="status">{{ message }}</p>
-      <p v-if="!accountChecked" class="loading">正在读取账户…</p>
+      <div v-if="githubPending" class="auth-card" :aria-busy="busy">
+        <h2>GitHub 登录</h2>
+        <p v-if="busy" class="loading" role="status">正在验证 GitHub 身份…</p>
+        <form v-if="githubOtp || githubRegistration" novalidate @submit.prevent="completeGithub">
+          <fieldset :disabled="busy">
+            <template v-if="githubRegistration">
+              <p class="hint">将使用 GitHub 已验证邮箱 {{ githubRegistration.email }} 创建账户。</p>
+              <label>本站密码<input ref="githubPasswordInput" v-model="password" :type="showGithubPassword ? 'text' : 'password'" autocomplete="new-password" minlength="8" maxlength="128" required :aria-invalid="githubSubmitted && password.length < 8" aria-describedby="github-password-help"></label>
+              <button class="ghost wide" type="button" :aria-pressed="showGithubPassword" @click="showGithubPassword = !showGithubPassword">{{ showGithubPassword ? '隐藏密码' : '显示密码' }}</button>
+              <p id="github-password-help" class="hint">至少 8 个字符，也用于 Cloud 客户端登录与账户安全设置。</p>
+              <label class="agree"><input ref="githubConsentInput" v-model="agree" type="checkbox" required :aria-invalid="githubSubmitted && !agree">我已了解：本站保存邮箱、GitHub 身份与账户资料，用于登录及账户功能；可随时解除绑定或删除账户。</label>
+              <a class="hint" href="/privacy" target="_blank" rel="noopener">阅读隐私政策 ↗</a>
+            </template>
+            <label v-if="githubOtp">两步验证码或恢复码<input v-model="otp" autocomplete="one-time-code" maxlength="80" required></label>
+            <button class="primary" type="submit">{{ busy ? '请稍候…' : githubRegistration ? '注册并登录' : '完成登录' }}</button>
+          </fieldset>
+        </form>
+        <a class="ghost wide admin-link" href="/account">返回账户页</a>
+      </div>
+      <p v-else-if="!accountChecked" class="loading">正在读取账户…</p>
 
       <!-- 未登录：登录 / 注册 / 找回密码 -->
       <div v-else-if="!account" class="auth-layout">
@@ -227,6 +302,8 @@ onBeforeUnmount(() => { clearInterval(timer); clearTimeout(warmup); captchaLifet
         <div class="switch" role="tablist">
           <button v-for="[value, label] in [['login', '登录'], ['register', '注册'], ['reset', '找回密码']]" :key="value" role="tab" :aria-selected="mode === value" :class="{ active: mode === value }" type="button" :disabled="busy" @click="switchMode(value as Mode)">{{ label }}</button>
         </div>
+        <button v-if="config?.githubEnabled && mode === 'login'" class="ghost wide" type="button" :disabled="busy" @click="startGithub">{{ busy ? '请稍候…' : '使用 GitHub 登录' }}</button>
+        <p v-if="config?.githubEnabled && mode === 'login'" class="hint">已有账户？请先用邮箱或 Passkey 登录，再到「账户设置 → 登录安全」绑定 GitHub。</p>
         <p v-if="mode === 'register' && config && !config.registrationOpen" class="closed">暂未开放注册，敬请期待。</p>
         <form v-else class="auth-form" @submit.prevent="submit">
           <fieldset :disabled="busy">

@@ -20,6 +20,14 @@ http://copylee.cn, http://www.copylee.cn {
         header Cache-Control "public, max-age=31536000, immutable"
         file_server
     }
+    handle /account/auth {
+        root * /var/www/copylee
+        header Cache-Control no-store
+        header Referrer-Policy no-referrer
+        header X-Robots-Tag noindex
+        rewrite * /index.html
+        file_server
+    }
     @scut path /scut /scut/ /account /games /games/*
     handle @scut {
         root * /var/www/copylee

@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     sync_enabled: bool = True
     scut_sync_enabled: bool = True
     github_token: str = ""
+    # OAuth login credentials are server-only and independent of repository sync.
+    github_client_id: str = ""
+    github_client_secret: str = ""
     session_hours: int = 12
     # 审计日志目录；留空时写入 data_dir/logs
     log_dir: Path | None = None
