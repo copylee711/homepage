@@ -35,6 +35,8 @@ import os, socket
 from pathlib import Path
 assert os.getuid() == 1000
 assert not any(k in os.environ for k in ['OPENCODE_API_KEY','RUNNER_SECRET','SANDBOX_SECRET','SANDBOX_LEASE'])
+pid1 = Path('/proc/1/environ').read_bytes().split(bytes([0]))
+assert not any(item.split(b'=', 1)[0] in [b'OPENCODE_API_KEY',b'RUNNER_SECRET',b'SANDBOX_SECRET',b'SANDBOX_LEASE'] for item in pid1)
 assert not Path('/var/run/docker.sock').exists()
 assert 'CapEff:\\t0000000000000000' in Path('/proc/self/status').read_text()
 assert 'NoNewPrivs:\\t1' in Path('/proc/self/status').read_text()

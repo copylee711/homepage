@@ -16,6 +16,14 @@ function setBusy(value) {
   $('task-state').textContent = value ? 'Pi 正在处理任务…' : auth?.can_execute ? '独立沙箱 · 无网络' : '尚未开通执行权限';
   $('chats').querySelectorAll('button').forEach(button => { button.disabled = value; });
 }
+function applyIdentity(value) {
+  auth = value; $('user-name').textContent = auth.user.name; $('avatar').textContent = auth.user.name.slice(0, 1);
+  $('settings-button').hidden = !auth.admin; $('grants-button').hidden = !auth.admin;
+  $('role-label').textContent = auth.admin ? '管理员 · 独立沙箱' : auth.can_execute ? '已授权 · ' + new Date(auth.grant_expires_at * 1000).toLocaleDateString('zh-CN') + ' 到期' : '已登录 · 暂无执行权限';
+  $('prompt').disabled = $('send').disabled = !auth.can_execute;
+  document.querySelectorAll('[data-prompt]').forEach(button => { button.disabled = !auth.can_execute; });
+  setBusy(busy);
+}
 function mobile(open) { document.querySelector('.shell').classList.toggle('sidebar-open', open); $('sidebar-shade').hidden = !open; $('menu-toggle').setAttribute('aria-expanded', String(open)); $('sidebar').inert = matchMedia('(max-width:680px)').matches && !open; }
 matchMedia('(max-width:680px)').addEventListener('change', () => mobile(false));
 mobile(false);
@@ -94,7 +102,7 @@ $('prompt-form').onsubmit = async event => {
       }
     }
   } catch (error) { if (error.name !== 'AbortError') notice(error.message || '连接中断，请重新读取对话。', true); }
-  finally { setBusy(false); streamController = undefined; await listChats().catch(() => {}); $('prompt').focus(); }
+  finally { setBusy(false); streamController = undefined; try { applyIdentity(await api('/api/me')); } catch { applyIdentity({ ...auth, can_execute: false }); } if (auth.can_execute) { await listChats().catch(() => {}); $('prompt').focus(); } else notice('执行权限已失效，任务已停止。请联系管理员或重新登录。', true); }
 };
 $('prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('prompt-form').requestSubmit(); } });
 $('stop').onclick = async () => { try { await api('/api/abort', { thread: chat }); if (!streamController) { setBusy(false); await selectChat(chat); } } catch (error) { notice(error.message, true); } };
@@ -134,10 +142,7 @@ $('test-provider').onclick = () => providerAction(false);
 $('provider-form').onsubmit = event => { event.preventDefault(); void providerAction(true); };
 (async () => {
   try {
-    auth = await api('/api/me'); $('user-name').textContent = auth.user.name; $('avatar').textContent = auth.user.name.slice(0, 1); $('settings-button').hidden = !auth.admin; $('grants-button').hidden = !auth.admin;
-    $('role-label').textContent = auth.admin ? '管理员 · 独立沙箱' : auth.can_execute ? '已授权 · ' + new Date(auth.grant_expires_at * 1000).toLocaleDateString('zh-CN') + ' 到期' : '已登录 · 暂无执行权限'; $('prompt').disabled = $('send').disabled = $('new-chat').disabled = !auth.can_execute;
-    document.querySelectorAll('[data-prompt]').forEach(button => { button.disabled = !auth.can_execute; });
-    $('task-state').textContent = auth.can_execute ? '独立沙箱 · 无网络' : '尚未开通执行权限';
+    applyIdentity(await api('/api/me'));
     if (!auth.can_execute) { notice('此账户尚未获得执行授权，请联系管理员开通。已有授权可能已过期或被撤销。'); $('chats').replaceChildren(); return; }
     if (auth.admin) await loadProviders(); const id = new URLSearchParams(location.search).get('chat');
     if (id && /^[a-f0-9-]{36}$/.test(id)) await selectChat(id); else { newChat(); await listChats(); }
