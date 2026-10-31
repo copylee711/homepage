@@ -81,6 +81,7 @@ def challenge(request, session, state):
     if not row or row.kind != "github" or row.expires_at <= time.time():
         raise HTTPException(400, "GitHub 登录已失效，请重新开始")
     data = json.loads(row.challenge)
+    data.setdefault("link", bool(row.session_hash))  # Preserve in-flight flows across rollout.
     browser = request.cookies.get(COOKIE, "")
     if not browser or not secrets.compare_digest(data["browser"], digest(browser)):
         raise HTTPException(400, "GitHub 登录校验失败，请在原浏览器重新开始")
@@ -110,7 +111,8 @@ def start(body: Start, request: Request, response: Response,
     session.add(UserChallenge(
         id=digest(state), kind="github", user_id=user_id, session_hash=session_hash,
         challenge=json.dumps({"browser": digest(browser), "verifier": verifier,
-                              "next": safe_next(body.next, settings), "stage": "code"}),
+                              "next": safe_next(body.next, settings), "stage": "code",
+                              "link": body.link}),
         expires_at=time.time() + TTL,
     ))
     accounts.record_failure(session, ip_key)  # Count starts, including successful ones.
@@ -193,6 +195,12 @@ def complete(body: Complete, request: Request, response: Response,
         lock(session)
         row, data = challenge(request, session, body.state)
         data.update(stage="identity", identity=identity)
+        # Once known, associate pending TOTP logins with the user too, so existing
+        # security-factor changes/reset revoke these challenges with the others.
+        if not data["link"]:
+            binding = session.get(GitHubIdentity, identity["id"])
+            if binding:
+                row.user_id = binding.user_id
         row.challenge = json.dumps(data)
         session.add(row)
         session.commit()
@@ -202,7 +210,7 @@ def complete(body: Complete, request: Request, response: Response,
         raise HTTPException(409, "GitHub 登录正在处理中，请稍后重新开始")
     identity = data["identity"]
     binding = session.get(GitHubIdentity, identity["id"])
-    if row.user_id:
+    if data["link"]:
         user, current = accounts.current_user(request, session, write=True)
         if user.id != row.user_id or current.token_hash != row.session_hash:
             discard(session, row, response)
@@ -221,6 +229,9 @@ def complete(body: Complete, request: Request, response: Response,
         return {"linked": True, "next": "/account?tab=settings"}
     if binding:
         user = session.get(User, binding.user_id)
+        if row.user_id and binding.user_id != row.user_id:
+            discard(session, row, response)
+            raise HTTPException(403, "GitHub 绑定已变更，请重新开始")
         if user is None or user.disabled:
             discard(session, row, response)
             raise HTTPException(403, "账户已被停用")

@@ -10,7 +10,7 @@ import pytest
 from sqlmodel import Session, select
 from test_content import ADMIN_EMAIL, ORIGIN, PASSWORD
 
-from app import github_oauth
+from app import github_oauth, user_security
 from app.auth import digest
 from app.models import Content, GitHubIdentity, User, UserChallenge
 from app.security import cipher
@@ -212,6 +212,18 @@ def test_totp_bruteforce_and_disabled_user(oauth):
         session.add(user)
         session.commit()
     assert finish(client, start(client)).status_code == 403
+
+
+def test_security_reset_revokes_pending_oauth_login(oauth):
+    client, app, _, _, _ = oauth
+    bound(app, totp=True)
+    state = start(client)
+    assert finish(client, state).status_code == 403
+    with Session(app.state.engine) as session:
+        user = session.exec(select(User).where(User.email == ADMIN_EMAIL)).one()
+        assert session.get(UserChallenge, digest(state)).user_id == user.id
+        user_security.reset(session, user)
+    assert finish(client, state).status_code == 400
 
 
 def test_expired_inflight_and_provider_failure(oauth, monkeypatch):
