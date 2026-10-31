@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { body, equal, fail, json, required } from './shared.mjs';
 import { publicProviders, saveProvider, activeProvider, testProvider, proxyEnvironment, loadProviders } from './providers.mjs';
 import { sandbox } from './sandbox-client.mjs';
+import { sessionCapacity } from './session-limits.mjs';
 
 const secret = required('RUNNER_SECRET');
 const sessions = new Map();
@@ -60,7 +61,7 @@ class Pi {
   }
   mask(text) { for (const key of this.secrets || []) text = text.split(key).join('[REDACTED]'); return text; }
   finish() {
-    clearTimeout(this.deadline); this.busy = false;
+    clearTimeout(this.deadline); clearInterval(this.storageCheck); this.busy = false;
     const output = this.output; this.output = undefined;
     if (output && !output.destroyed) output.end();
   }
@@ -77,17 +78,28 @@ class Pi {
   async prompt(res, message) {
     if (this.busy) fail(409, '当前任务尚未结束，请先停止或等待完成');
     if ([...sessions.values()].some(entry => entry.pi !== this && entry.pi.user === this.user && entry.pi.busy)) fail(409, '每个用户同时只能运行一个任务');
+    await sessionCapacity(`/data/sessions/${this.user}`, this.thread);
+    // Recheck after the asynchronous capacity read before claiming this user's task.
+    if ([...sessions.values()].some(entry => entry.pi.user === this.user && entry.pi.busy)) fail(409, '每个用户同时只能运行一个任务');
     this.busy = true; this.output = res;
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
     const abort = () => { if (this.busy && this.output === res) void cancel(this.user).catch(() => this.proc?.kill()); };
     res.once('close', abort);
     this.deadline = setTimeout(abort, 10 * 60000);
+    let checking = false;
+    this.storageCheck = setInterval(async () => {
+      if (checking) return; checking = true;
+      try { await sessionCapacity(`/data/sessions/${this.user}`, this.thread); }
+      catch { if (this.output === res) { res.write(JSON.stringify({ type: 'gateway_error', error: '对话存储达到上限，任务已停止。请联系管理员归档。' }) + '\n'); abort(); } }
+      finally { checking = false; }
+    }, 500);
     try { await this.command('prompt', { message }); }
     catch (error) { res.write(JSON.stringify({ type: 'gateway_error', error: error.message }) + '\n'); this.finish(); }
   }
 }
 async function instance(user, thread) {
   if (configuring) fail(409, '正在更新供应商，请稍后重试');
+  await sessionCapacity(`/data/sessions/${user}`, thread, { readExisting: true });
   const key = user + ':' + thread;
   let entry = sessions.get(key);
   if (entry) {
@@ -97,13 +109,15 @@ async function instance(user, thread) {
   }
   if (!entry) {
     if (sessions.size >= 4) {
-      const idle = [...sessions.values()].filter(item => !item.pi.busy).sort((a, b) => a.touched - b.touched)[0];
+      const idle = [...sessions.values()].filter(item => !item.initializing && !item.pi.busy).sort((a, b) => a.touched - b.touched)[0];
       if (!idle) fail(429, 'Agent 会话已满，请稍后重试');
       sessions.delete(idle.pi.key); idle.pi.proc?.kill();
     }
     const pi = new Pi(user, thread);
-    entry = { pi, ready: pi.start(), touched: Date.now() }; sessions.set(key, entry);
-    entry.ready.catch(() => { if (sessions.get(key) === entry) sessions.delete(key); });
+    entry = { pi, ready: pi.start(), initializing: true, touched: Date.now() }; sessions.set(key, entry);
+    entry.ready.then(() => { entry.initializing = false; }, () => {
+      pi.proc?.kill(); if (sessions.get(key) === entry) sessions.delete(key);
+    });
   }
   entry.touched = Date.now();
   await entry.ready; return entry.pi;
