@@ -49,6 +49,10 @@ docker compose ps
 构建上下文为仓库根目录，根 `.dockerignore` 采用允许列表。构建不包含 `.env`、会话、工作区等运行数据。
 更改服务代码后重新 build；无需删除持久化卷或工作区。
 
+xa 外网下载慢时，可手动运行 GitHub Actions 的 `Build Agent images`，下载短期保留的
+`agent-images` 构件，传到 xa 后执行 `docker load -i agent-images.tar.gz`、
+`docker compose up -d --no-build`。镜像内不包含任何运行密钥，构建无需服务器或模型凭据。
+
 将 `agent-tunnel.service.example` 安装到 xa 的 systemd，替换 SSH 地址，使用专用 `agent-tunnel` 用户，
 校验并固定 gz 的 SSH host key。gz 端公钥限制：
 

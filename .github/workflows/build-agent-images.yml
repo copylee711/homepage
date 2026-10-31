@@ -1,0 +1,22 @@
+name: Build Agent images
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build gateway and Pi runner
+        run: |
+          docker build -t copylee-agent-gateway:latest -f agent-platform/Dockerfile.gateway .
+          docker build -t copylee-agent-runner:latest -f agent-platform/Dockerfile.runner .
+          docker run --rm --entrypoint pi copylee-agent-runner:latest --version
+      - name: Export deployment images
+        run: docker save copylee-agent-gateway:latest copylee-agent-runner:latest | gzip -1 > agent-images.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-images
+          path: agent-images.tar.gz
+          retention-days: 3
