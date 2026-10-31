@@ -9,6 +9,7 @@ SSH 反向隧道提供 gateway，Compose 管理 gateway 与 Pi runner。`agent.c
 授权码 60 秒有效，绑定原 Homepage 会话并使用 S256 PKCE；仅持有服务端客户端密钥的 gateway
 可交换。ai 设置独立的 `__Host-copylee_ai` Cookie（Secure、HttpOnly、Path=/、无 Domain，最长 8 小时）。
 Homepage 不给新应用扩大主站 Cookie 的域或路径。
+Caddy 转发至 xa 时只保留两个 ai 专属 Cookie，剥离既有 Cloud 兼容会话 Cookie，避免把主站会话交给 Agent 服务。
 
 每次访问重新检查原会话、账户停用状态与当前角色。退出原会话、修改密码撤销会话、删除账户时，
 关联 Agent 会话级联失效。任务流每 15 秒重新检查权限，失败即中止。应用退出只撤销当前 Agent 会话。

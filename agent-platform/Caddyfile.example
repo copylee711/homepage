@@ -8,7 +8,9 @@ ai.copylee.cn {
         respond 404
     }
     handle /auth/* {
-        reverse_proxy 127.0.0.1:18081
+        reverse_proxy 127.0.0.1:18081 {
+            header_up Cookie "__Host-copylee_ai={cookie.__Host-copylee_ai}; __Host-copylee_ai_flow={cookie.__Host-copylee_ai_flow}"
+        }
     }
     handle {
         route {
@@ -17,9 +19,11 @@ ai.copylee.cn {
             request_header -X-Agent-User
             forward_auth 127.0.0.1:18081 {
                 uri /auth/check
+                header_up Cookie "__Host-copylee_ai={cookie.__Host-copylee_ai}; __Host-copylee_ai_flow={cookie.__Host-copylee_ai_flow}"
             }
             reverse_proxy 127.0.0.1:18081 {
                 flush_interval -1
+                header_up Cookie "__Host-copylee_ai={cookie.__Host-copylee_ai}; __Host-copylee_ai_flow={cookie.__Host-copylee_ai_flow}"
             }
         }
     }
