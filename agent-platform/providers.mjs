@@ -3,11 +3,11 @@ import { spawn } from 'node:child_process';
 import { fail } from './shared.mjs';
 
 export const presets = [
-  { id: 'opencode-go', name: 'OpenCode Go', baseUrl: 'https://opencode.ai/inference/go/openai/v1', api: 'openai-completions', model: 'deepseek-v4.1-flash', proxy: false },
+  { id: 'opencode-go', name: 'OpenCode Go', baseUrl: 'https://opencode.ai/inference/go/openai/v1', api: 'openai-completions', model: 'deepseek-v4.1-flash', proxy: false, reasoning: true },
   { id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', api: 'openai-responses', model: '', proxy: true },
   { id: 'anthropic', name: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', api: 'anthropic-messages', model: '', proxy: true },
   { id: 'google', name: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', api: 'google-generative-ai', model: '', proxy: true },
-  { id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', api: 'openai-completions', model: 'deepseek-flash', proxy: false },
+  { id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', api: 'openai-completions', model: 'deepseek-flash', proxy: false, reasoning: true },
 ];
 const root = process.env.PROVIDER_DATA_DIR || '/data';
 const file = root + '/providers.json';
@@ -38,7 +38,7 @@ export async function normalizeProvider(input) {
   if (old && old.baseUrl !== baseUrl && !input.apiKey) fail(422, '修改 API 地址时，请重新填写密钥');
   const apiKey = input.apiKey || old?.apiKey || '';
   if (typeof apiKey !== 'string' || apiKey.length > 1024 || /[\r\n]/.test(apiKey) || /^[!$]/.test(apiKey)) fail(422, '密钥格式无效');
-  const value = { id: input.id, name: input.name.trim(), baseUrl, api: input.api, model: input.model, proxy: input.proxy === true, apiKey };
+  const value = { id: input.id, name: input.name.trim(), baseUrl, api: input.api, model: input.model, proxy: input.proxy === true, reasoning: input.reasoning === true, apiKey };
   if (!providerKey(value)) fail(422, '请先填写 API 密钥');
   return value;
 }
@@ -46,9 +46,9 @@ export async function saveProvider(input) {
   const value = await normalizeProvider(input), config = await loadProviders();
   config.providers = [...config.providers.filter(item => item.id !== value.id), value]; config.active = value.id;
   const providers = Object.fromEntries(config.providers.map(item => [item.id, {
-    baseUrl: item.baseUrl, api: item.api, apiKey: item.apiKey || '$OPENCODE_API_KEY', authHeader: true,
+    baseUrl: item.baseUrl, api: item.api, apiKey: item.apiKey || '$OPENCODE_API_KEY', authHeader: item.api.startsWith('openai-'),
     headers: { 'User-Agent': 'copylee-pi-agent/0.1.0' },
-    models: [{ id: item.model, reasoning: true, input: ['text'], contextWindow: 128000, maxTokens: 16384 }],
+    models: [{ id: item.model, reasoning: item.reasoning === true, input: ['text'], contextWindow: 128000, maxTokens: 16384 }],
   }]));
   await mkdir(root + '/agent', { recursive: true, mode: 0o700 });
   await writeFile(root + '/agent/models.json.pending', JSON.stringify({ providers }), { mode: 0o600 });

@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-let auth, chat, busy = false, configs, streamController;
+let auth, chat, busy = false, configs, streamController, providerReasoning = false;
 const tools = new Map();
 document.documentElement.dataset.theme = localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 $('theme').onclick = () => { const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = theme; localStorage.setItem('theme', theme); };
@@ -100,11 +100,12 @@ $('prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && 
 $('stop').onclick = async () => { try { await api('/api/abort', { thread: chat }); if (!streamController) { setBusy(false); await selectChat(chat); } } catch (error) { notice(error.message, true); } };
 $('logout').onclick = async () => { try { await api('/auth/logout', {}); location.assign('/auth/login'); } catch (error) { notice(error.message, true); } };
 function fillProvider(value) {
+  providerReasoning = value.reasoning === true;
   $('provider-id').value = value.id; $('provider-name').value = value.name; $('provider-url').value = value.baseUrl; $('provider-api').value = value.api; $('provider-model').value = value.model; $('provider-proxy').checked = value.proxy;
   $('provider-key').value = ''; $('provider-key').type = 'password'; $('show-key').textContent = '显示密钥'; $('show-key').setAttribute('aria-pressed', 'false'); $('provider-status').textContent = '';
   $('key-help').textContent = value.hasKey ? '已保存密钥。留空保留原值；修改 API 地址时需重新填写。' : '密钥仅保存在服务端，不会回显，也不会保存到浏览器。';
 }
-function providerInput() { return { id: $('provider-id').value.trim(), name: $('provider-name').value.trim(), api: $('provider-api').value, baseUrl: $('provider-url').value.trim(), model: $('provider-model').value.trim(), proxy: $('provider-proxy').checked, apiKey: $('provider-key').value.trim() }; }
+function providerInput() { return { id: $('provider-id').value.trim(), name: $('provider-name').value.trim(), api: $('provider-api').value, baseUrl: $('provider-url').value.trim(), model: $('provider-model').value.trim(), proxy: $('provider-proxy').checked, reasoning: providerReasoning, apiKey: $('provider-key').value.trim() }; }
 async function loadProviders() { configs = await api('/api/providers'); const active = configs.providers.find(value => value.id === configs.active); if (active) $('model-name').textContent = active.model; }
 $('settings-button').onclick = async () => {
   try {
