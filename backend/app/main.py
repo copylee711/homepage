@@ -25,7 +25,18 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, select
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import accounts, audit, feedback, games, github_oauth, images, storage, teams, user_security
+from . import (
+    accounts,
+    agent_sso,
+    audit,
+    feedback,
+    games,
+    github_oauth,
+    images,
+    storage,
+    teams,
+    user_security,
+)
 from .accounts import current_user, profile
 from .auth import (
     COOKIE,
@@ -187,7 +198,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        if request.url.path.rstrip("/") == "/account/auth":
+        if request.url.path.rstrip("/") == "/account/auth" or request.url.path.startswith("/api/agent/"):
             response.headers["Referrer-Policy"] = "no-referrer"
             response.headers["Cache-Control"] = "no-store"
             response.headers["X-Robots-Tag"] = "noindex"
@@ -228,6 +239,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(friends_router)
     app.include_router(messages_router)
     app.include_router(github_oauth.router)
+    app.include_router(agent_sso.router)
 
     @app.get("/api/health")
     def health(session: Session = Depends(database)):

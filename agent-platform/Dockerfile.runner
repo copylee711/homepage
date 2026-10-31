@@ -1,0 +1,12 @@
+FROM node:24.21.0-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git python3 ripgrep curl \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/pi
+COPY agent-platform/package*.json ./
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+ENV PATH="/opt/pi/node_modules/.bin:$PATH" PI_CODING_AGENT_DIR=/data/agent HOME=/data
+WORKDIR /app
+COPY agent-platform/runner.mjs agent-platform/shared.mjs ./
+COPY agent-platform/providers.mjs agent-platform/provider-test.mjs ./
+USER 1000:1000
+CMD ["node", "runner.mjs"]

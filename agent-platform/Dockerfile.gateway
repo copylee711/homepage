@@ -1,0 +1,7 @@
+FROM node:24.21.0-bookworm-slim
+WORKDIR /app
+COPY agent-platform/gateway.mjs agent-platform/shared.mjs ./
+COPY agent-platform/web/ ./web/
+COPY src/styles/tokens.css ./web/tokens.css
+USER 1000:1000
+CMD ["node", "gateway.mjs"]

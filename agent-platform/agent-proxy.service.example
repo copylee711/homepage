@@ -1,0 +1,17 @@
+[Unit]
+Description=Private Agent network to loopback Mihomo relay
+After=docker.service mihomo.service
+Requires=docker.service
+
+[Service]
+User=agent-tunnel
+ExecStart=/usr/bin/python3 /opt/homepage/agent-platform/proxy-relay.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

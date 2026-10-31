@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # OAuth login credentials are server-only and independent of repository sync.
     github_client_id: str = ""
     github_client_secret: str = ""
+    # Dedicated first-party Agent SSO; never share the Homepage cookie with new apps.
+    agent_url: str = ""
+    agent_client_secret: str = ""
     session_hours: int = 12
     # 审计日志目录；留空时写入 data_dir/logs
     log_dir: Path | None = None
@@ -48,7 +51,7 @@ class Settings(BaseSettings):
     oss_region: str = "cn-guangzhou"
     oss_endpoint: str = ""
 
-    @field_validator("site_url", "image_url", "drive_url", "dav_url")
+    @field_validator("site_url", "image_url", "drive_url", "dav_url", "agent_url")
     @classmethod
     def valid_url(cls, value: str) -> str:
         if not value:

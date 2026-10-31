@@ -302,8 +302,6 @@ onBeforeUnmount(() => { clearInterval(timer); clearTimeout(warmup); captchaLifet
         <div class="switch" role="tablist">
           <button v-for="[value, label] in [['login', '登录'], ['register', '注册'], ['reset', '找回密码']]" :key="value" role="tab" :aria-selected="mode === value" :class="{ active: mode === value }" type="button" :disabled="busy" @click="switchMode(value as Mode)">{{ label }}</button>
         </div>
-        <button v-if="config?.githubEnabled && mode === 'login'" class="ghost wide" type="button" :disabled="busy" @click="startGithub">{{ busy ? '请稍候…' : '使用 GitHub 登录' }}</button>
-        <p v-if="config?.githubEnabled && mode === 'login'" class="hint">已有账户？请先用邮箱或 Passkey 登录，再到「账户设置 → 登录安全」绑定 GitHub。</p>
         <p v-if="mode === 'register' && config && !config.registrationOpen" class="closed">暂未开放注册，敬请期待。</p>
         <form v-else class="auth-form" @submit.prevent="submit">
           <fieldset :disabled="busy">
@@ -319,6 +317,8 @@ onBeforeUnmount(() => { clearInterval(timer); clearTimeout(warmup); captchaLifet
             <label v-if="mode === 'register'" class="agree"><input v-model="agree" type="checkbox">我已了解：本站只保存邮箱、昵称、头像、收藏与浏览记录，用于账户功能；可随时在账户设置中删除。</label>
             <button class="primary" type="submit">{{ busy ? '请稍候…' : mode === 'login' ? '登录' : mode === 'register' ? '注册并登录' : '重置密码' }}</button>
             <button v-if="mode === 'login' && canPasskey" class="ghost wide" type="button" @click="passkeyLogin">使用 Passkey 登录</button>
+            <button v-if="config?.githubEnabled && mode === 'login'" class="ghost wide github-login" type="button" @click="startGithub"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .75a11.25 11.25 0 0 0-3.56 21.92c.56.1.77-.24.77-.54v-2.1c-3.14.68-3.8-1.33-3.8-1.33-.51-1.3-1.25-1.65-1.25-1.65-1.03-.7.08-.69.08-.69 1.14.08 1.73 1.17 1.73 1.17 1.01 1.73 2.65 1.23 3.3.94.1-.73.4-1.23.72-1.52-2.5-.29-5.13-1.25-5.13-5.56 0-1.23.44-2.23 1.16-3.02-.12-.28-.5-1.43.11-2.98 0 0 .95-.3 3.1 1.15a10.79 10.79 0 0 1 5.64 0c2.15-1.46 3.1-1.15 3.1-1.15.61 1.55.23 2.7.11 2.98.72.79 1.16 1.79 1.16 3.02 0 4.32-2.63 5.27-5.14 5.55.4.35.76 1.03.76 2.08v3.1c0 .3.2.65.78.54A11.25 11.25 0 0 0 12 .75Z"/></svg>{{ busy ? '请稍候…' : '使用 GitHub 登录' }}</button>
+            <p v-if="config?.githubEnabled && mode === 'login'" class="hint">已有账户？请先用邮箱或 Passkey 登录，再到「账户设置 → 登录安全」绑定 GitHub。</p>
           </fieldset>
         </form>
       </div>
@@ -411,6 +411,8 @@ button:disabled { opacity:.5; cursor:default; }
 .ghost { padding:10px 16px; border:1px solid var(--line-strong); border-radius:10px; background:var(--surface); color:var(--text); font-size:13px; white-space:nowrap; transition:border-color .25s,color .25s; }
 .ghost:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
 .wide { width:100%; margin-top:20px; }
+.github-login { display:flex; align-items:center; justify-content:center; gap:9px; }
+.github-login svg { width:19px; height:19px; flex:none; }
 .danger { margin-top:20px; padding:11px 18px; border:1px solid rgba(209,92,92,.5); border-radius:10px; background:none; color:#d15c5c; }
 .hint,.optional { color:var(--faint); font-size:12px; }
 .hint { margin:8px 0 0; }

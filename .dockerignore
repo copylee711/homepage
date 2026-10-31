@@ -1,0 +1,13 @@
+**
+!agent-platform/
+!agent-platform/**
+!src/
+!src/styles/
+!src/styles/tokens.css
+agent-platform/.env
+agent-platform/*.local
+agent-platform/secrets/
+agent-platform/data/
+agent-platform/workspace/
+agent-platform/node_modules/
+agent-platform/tests/

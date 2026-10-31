@@ -1,0 +1,26 @@
+ai.copylee.cn {
+    import access_log ai
+    encode zstd gzip
+    header Cache-Control no-store
+    header Referrer-Policy no-referrer
+    header X-Robots-Tag noindex
+    handle /auth/check {
+        respond 404
+    }
+    handle /auth/* {
+        reverse_proxy 127.0.0.1:18081
+    }
+    handle {
+        route {
+            request_header -Remote-User
+            request_header -Remote-Email
+            request_header -X-Agent-User
+            forward_auth 127.0.0.1:18081 {
+                uri /auth/check
+            }
+            reverse_proxy 127.0.0.1:18081 {
+                flush_interval -1
+            }
+        }
+    }
+}

@@ -159,6 +159,14 @@ class UserSession(SQLModel, table=True):
     expires_at: float
 
 
+class AgentSession(SQLModel, table=True):
+    __tablename__ = "agent_session"
+    token_hash: str = Field(primary_key=True)
+    user_id: str = Field(index=True, foreign_key="user.id", ondelete="CASCADE")
+    parent_hash: str = Field(index=True, foreign_key="user_session.token_hash", ondelete="CASCADE")
+    expires_at: float
+
+
 class UserPasskey(SQLModel, table=True):
     __tablename__ = "user_passkey"
     id: str = Field(primary_key=True)

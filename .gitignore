@@ -16,5 +16,8 @@ __pycache__/
 .playwright-cli/
 output/playwright/
 output/ui-preview/
+agent-platform/data/
+agent-platform/workspace/
+agent-platform/secrets/
 .playwright-mcp/
 backend/.data-drive/

@@ -1,0 +1,17 @@
+[Unit]
+Description=Agent gateway reverse tunnel from xa to gz
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+User=agent-tunnel
+ExecStart=/usr/bin/ssh -NT -i /var/lib/agent-tunnel/id_ed25519 -o UserKnownHostsFile=/var/lib/agent-tunnel/known_hosts -o StrictHostKeyChecking=yes -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -R 127.0.0.1:18081:127.0.0.1:18080 agent-tunnel@YOUR_GZ_SSH_HOST
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

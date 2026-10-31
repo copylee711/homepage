@@ -13,6 +13,7 @@
             wrap json
             request>headers>X-Copylee-Esa-Origin delete
             request>headers>Captcha-Verify-Param delete
+            request>headers>X-Agent-Client-Secret delete
             request>uri query {
                 replace code REDACTED
                 replace state REDACTED

@@ -1,0 +1,48 @@
+import { test, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+let admin = true;
+const homepage = createServer(async (req, res) => {
+  assert.equal(req.headers['x-agent-client-secret'], 'a'.repeat(64));
+  res.setHeader('Content-Type', 'application/json');
+  if (req.url.endsWith('/exchange')) res.end(JSON.stringify({ token: 't'.repeat(64), expires_at: Date.now() / 1000 + 3600 }));
+  else res.end(JSON.stringify({ user: { id: 'user-1', name: 'Tester' }, can_execute: admin, admin }));
+});
+await new Promise(resolve => homepage.listen(0, '127.0.0.1', resolve));
+process.env.HOMEPAGE_URL = `http://127.0.0.1:${homepage.address().port}`;
+process.env.PUBLIC_URL = 'http://127.0.0.1';
+process.env.HOMEPAGE_CLIENT_SECRET = 'a'.repeat(64);
+process.env.RUNNER_SECRET = 'b'.repeat(64);
+process.env.SECURE_COOKIES = 'false';
+process.env.NODE_ENV = 'test';
+const { server } = await import('../gateway.mjs');
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+const base = `http://127.0.0.1:${server.address().port}`;
+after(async () => { await Promise.all([new Promise(resolve => server.close(resolve)), new Promise(resolve => homepage.close(resolve))]); });
+test('anonymous access redirects and a callback needs the original signed browser flow', async () => {
+  const root = await fetch(base, { redirect: 'manual' });
+  assert.equal(root.status, 302);
+  const start = await fetch(base + '/auth/login', { redirect: 'manual' });
+  const state = new URL(start.headers.get('location')).searchParams.get('state');
+  const cookie = start.headers.get('set-cookie').split(';')[0];
+  const missing = await fetch(base + '/auth/callback?code=valid-code&state=' + state, { redirect: 'manual' });
+  assert.equal(missing.status, 400);
+  const wrong = await fetch(base + '/auth/callback?code=valid-code&state=wrong', { headers: { cookie }, redirect: 'manual' });
+  assert.equal(wrong.status, 400);
+  const completed = await fetch(base + '/auth/callback?code=valid-code&state=' + state, { headers: { cookie }, redirect: 'manual' });
+  assert.equal(completed.status, 302);
+  assert.match(completed.headers.get('set-cookie'), /HttpOnly/);
+  assert.doesNotMatch(completed.headers.get('set-cookie'), /Domain=/);
+});
+test('server authorization and CSRF protect execution and provider settings', async () => {
+  const cookie = 'copylee_ai=' + 't'.repeat(64);
+  admin = false;
+  assert.equal((await fetch(base + '/api/providers', { headers: { cookie } })).status, 403);
+  admin = true;
+  const response = await fetch(base + '/api/providers/save', { method: 'POST', headers: { cookie, Origin: 'http://evil.test' }, body: '{}' });
+  assert.equal(response.status, 403);
+  const me = await fetch(base + '/api/me', { headers: { cookie } });
+  assert.equal(me.status, 200);
+  assert.equal((await me.json()).csrf.length > 20, true);
+  assert.equal(me.headers.get('referrer-policy'), 'no-referrer');
+});

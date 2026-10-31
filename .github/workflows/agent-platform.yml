@@ -1,0 +1,15 @@
+name: Check Agent platform
+on:
+  workflow_dispatch:
+  push:
+    paths: ["agent-platform/**", ".github/workflows/agent-platform.yml", ".dockerignore"]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: node --test agent-platform/tests/*.test.mjs
+      - run: docker compose --env-file .env.example config --quiet
+        working-directory: agent-platform
