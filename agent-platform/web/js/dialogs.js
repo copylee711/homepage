@@ -190,7 +190,7 @@ function setupGrants({ notice }) {
     const state = user.disabled ? '账户已停用' : user.admin ? '管理员 · 已有执行权限'
       : active ? '已授权至 ' + grantDate(user.expires_at) : user.expires_at ? '授权已过期' : '未授权';
     section.append(el('p', { class: 'hint', text: state }));
-    const quota = el('button', { type: 'button', class: 'btn btn-outline', text: '沙箱配额' });
+    const quota = el('button', { type: 'button', class: 'btn btn-quiet', text: '沙箱配额' });
     quota.addEventListener('click', () => void openQuota(user, confirmDialog));
     section.append(quota);
     if (!user.admin && !user.disabled) {

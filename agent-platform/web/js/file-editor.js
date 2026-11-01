@@ -11,7 +11,7 @@ export function askPath(title, initial = '') {
     const input = el('input', { value: initial, attrs: { 'aria-label': '工作区相对路径', maxlength: '1024', required: '' } });
     const hint = el('p', { class: 'field-help', text: '相对于工作区的路径，例如 notes/readme.md。目标目录需已存在。' });
     const form = el('form', {}, heading, input, hint);
-    const cancel = el('button', { type: 'button', class: 'btn btn-ghost', text: '取消' });
+    const cancel = el('button', { type: 'button', class: 'btn btn-quiet', text: '取消' });
     const submit = el('button', { type: 'submit', class: 'btn btn-solid', text: '确定' });
     form.append(el('div', { class: 'dialog-actions' }, cancel, submit));
     dialog.append(form); document.body.append(dialog);
@@ -32,7 +32,7 @@ export async function editFile(path, { confirm, saved }) {
   dialog.setAttribute('aria-labelledby', title.id);
   const editor = el('textarea', { class: 'file-editor-input', value: decoded.text, attrs: { 'aria-label': '文件内容', spellcheck: 'false' } });
   const status = el('p', { class: 'field-help', attrs: { role: 'status' } });
-  const close = el('button', { type: 'button', class: 'btn btn-ghost', text: '关闭' });
+  const close = el('button', { type: 'button', class: 'btn btn-quiet', text: '关闭' });
   const save = el('button', { type: 'button', class: 'btn btn-solid', text: '保存' });
   dialog.append(title, editor, status, el('div', { class: 'dialog-actions' }, close, save));
   document.body.append(dialog);

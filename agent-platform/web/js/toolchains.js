@@ -7,7 +7,7 @@ export function openToolchains({ confirm }) {
   const status = el('p', { class: 'field-help', attrs: { role: 'status' } });
   const list = el('div', { class: 'package-list' });
   const output = el('pre', { class: 'toolchain-output' });
-  dialog.append(el('div', { class: 'dialog-heading' }, el('h2', { text: '工作区工具链', id: 'toolchains-title' }), close),
+  dialog.append(el('div', { class: 'dialog-heading' }, el('div', {}, el('h2', { text: '工作区工具链', id: 'toolchains-title' })), close),
     el('div', { class: 'dialog-body' }, el('p', { class: 'hint', text: '仅为你安装到工作区 .tools，不需要重建镜像。基础镜像保留 Node、Python、pip/venv、Git 和 C/C++。Agent 也能在配额内自行安装其他缺失依赖。' }), status, list, output));
   document.body.append(dialog);
   let timer, running = false, pending = false;
@@ -24,8 +24,8 @@ export function openToolchains({ confirm }) {
       const installed = new Map((data.installed || []).map(item => [item.id, item.version]));
       for (const item of data.catalog || []) {
         const version = el('input', { value: installed.get(item.id) || item.version, class: 'tool-version', attrs: { 'aria-label': item.name + ' 固定版本号', maxlength: '40' } });
-        const install = el('button', { type: 'button', class: 'btn btn-outline', text: installed.has(item.id) ? '更新 / 重装' : '安装' });
-        const remove = installed.has(item.id) ? el('button', { type: 'button', class: 'btn btn-ghost', text: '移除' }) : null;
+        const install = el('button', { type: 'button', class: 'btn btn-quiet', text: installed.has(item.id) ? '更新 / 重装' : '安装' });
+        const remove = installed.has(item.id) ? el('button', { type: 'button', class: 'btn btn-quiet', text: '移除' }) : null;
         const change = async action => {
           if (pending || running) return;
           if (action === 'remove' && !await confirm({ title: '移除 ' + item.name + '？', body: '只删除这个工具的托管环境，项目文件和其他工具会保留。', confirmLabel: '移除', tone: 'danger' })) return;

@@ -28,7 +28,7 @@ export function openPackages({ confirm }) {
       for (const item of packages) {
         const saved = installed.get(item.name);
         const heading = el('h3', { text: item.name });
-        const action = el('button', { type: 'button', class: saved ? 'btn btn-ghost' : 'btn btn-outline', text: saved ? '移除' : '安装文本资源' });
+        const action = el('button', { type: 'button', class: saved ? 'btn btn-quiet' : 'btn btn-quiet', text: saved ? '移除' : '安装文本资源' });
         const info = el('p', { class: 'package-meta', text: 'v' + item.version + (saved ? ' · 已安装 ' + saved.resources.length + ' 个文本资源' : '') });
         const description = el('p', { text: item.description || (saved ? '已校验 SHA-512，扩展代码未加载。' : '暂无说明。') });
         action.addEventListener('click', async () => {

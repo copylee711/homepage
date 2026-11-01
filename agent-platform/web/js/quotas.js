@@ -7,7 +7,7 @@ export async function openQuota(user, confirm) {
   const close = iconButton('x', '关闭配额设置', 'icon-button');
   const status = el('p', { class: 'field-help', attrs: { role: 'status' } });
   const form = el('form');
-  dialog.append(el('div', { class: 'dialog-heading' }, title, close), status, form);
+  dialog.append(el('div', { class: 'dialog-heading' }, el('div', {}, title), close), status, form);
   document.body.append(dialog);
   let pending = false;
   close.addEventListener('click', () => { if (!pending) dialog.close(); });
