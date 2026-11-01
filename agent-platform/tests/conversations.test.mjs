@@ -43,6 +43,15 @@ test('permanent deletion removes only the owned history, backup and metadata', a
   assert.equal((await store.loadMeta(a)).chats[id], undefined);
   assert.ok((await store.list(b)).some(chat => chat.id === idB));
   await assert.rejects(store.delete(a, id), error => error.status === 404);
+  await writeFile(store.file(a, id), session('concurrent deletion'));
+  let release;
+  const gate = store.serialize(a, () => new Promise(resolve => { release = resolve; }));
+  await new Promise(resolve => setImmediate(resolve));
+  const deletion = store.delete(a, id);
+  const rename = store.rename(a, id, 'must not resurrect metadata');
+  const rejectedRename = assert.rejects(rename, error => error.status === 404);
+  release(); await gate; await deletion; await rejectedRename;
+  assert.equal((await store.loadMeta(a)).chats[id], undefined);
 });
 after(async () => rm(root, { recursive: true, force: true }));
 

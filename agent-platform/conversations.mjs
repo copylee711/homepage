@@ -86,8 +86,8 @@ export class ChatStore {
     catch (error) { await unlink(temporary).catch(() => {}); throw error; }
   }
   async update(user, thread, change) {
-    await this.assertOwned(user, thread);
     return this.serialize(user, async () => {
+      await this.assertOwned(user, thread);
       const meta = await this.loadMeta(user);
       const next = change({ ...(meta.chats[thread] || {}) });
       if (next && typeof next === 'object') meta.chats[thread] = next;
