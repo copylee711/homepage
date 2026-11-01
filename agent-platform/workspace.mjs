@@ -34,11 +34,13 @@ async function run(user, op, fields) {
   return sandboxTool(token, { op, ...fields });
 }
 
-export async function listWorkspace(user, path) {
+export async function listWorkspace(user, path, fresh = false) {
+  if (fresh) invalidateWorkspace(user);
   workspacePath(path, true);
   return snapshot(user, 'list:' + path, () => run(user, 'list', { path }));
 }
-export async function previewWorkspace(user, path, limit) {
+export async function previewWorkspace(user, path, limit, fresh = false) {
+  if (fresh) invalidateWorkspace(user);
   const size = Math.min(MAX_DOWNLOAD, Math.max(1024, Number(limit) || MAX_PREVIEW));
   workspacePath(path);
   const result = await snapshot(user, 'read:' + size + ':' + path, () => run(user, 'file-read', { path, limit: size }));
@@ -58,6 +60,7 @@ export async function uploadWorkspace(user, path, content, overwrite = false, re
   if (overwrite !== true && overwrite !== false) fail(422, '覆盖参数无效');
   if (revision !== undefined && (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision))) fail(422, '文件版本无效');
   const result = await run(user, 'file-write', { path, content, overwrite, revision });
+  invalidateWorkspace(user);
   return { ...result, name: fileName(path), size: Buffer.byteLength(content, 'utf8'), overwritten: overwrite };
 }
 export async function manageWorkspace(user, input) {
@@ -65,5 +68,7 @@ export async function manageWorkspace(user, input) {
   if (!['mkdir', 'delete', 'move'].includes(input.action)) fail(422, '文件操作无效');
   workspacePath(input.path);
   if (input.action === 'move') workspacePath(input.destination);
-  return run(user, 'file-manage', { action: input.action, path: input.path, destination: input.destination });
+  const result = await run(user, 'file-manage', { action: input.action, path: input.path, destination: input.destination });
+  invalidateWorkspace(user);
+  return result;
 }

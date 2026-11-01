@@ -186,10 +186,10 @@ export const server = createServer(async (req, res) => {
         return sendExport(res, await response.json());
       }
       if (url.pathname === '/api/files' && req.method === 'GET') {
-        const response = await runner('/files/list', auth.user.id, { path: filePath(url) }); return json(res, 200, await response.json());
+        const response = await runner('/files/list', auth.user.id, { path: filePath(url), fresh: url.searchParams.get('fresh') === '1' }); return json(res, 200, await response.json());
       }
       if (url.pathname === '/api/files/preview' && req.method === 'GET') {
-        const response = await runner('/files/preview', auth.user.id, { path: filePath(url), limit: Number(url.searchParams.get('limit')) || 65536 });
+        const response = await runner('/files/preview', auth.user.id, { path: filePath(url), limit: Number(url.searchParams.get('limit')) || 65536, fresh: url.searchParams.get('fresh') === '1' });
         return json(res, 200, await response.json());
       }
       if (url.pathname === '/api/files/download' && req.method === 'GET') {

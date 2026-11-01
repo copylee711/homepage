@@ -24,7 +24,7 @@ export function askPath(title, initial = '') {
 }
 
 export async function editFile(path, { confirm, saved }) {
-  const file = await get('/api/files/preview?path=' + encodeURIComponent(path) + '&limit=262144');
+  const file = await get('/api/files/preview?path=' + encodeURIComponent(path) + '&limit=262144&fresh=1');
   const decoded = decodePreview(file);
   if (decoded.binary || file.truncated || !file.revision) throw new Error('仅能编辑完整的 UTF-8 文本文件，大小不超过 256 KiB');
   const dialog = el('dialog', { class: 'dialog file-editor' });

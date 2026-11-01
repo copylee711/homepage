@@ -54,7 +54,7 @@ export class WorkspacePanel {
     this.up.addEventListener('click', () => {
       if (this.crumbPath !== null && this.crumbPath !== undefined) this.navigate(this.crumbPath);
     });
-    this.refresh.addEventListener('click', () => this.load(this.path));
+    this.refresh.addEventListener('click', () => this.load(this.path, true));
     this.upload.addEventListener('click', () => this.fileInput.click());
     this.fileInput.addEventListener('change', () => { const file = this.fileInput.files?.[0]; this.fileInput.value = ''; if (file) void this.uploadFile(file); });
     this.closePreview.addEventListener('click', () => this.clearPreview());
@@ -85,7 +85,7 @@ export class WorkspacePanel {
   open() { this.panel.hidden = false; if (!this.loading) void this.load(this.path); }
   close() { this.panel.hidden = true; }
   clearPreview() { this.previewRequest += 1; this.selected = null; this.preview.hidden = true; }
-  async load(path = '') {
+  async load(path = '', fresh = false) {
     if (this.loading) return;
     this.loading = true;
     this.error = '';
@@ -93,7 +93,7 @@ export class WorkspacePanel {
     if (cached) { this.applyListing(cached); this.loading = false; this.render(); this.loading = true; }
     this.renderStatus('正在读取工作区…', true);
     try {
-      const value = await this.request('/api/files?path=' + encodeURIComponent(normalizeWorkspacePath(path)));
+      const value = await this.request('/api/files?path=' + encodeURIComponent(normalizeWorkspacePath(path)) + (fresh ? '&fresh=1' : ''));
       this.snapshots.set(path, value);
       while (this.snapshots.size > 20) this.snapshots.delete(this.snapshots.keys().next().value);
       this.applyListing(value);

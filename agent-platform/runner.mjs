@@ -218,8 +218,8 @@ export const server = createServer(async (req, res) => {
     if (req.url === '/chats/export') return json(res, 200, await chats.export(input.user, input.thread, input.format, await secretValues()));
     // Workspace calls use an independent short lease; they never cancel model work.
     if (req.url.startsWith('/files/') && [...sessions.values()].some(entry => entry.pi.user === input.user && entry.pi.busy)) invalidateWorkspace(input.user);
-    if (req.url === '/files/list') return json(res, 200, await listWorkspace(input.user, input.path));
-    if (req.url === '/files/preview') return json(res, 200, await previewWorkspace(input.user, input.path, input.limit));
+    if (req.url === '/files/list') return json(res, 200, await listWorkspace(input.user, input.path, input.fresh === true));
+    if (req.url === '/files/preview') return json(res, 200, await previewWorkspace(input.user, input.path, input.limit, input.fresh === true));
     if (req.url === '/files/download') return json(res, 200, await downloadWorkspace(input.user, input.path));
     if (req.url === '/files/upload') return json(res, 200, await uploadWorkspace(input.user, input.path, input.content, input.overwrite === true, input.revision));
     if (req.url === '/files/manage') return json(res, 200, await manageWorkspace(input.user, input));
