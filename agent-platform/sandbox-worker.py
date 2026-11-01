@@ -1,6 +1,7 @@
 """Runs INSIDE an unprivileged, networkless, bounded disposable container."""
 import base64
 import json
+import hashlib
 import os
 from pathlib import Path
 import selectors
@@ -9,6 +10,11 @@ import stat
 import subprocess
 import sys
 import time
+import tempfile
+import importlib.util
+
+tool_spec = importlib.util.spec_from_file_location('toolchains_worker', Path(__file__).with_name('toolchains-worker.py'))
+toolchains_worker = importlib.util.module_from_spec(tool_spec); tool_spec.loader.exec_module(toolchains_worker)
 
 LIMIT = 1024 * 1024
 MAX_WRITE = 256 * 1024
@@ -81,7 +87,8 @@ def read_file(raw, value):
     with target.open("rb") as file:
         data = file.read(limit + 1)
     return {"data": base64.b64encode(data[:limit]).decode(), "size": size,
-            "truncated": len(data) > limit or size > limit, "path": relative}
+            "truncated": len(data) > limit or size > limit, "path": relative,
+            "revision": hashlib.sha256(data).hexdigest() if len(data) <= limit and size <= limit else None}
 
 
 def write_file(raw, value):
@@ -99,17 +106,69 @@ def write_file(raw, value):
     if not name or name in {".", ".."} or "/" in name or "\\" in name:
         raise ValueError("文件名无效")
     target = parent / name
-    if target.is_symlink() or (target.exists() and target.is_dir()):
+    if target.is_symlink() or (target.exists() and not target.is_file()):
         raise ValueError("不能覆盖符号链接或文件夹")
     overwrite = value.get("overwrite") is True
+    expected = value.get("revision")
+    if expected is not None:
+        if not isinstance(expected, str) or len(expected) != 64 or not target.is_file():
+            raise FileExistsError("文件已存在变更，请重新读取后保存")
+        with target.open("rb") as current:
+            original = current.read(MAX_WRITE + 1)
+        if hashlib.sha256(original).hexdigest() != expected:
+            raise FileExistsError("文件已存在变更，请重新读取后保存")
     if target.exists() and not overwrite:
         raise FileExistsError("文件已存在，请确认覆盖")
-    flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
-    flags |= os.O_TRUNC if overwrite else os.O_EXCL
-    descriptor = os.open(target, flags, 0o644)
-    with os.fdopen(descriptor, "wb") as file:
-        file.write(data)
-    return {"ok": True, "path": relative_to_root(target), "size": len(data)}
+    if overwrite:
+        descriptor, temporary = tempfile.mkstemp(prefix=".copylee-save-", dir=parent)
+        try:
+            with os.fdopen(descriptor, "wb") as file:
+                file.write(data)
+                file.flush()
+                os.fsync(file.fileno())
+            os.chmod(temporary, stat.S_IMODE(target.stat().st_mode) if target.exists() else 0o644)
+            os.replace(temporary, target)
+        finally:
+            if os.path.exists(temporary): os.unlink(temporary)
+    else:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(target, flags, 0o644)
+        with os.fdopen(descriptor, "wb") as file:
+            file.write(data)
+    return {"ok": True, "path": relative_to_root(target), "size": len(data), "revision": hashlib.sha256(data).hexdigest()}
+
+
+def manage_file(value):
+    action = value.get("action")
+    raw = candidate(value.get("path", ""))
+    parent, _ = inside(raw.parent)
+    target = parent / raw.name
+    if target == ROOT or raw.name in {".", "..", ""}:
+        raise ValueError("不能修改工作区根目录")
+    if action == "mkdir":
+        if target.exists() or target.is_symlink():
+            raise FileExistsError("文件已存在")
+        target.mkdir()
+    elif action == "delete":
+        # Empty directories only: no silent recursive destruction.
+        if target.is_symlink() or target.is_file():
+            target.unlink()
+        elif target.is_dir():
+            target.rmdir()
+        else:
+            raise ValueError("文件或目录不存在")
+    elif action == "move":
+        dest = candidate(value.get("destination", ""))
+        dest_parent, _ = inside(dest.parent)
+        destination = dest_parent / dest.name
+        if destination == ROOT or dest.name in {".", "..", ""}:
+            raise ValueError("目标路径无效")
+        if destination.exists() or destination.is_symlink():
+            raise FileExistsError("文件已存在，请选择其他目标")
+        target.rename(destination)
+    else:
+        raise ValueError("文件操作无效")
+    return {"ok": True}
 
 
 def bash(value):
@@ -119,10 +178,14 @@ def bash(value):
     proc = subprocess.Popen(["/bin/bash", "-c", command], cwd="/workspace",
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=True,
-                            env={"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/tmp",
-                                 "LANG": "C.UTF-8", "TMPDIR": "/tmp"})
+                            env={"PATH": "/workspace/.venv/bin:/workspace/.tools/bin:/workspace/.tools/node_modules/.bin:/workspace/node_modules/.bin:/usr/local/bin:/usr/bin:/bin", "HOME": "/tmp",
+                                 "LANG": "C.UTF-8", "TMPDIR": "/tmp", "npm_config_cache": "/tmp/npm-cache",
+                                 "PIP_CACHE_DIR": "/tmp/pip-cache", "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+                                 **{key: os.environ[key] for key in ['HTTP_PROXY', 'HTTPS_PROXY'] if key in os.environ},
+                                 **{key.lower(): os.environ[key] for key in ['HTTP_PROXY', 'HTTPS_PROXY'] if key in os.environ}})
     output = bytearray()
-    deadline = time.monotonic() + min(60, max(1, float(value.get("timeout") or 60)))
+    maximum = min(600, max(10, int(value.get('_timeout_limit', 180))))
+    deadline = time.monotonic() + min(maximum, max(1, float(value.get("timeout") or maximum)))
     poll = selectors.DefaultSelector()
     poll.register(proc.stdout, selectors.EVENT_READ)
     try:
@@ -135,7 +198,7 @@ def bash(value):
             output.extend(chunk)
             if len(output) > LIMIT:
                 raise ValueError("工具输出超过 1 MiB，任务已停止")
-        raise ValueError("命令超过 60 秒上限，任务已停止")
+        raise ValueError("命令超过分配的时限，任务已停止")
     finally:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
@@ -147,6 +210,8 @@ def bash(value):
 
 def main(value):
     op = value.get("op")
+    if op in {"toolchain-list", "toolchain-change"}:
+        return toolchains_worker.manage(value, ROOT, bash, inside)
     # Browser-visible file APIs are root-restricted inside this container.
     if op == "list":
         return list_workspace(value.get("path", ""))
@@ -154,6 +219,8 @@ def main(value):
         return read_file(value.get("path", ""), value)
     if op == "file-write":
         return write_file(value.get("path", ""), value)
+    if op == "file-manage":
+        return manage_file(value)
     if op == "bash":
         return bash(value)
     path = Path(value.get("path", ""))

@@ -1,6 +1,8 @@
 import { el, icon, iconButton, triggerDownload } from './dom.js';
 import { get, post, ApiError } from './api.js';
 import { formatBytes, formatDateTime, normalizeWorkspacePath } from './format.js';
+import { openMenu } from './menu.js';
+import { askPath, editFile } from './file-editor.js';
 
 const MAX_UPLOAD = 256 * 1024;
 const PREVIEW_LIMIT = 64 * 1024;
@@ -16,7 +18,7 @@ export function decodePreview(value) {
 
 export class WorkspacePanel {
   constructor({ panel, crumb, list, status, preview, previewTitle, previewMeta, previewBody, previewNote,
-    up, refresh, upload, fileInput, closePreview, download, insert, onInsert, notice, confirmOverwrite, request = get }) {
+    up, refresh, upload, fileInput, closePreview, download, insert, onInsert, notice, confirmOverwrite, confirm, request = get }) {
     this.request = request;
     this.panel = panel;
     this.crumb = crumb;
@@ -37,6 +39,8 @@ export class WorkspacePanel {
     this.onInsert = onInsert;
     this.notice = notice;
     this.confirmOverwrite = confirmOverwrite;
+    this.confirm = confirm;
+    this.snapshots = new Map();
     this.path = '';
     this.entries = [];
     this.selected = null;
@@ -64,29 +68,67 @@ export class WorkspacePanel {
       if (entry.type === 'dir') this.navigate(entry.path);
       else void this.previewFile(entry.path);
     });
+    this.list.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      this.context(event.target.closest('[data-path]') || this.list, { x: event.clientX, y: event.clientY });
+    });
+    this.list.addEventListener('keydown', event => {
+      if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+        event.preventDefault(); this.context(event.target.closest('[data-path]') || this.list);
+      }
+    });
+    // A visible menu also makes file management discoverable on touch devices.
+    const actions = iconButton('more-horizontal', '工作区文件操作', 'icon-button');
+    this.refresh.after(actions);
+    actions.addEventListener('click', () => this.context(actions));
   }
-  open() { this.panel.hidden = false; if (!this.entries.length && !this.loading) void this.load(''); }
+  open() { this.panel.hidden = false; if (!this.loading) void this.load(this.path); }
   close() { this.panel.hidden = true; }
   clearPreview() { this.previewRequest += 1; this.selected = null; this.preview.hidden = true; }
   async load(path = '') {
     if (this.loading) return;
     this.loading = true;
     this.error = '';
+    const cached = this.snapshots.get(path);
+    if (cached) { this.applyListing(cached); this.loading = false; this.render(); this.loading = true; }
     this.renderStatus('正在读取工作区…', true);
     try {
       const value = await this.request('/api/files?path=' + encodeURIComponent(normalizeWorkspacePath(path)));
-      this.path = normalizeWorkspacePath(value.path);
-      this.crumbPath = value.parent === null || value.parent === undefined ? null : normalizeWorkspacePath(value.parent);
-      this.entries = (Array.isArray(value.entries) ? value.entries : [])
-        .map(entry => ({ ...entry, path: normalizeWorkspacePath(entry.path) }))
-        .filter(entry => entry.path !== '');
-      this.truncated = value.truncated === true;
+      this.snapshots.set(path, value);
+      while (this.snapshots.size > 20) this.snapshots.delete(this.snapshots.keys().next().value);
+      this.applyListing(value);
     } catch (error) {
       this.error = error.message;
     } finally {
       this.loading = false;
       this.render();
     }
+  }
+  applyListing(value) {
+    this.path = normalizeWorkspacePath(value.path);
+    this.crumbPath = value.parent == null ? null : normalizeWorkspacePath(value.parent);
+    this.entries = (Array.isArray(value.entries) ? value.entries : []).map(entry => ({ ...entry, path: normalizeWorkspacePath(entry.path) })).filter(entry => entry.path !== '');
+    this.truncated = value.truncated === true;
+  }
+  context(anchor, point) {
+    const entry = this.entries.find(item => item.path === anchor.dataset.path);
+    const run = async fn => { try { await fn(); } catch (error) { this.notice?.(error.message, { tone: 'error' }); } };
+    const mutate = async input => { await post('/api/files/manage', input); this.snapshots.clear(); this.clearPreview(); await this.load(this.path); };
+    const prefix = this.path ? this.path + '/' : '';
+    openMenu({ anchor, point, label: '工作区文件操作', items: [
+      entry?.type === 'file' && { icon: 'edit', label: '编辑文本', action: () => void run(() => editFile(entry.path, { confirm: this.confirm, saved: () => { this.snapshots.clear(); void this.load(this.path); } })) },
+      entry?.type === 'file' && { icon: 'download', label: '下载文件', action: () => triggerDownload('/api/files/download?path=' + encodeURIComponent(entry.path)) },
+      entry && { icon: 'copy', label: '引用路径到对话', action: () => this.onInsert?.(entry.path) },
+      { icon: 'file', label: '新建文本文件', action: () => void run(async () => {
+        const path = await askPath('新建文本文件', prefix);
+        if (path) { await post('/api/files/upload', { path, content: '', overwrite: false }); this.snapshots.clear(); await this.load(this.path); await editFile(path, { confirm: this.confirm, saved: () => void this.load(this.path) }); }
+      }) },
+      { icon: 'folder', label: '新建文件夹', action: () => void run(async () => { const path = await askPath('新建文件夹', prefix); if (path) await mutate({ action: 'mkdir', path }); }) },
+      entry && { icon: 'edit', label: '重命名 / 移动', action: () => void run(async () => { const destination = await askPath('重命名 / 移动', entry.path); if (destination && destination !== entry.path) await mutate({ action: 'move', path: entry.path, destination }); }) },
+      entry && { icon: 'trash', label: '删除' + (entry.type === 'dir' ? '空文件夹' : '文件'), danger: true, action: () => void run(async () => {
+        if (await this.confirm?.({ title: '删除“' + entry.name + '”？', body: '删除后无法撤销。文件夹必须为空。', confirmLabel: '删除', tone: 'danger' })) await mutate({ action: 'delete', path: entry.path });
+      }) },
+    ] });
   }
   navigate(path) { this.clearPreview(); void this.load(normalizeWorkspacePath(path)); }
   renderStatus(text, spinner = false) {

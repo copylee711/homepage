@@ -1471,3 +1471,26 @@ kbd { padding: 2px 6px; border: 1px solid var(--line); border-bottom-color: var(
   }
   .conversation { scroll-behavior: auto; }
 }
+/* File workflows use the same quiet surfaces and focus tokens as settings. */
+.file-dialog { width: min(92vw, 480px); padding: 24px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--text); }
+.file-dialog input { width: 100%; padding: 10px 12px; margin: 16px 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+.file-editor { width: min(94vw, 1000px); max-height: 90dvh; padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--text); }
+.file-editor h2 { font-size: 15px; overflow-wrap: anywhere; margin-bottom: 12px; }
+.file-editor-input { width: 100%; height: 60dvh; min-height: 160px; resize: vertical; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font: 13px/1.65 var(--font-mono); tab-size: 2; white-space: pre; overflow: auto; }
+.file-editor-input:focus-visible, .file-dialog input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.file-editor .dialog-actions, .file-dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.file-editor .field-help, .file-dialog .field-help { color: var(--muted); font-size: 12px; margin-top: 8px; }
+.package-dialog { width: min(94vw, 820px); }
+.package-search { display: flex; gap: 8px; margin: 16px 0 10px; }
+.package-search input { min-width: 0; flex: 1; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+.package-list { display: grid; gap: 0; }
+.package-row { display: flex; align-items: start; justify-content: space-between; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.package-row > div { min-width: 0; }
+.package-row h3 { font: 600 14px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+.package-row p { font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; }
+.package-row .package-meta { margin: 4px 0; color: var(--muted); }
+.package-row button { flex-shrink: 0; }
+@media (max-width: 600px) { .package-row { flex-direction: column; gap: 8px; } }
+.toolchain-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 240px; }
+.tool-version { width: 90px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: 12px var(--font-mono); }
+.toolchain-output { max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; font: 11px/1.6 var(--font-mono); background: var(--bg); border-radius: 8px; }

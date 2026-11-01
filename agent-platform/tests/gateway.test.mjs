@@ -63,10 +63,10 @@ test('an execution grant never grants provider or user-management privileges', a
   const cookie = 'copylee_ai=' + 't'.repeat(64);
   const me = await (await fetch(base + '/api/me', { headers: { cookie } })).json();
   assert.equal(me.can_execute, true); assert.equal(me.admin, false);
-  for (const path of ['/api/providers', '/api/grants']) {
+  for (const path of ['/api/providers', '/api/grants', '/api/packages', '/api/quotas?user_id=other']) {
     assert.equal((await fetch(base + path, { headers: { cookie } })).status, 403);
   }
-  for (const path of ['/api/providers/save', '/api/providers/test', '/api/grants/save']) {
+  for (const path of ['/api/providers/save', '/api/providers/test', '/api/grants/save', '/api/packages/change', '/api/quotas/save']) {
     assert.equal((await fetch(base + path, { method: 'POST', headers: { cookie,
       Origin: 'http://127.0.0.1', 'X-CSRF-Token': me.csrf }, body: JSON.stringify({ user_id: 'other', days: 30 }) })).status, 403);
   }
@@ -82,7 +82,7 @@ test('new file/chat endpoints enforce CSRF and derive tenant identity; local mod
   const headers = { cookie, Origin: 'http://127.0.0.1', 'X-CSRF-Token': me.csrf };
   assert.equal((await fetch(base + '/api/files', { headers })).status, 200);
   assert.equal(lastRunner.value.user, createHash('sha256').update('user-1').digest('hex'));
-  for (const path of ['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/files/upload']) {
+  for (const path of ['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/files/upload', '/api/files/manage', '/api/toolchains/change', '/api/toolchains/cancel']) {
     const value = JSON.stringify({ user: 'forged', thread: '11111111-1111-4111-8111-111111111111', title: 'test', content: 'test', path: 'test.txt' });
     assert.equal((await fetch(base + path, { method: 'POST', headers: { cookie }, body: value })).status, 403);
     assert.equal((await fetch(base + path, { method: 'POST', headers, body: value })).status, 200);

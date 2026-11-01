@@ -7,6 +7,7 @@ Requires=docker.service
 Type=simple
 EnvironmentFile=/etc/copylee-agent-sandbox.env
 ExecStart=/usr/bin/python3 /opt/homepage/agent-platform/sandbox-broker.py
+ExecStartPre=/bin/sh /opt/homepage/agent-platform/sandbox-network.sh
 Restart=always
 RestartSec=3
 UMask=0077

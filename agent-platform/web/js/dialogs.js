@@ -1,6 +1,7 @@
 import { $, el, platformKey } from './dom.js';
 import { get, post } from './api.js';
 import { grantDate } from './format.js';
+import { openQuota } from './quotas.js';
 
 function show(dialog) {
   if (!dialog.open) dialog.showModal();
@@ -189,6 +190,9 @@ function setupGrants({ notice }) {
     const state = user.disabled ? '账户已停用' : user.admin ? '管理员 · 已有执行权限'
       : active ? '已授权至 ' + grantDate(user.expires_at) : user.expires_at ? '授权已过期' : '未授权';
     section.append(el('p', { class: 'hint', text: state }));
+    const quota = el('button', { type: 'button', class: 'btn btn-outline', text: '沙箱配额' });
+    quota.addEventListener('click', () => void openQuota(user, confirmDialog));
+    section.append(quota);
     if (!user.admin && !user.disabled) {
       const actions = el('div', { class: 'grant-actions' });
       const duration = el('select', { attrs: { 'aria-label': '为 ' + user.name + ' 选择授权期限' } });

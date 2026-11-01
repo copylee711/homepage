@@ -31,6 +31,23 @@ function run(value) {
 }
 const skip = python ? false : 'Python 3 is not installed in this environment';
 
+test('editor revisions prevent lost updates and file management cannot leave the workspace', { skip }, () => {
+  assert.equal(run({ op: 'file-write', path: 'edit.txt', content: 'original' }).status, 0);
+  const read = run({ op: 'file-read', path: 'edit.txt' }).output;
+  assert.match(read.revision, /^[a-f0-9]{64}$/);
+  const save = run({ op: 'file-write', path: 'edit.txt', content: 'edited', overwrite: true, revision: read.revision });
+  assert.equal(save.status, 0);
+  assert.notEqual(save.output.revision, read.revision);
+  assert.match(run({ op: 'file-write', path: 'edit.txt', content: 'stale', overwrite: true, revision: read.revision }).output.error, /变更/);
+  assert.equal(run({ op: 'file-manage', action: 'mkdir', path: 'managed' }).status, 0);
+  assert.equal(run({ op: 'file-manage', action: 'move', path: 'edit.txt', destination: 'managed/edit.txt' }).status, 0);
+  assert.notEqual(run({ op: 'file-manage', action: 'delete', path: 'managed' }).status, 0);
+  assert.notEqual(run({ op: 'file-manage', action: 'move', path: 'managed/edit.txt', destination: '../escape.txt' }).status, 0);
+  assert.notEqual(run({ op: 'file-manage', action: 'delete', path: '.' }).status, 0);
+  assert.equal(run({ op: 'file-manage', action: 'delete', path: 'managed/edit.txt' }).status, 0);
+  assert.equal(run({ op: 'file-manage', action: 'delete', path: 'managed' }).status, 0);
+});
+
 test('lists only the user workspace and marks directories/files', { skip }, () => {
   const result = run({ op: 'list', path: '' });
   assert.equal(result.status, 0);

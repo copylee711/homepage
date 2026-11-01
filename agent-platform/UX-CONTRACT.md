@@ -34,8 +34,10 @@ and expired/revoked parent sessions cannot use an execution grant.
 ## Sandboxes
 
 Each user has a distinct bounded persistent workspace. Tool calls run in disposable,
-unprivileged networkless containers. `/workspace` persists, `/tmp` and background
-processes do not. A task can run for at most 10 minutes; a command for at most 60 seconds.
+unprivileged containers on an internal network. Public HTTP(S) uses an IP-validated
+egress proxy; host/private/metadata and direct access are blocked. `/workspace`
+persists, `/tmp` and background processes do not. A task runs at most 10 minutes;
+per-user command, memory, CPU, process and disk quotas are administered separately.
 Errors are text, never executable markup. Provider keys are never returned to browsers
 or passed to tool containers. New task, cancellation, authorization and service failures
 must remain distinguishable in feedback. Mobile dialogs scroll within the viewport;
@@ -43,6 +45,27 @@ Escape closes idle dialogs and focus returns to their trigger.
 
 
 ## Conversation and file workflows
+
+- Read-only conversation snapshots use Pi's canonical branch/compaction projection
+  and never start a model process. Server snapshots invalidate on file version changes.
+  Recent chats and the root workspace listing preload after authentication; bounded
+  memory caches render immediately then refresh, with no conversation localStorage.
+  Workspace server read snapshots last at most 2 seconds and invalidate on mutations
+  and model task boundaries. Active model reads bypass the snapshot cache.
+- Workspace right-click/Shift+F10 and a visible menu provide new file/folder,
+  text editing, move/rename and delete. Deletion requires confirmation and directories
+  must be empty. Paths remain tenant-rooted; destination overwrite is refused.
+  The UTF-8 editor accepts at most 256 KiB, has Ctrl/Cmd+S and unsaved-change confirmation.
+  Saves check a SHA-256 revision and atomically replace only an unchanged file.
+- Admins manage Pi package text resources at fixed versions. Catalog content is
+  escaped text. Downloads verify SHA-512 and have archive/file/size bounds; package
+  code, dependencies, scripts, themes and JS/TS extensions are not executed.
+- Authorized users manage their own optional toolchain versions in `.tools`.
+  Install jobs are mutually exclusive with their model work and require continuing
+  authorized polling to renew a 20-second lease. Closing a running job asks to stop.
+  Administrators assign quotas from each user's grant row; quota editing does not
+  change grants. Disk resizing requires idle tools, checks existing data, refuses
+  unsafe shrinking and never deletes files to meet the new limit.
 
 - The sidebar groups pinned chats and recent dates, filters titles locally, and offers
   rename, pin/unpin, archive/unarchive and Markdown/JSON export. Metadata is server-side

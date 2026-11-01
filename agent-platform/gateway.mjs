@@ -38,10 +38,19 @@ async function sso(path, value) {
   }
   return response.json();
 }
+const identityRequests = new Map();
 async function identity(req) {
   const token = cookies(req)[cookieName];
   if (!token || !/^[A-Za-z0-9_-]{40,128}$/.test(token)) fail(401, '请先登录');
-  return { ...await sso('/introspect', { token }), token };
+  // Coalesce concurrent asset/API checks only; retain no completed authorization.
+  const key = createHash('sha256').update(token).digest('hex');
+  let pending = identityRequests.get(key);
+  if (!pending) {
+    pending = sso('/introspect', { token });
+    if (identityRequests.size < 256) identityRequests.set(key, pending);
+    pending.finally(() => { if (identityRequests.get(key) === pending) identityRequests.delete(key); }).catch(() => {});
+  }
+  return { ...await pending, token };
 }
 function writeAccess(req, auth) {
   if (req.headers.origin !== publicURL || !equal(req.headers['x-csrf-token'], csrf(auth.token))) fail(403, '请求校验失败');
@@ -157,6 +166,17 @@ export const server = createServer(async (req, res) => {
       }
       if (!auth.can_execute) fail(403, '此账户尚未获得 Agent 执行权限');
       if (url.pathname.startsWith('/api/providers') && !auth.admin) fail(403, '仅管理员可管理供应商');
+      if (url.pathname === '/api/toolchains' && req.method === 'GET') {
+        const response = await runner('/toolchains', auth.user.id, {}); return json(res, 200, await response.json());
+      }
+      if (url.pathname.startsWith('/api/packages') && !auth.admin) fail(403, '仅管理员可管理扩展');
+      if (url.pathname.startsWith('/api/quotas') && !auth.admin) fail(403, '仅管理员可分配沙箱配额');
+      if (url.pathname === '/api/quotas' && req.method === 'GET') {
+        const response = await runner('/quotas', auth.user.id, { target: url.searchParams.get('user_id') }); return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/packages' && req.method === 'GET') {
+        const response = await runner('/packages', auth.user.id, { query: url.searchParams.get('q') || '' }); return json(res, 200, await response.json());
+      }
       if (url.pathname === '/api/chats' && req.method === 'GET') {
         const response = await runner('/chats', auth.user.id, {}); return json(res, 200, await response.json());
       }
@@ -190,10 +210,29 @@ export const server = createServer(async (req, res) => {
         if (typeof input.content !== 'string') fail(422, '请选择文本文件');
         if (Buffer.byteLength(input.content, 'utf8') > 256 * 1024) fail(413, '上传文件不能超过 256 KiB');
         if (input.content.includes('\u0000')) fail(422, '暂不支持上传二进制文件');
-        const response = await runner('/files/upload', auth.user.id, { path: input.path, content: input.content, overwrite: input.overwrite === true });
+        const response = await runner('/files/upload', auth.user.id, { path: input.path, content: input.content, overwrite: input.overwrite === true, revision: input.revision });
         return json(res, 200, await response.json());
       }
       const input = await body(req);
+      if (url.pathname === '/api/quotas/save') {
+        const response = await runner('/quotas/save', auth.user.id, { target: input.user_id, quota: input.quota }, AbortSignal.timeout(135000));
+        return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/toolchains/change') {
+        const response = await runner('/toolchains/change', auth.user.id, { id: input.id, action: input.action, version: input.version });
+        return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/toolchains/cancel') {
+        const response = await runner('/cancel', auth.user.id, {}); return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/packages/change') {
+        const response = await runner('/packages/change', auth.user.id, { name: input.name, version: input.version, action: input.action });
+        return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/files/manage') {
+        const response = await runner('/files/manage', auth.user.id, { action: input.action, path: input.path, destination: input.destination });
+        return json(res, 200, await response.json());
+      }
       if (['/api/providers/test', '/api/providers/save'].includes(url.pathname)) {
         const response = await runner(url.pathname.replace('/api', ''), auth.user.id, { config: input.config });
         if (url.pathname === '/api/providers/save') modelCache.expires = 0;

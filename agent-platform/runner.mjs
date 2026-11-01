@@ -1,18 +1,24 @@
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { body, equal, fail, json, modelLabel, required } from './shared.mjs';
 import { publicProviders, saveProvider, activeProvider, testProvider, proxyEnvironment, loadProviders } from './providers.mjs';
 import { sandbox } from './sandbox-client.mjs';
 import { sessionCapacity } from './session-limits.mjs';
 import { prepareSessionCwd } from './session-cwd.mjs';
 import { ChatStore } from './conversations.mjs';
-import { listWorkspace, previewWorkspace, downloadWorkspace, uploadWorkspace } from './workspace.mjs';
+import { SessionSnapshots, projectSession } from './session-snapshot.mjs';
+import { packageCatalog, changePackage, packageArguments, packageTextFiles } from './packages.mjs';
+import { toolchainBusy, toolchainStatus, startToolchain, renewToolchain, cancelToolchain } from './toolchains.mjs';
+import { listWorkspace, previewWorkspace, downloadWorkspace, uploadWorkspace, manageWorkspace, invalidateWorkspace } from './workspace.mjs';
 
 const secret = required('RUNNER_SECRET');
 const sessions = new Map();
 const chats = new ChatStore({ sessionsRoot: '/data/sessions', metaRoot: '/data/chat-meta' });
+const snapshots = new SessionSnapshots(chats, projectSession);
+// Pay the SDK import cost at service startup, before readiness, never on a click.
+await projectSession('');
 let configuring = false;
 const model = process.env.PI_MODEL || 'opencode-go/deepseek-v4.1-flash';
 async function secretValues() {
@@ -33,11 +39,13 @@ class Pi {
     const env = proxyEnvironment(config.proxy); delete env.RUNNER_SECRET; delete env.SANDBOX_SECRET;
     env.SANDBOX_URL = process.env.SANDBOX_URL || 'http://192.168.84.1:18082';
     env.SANDBOX_LEASE = this.lease;
+    env.PI_PACKAGE_TEXT_FILES = JSON.stringify(await packageTextFiles());
+    env.PI_OFFLINE = '1';
     // Private broker traffic must never use the model's Mihomo proxy.
     env.NO_PROXY = env.no_proxy = '127.0.0.1,localhost,192.168.84.1';
     this.proc = spawn('pi', ['--mode', 'rpc', '--model', config.id + '/' + config.model, '--session', `/data/sessions/${this.user}/${this.thread}.jsonl`,
-      '--no-builtin-tools', '--no-extensions', '-e', '/opt/pi/sandbox-extension.ts',
-      '--no-skills', '--no-prompt-templates', '--no-themes'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+      '--no-builtin-tools', '--no-extensions', '--no-mcp', '--no-context-files', '-e', '/opt/pi/sandbox-extension.ts',
+      '--no-skills', '--no-prompt-templates', '--no-themes', ...await packageArguments()], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
     this.proc.stderr.on('data', () => {}); // Diagnostics can contain provider details; never log them.
     this.proc.stdout.setEncoding('utf8');
     this.proc.stdout.on('data', chunk => {
@@ -70,6 +78,7 @@ class Pi {
   }
   mask(text) { for (const key of this.secrets || []) text = text.split(key).join('[REDACTED]'); return text; }
   finish() {
+    invalidateWorkspace(this.user);
     clearTimeout(this.deadline); clearInterval(this.storageCheck); this.busy = false;
     const output = this.output; this.output = undefined;
     if (output && !output.destroyed) output.end();
@@ -85,6 +94,7 @@ class Pi {
     });
   }
   async prompt(res, message) {
+    invalidateWorkspace(this.user);
     if (this.busy) fail(409, '当前任务尚未结束，请先停止或等待完成');
     if ([...sessions.values()].some(entry => entry.pi !== this && entry.pi.user === this.user && entry.pi.busy)) fail(409, '每个用户同时只能运行一个任务');
     await sessionCapacity(`/data/sessions/${this.user}`, this.thread);
@@ -107,8 +117,10 @@ class Pi {
   }
 }
 async function instance(user, thread) {
+  if (toolchainBusy(user)) fail(409, '工具链正在安装，请等待完成');
   if (configuring) fail(409, '正在更新供应商，请稍后重试');
   await sessionCapacity(`/data/sessions/${user}`, thread, { readExisting: true });
+  if (toolchainBusy(user)) fail(409, '工具链正在安装，请等待完成');
   const key = user + ':' + thread;
   let entry = sessions.get(key);
   if (entry) {
@@ -132,6 +144,7 @@ async function instance(user, thread) {
   await entry.ready; return entry.pi;
 }
 async function cancel(user) {
+  cancelToolchain(user);
   // Kill model generation AND every tool descendant, including detached processes.
   for (const [key, entry] of sessions) {
     if (entry.pi.user === user) { sessions.delete(key); entry.pi.proc?.kill(); }
@@ -147,6 +160,7 @@ export const server = createServer(async (req, res) => {
     if (!/^[a-f0-9]{64}$/.test(input.user || '')) fail(422, '用户标识无效');
     if (req.url === '/cancel') { await cancel(input.user); return json(res, 200, { ok: true }); }
     if (req.url === '/renew') {
+      await renewToolchain(input.user);
       for (const entry of sessions.values()) {
         if (entry.pi.user === input.user && entry.pi.busy) await sandbox('/renew', input.user, entry.pi.lease);
       }
@@ -157,6 +171,34 @@ export const server = createServer(async (req, res) => {
       return json(res, 200, { label: modelLabel(config?.model || model.split('/').pop()) });
     }
     if (req.url === '/providers') return json(res, 200, await publicProviders());
+    if (req.url === '/quotas' || req.url === '/quotas/save') {
+      if (typeof input.target !== 'string' || !input.target || input.target.length > 128) fail(422, '用户标识无效');
+      const target = createHash('sha256').update(input.target).digest('hex');
+      if (req.url.endsWith('/save') && (toolchainBusy(target) || [...sessions.values()].some(entry => entry.pi.user === target && (entry.pi.busy || entry.initializing)))) fail(409, '该用户正在运行任务，请先停止或等待完成');
+      const response = await fetch((process.env.SANDBOX_URL || 'http://192.168.84.1:18082') + (req.url.endsWith('/save') ? '/quota/set' : '/quota/get'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + required('SANDBOX_SECRET') },
+        body: JSON.stringify({ user: target, quota: input.quota }), signal: AbortSignal.timeout(130000), redirect: 'error' });
+      const result = await response.json();
+      if (!response.ok) fail(response.status === 409 ? 409 : 422, result.error || '配额操作失败');
+      return json(res, 200, result);
+    }
+    if (req.url === '/toolchains') return json(res, 200, await toolchainStatus(input.user));
+    if (req.url === '/toolchains/change') {
+      if ([...sessions.values()].some(entry => entry.pi.user === input.user && (entry.initializing || entry.pi.busy))) fail(409, '请先等待当前模型任务结束');
+      invalidateWorkspace(input.user);
+      return json(res, 200, await startToolchain(input.user, input));
+    }
+    if (req.url === '/packages') return json(res, 200, await packageCatalog(input.query));
+    if (req.url === '/packages/change') {
+      if (configuring || [...sessions.values()].some(entry => entry.initializing || entry.pi.busy)) fail(409, '请先等待所有任务结束，再修改扩展');
+      configuring = true;
+      try {
+        const result = await changePackage(input);
+        for (const entry of sessions.values()) entry.pi.proc?.kill();
+        sessions.clear();
+        return json(res, 200, result);
+      } finally { configuring = false; }
+    }
     if (req.url === '/providers/test') return json(res, 200, await testProvider(input.config));
     if (req.url === '/providers/save') {
       if (configuring) fail(409, '供应商正在更新，请稍后重试');
@@ -175,19 +217,25 @@ export const server = createServer(async (req, res) => {
     if (req.url === '/chats/archive') return json(res, 200, await chats.setArchived(input.user, input.thread, input.archived));
     if (req.url === '/chats/export') return json(res, 200, await chats.export(input.user, input.thread, input.format, await secretValues()));
     // Workspace calls use an independent short lease; they never cancel model work.
+    if (req.url.startsWith('/files/') && [...sessions.values()].some(entry => entry.pi.user === input.user && entry.pi.busy)) invalidateWorkspace(input.user);
     if (req.url === '/files/list') return json(res, 200, await listWorkspace(input.user, input.path));
     if (req.url === '/files/preview') return json(res, 200, await previewWorkspace(input.user, input.path, input.limit));
     if (req.url === '/files/download') return json(res, 200, await downloadWorkspace(input.user, input.path));
-    if (req.url === '/files/upload') return json(res, 200, await uploadWorkspace(input.user, input.path, input.content, input.overwrite === true));
+    if (req.url === '/files/upload') return json(res, 200, await uploadWorkspace(input.user, input.path, input.content, input.overwrite === true, input.revision));
+    if (req.url === '/files/manage') return json(res, 200, await manageWorkspace(input.user, input));
     if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(input.thread || '')) fail(422, '对话标识无效');
-    const pi = await instance(input.user, input.thread);
     if (req.url === '/session') {
-      const result = await pi.command('get_messages');
-      return json(res, 200, { messages: JSON.parse(pi.mask(JSON.stringify(result.messages || []))), busy: pi.busy });
+      const live = sessions.get(input.user + ':' + input.thread);
+      const busy = live?.pi.busy === true;
+      const messages = busy ? (await live.pi.command('get_messages')).messages || [] : await snapshots.read(input.user, input.thread);
+      let text = JSON.stringify(messages);
+      for (const key of await secretValues()) text = text.split(key).join('[REDACTED]');
+      return json(res, 200, { messages: JSON.parse(text), busy });
     }
     if (req.url === '/abort') { await cancel(input.user); return json(res, 200, { ok: true }); }
     if (req.url === '/prompt') {
       if (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 20000) fail(422, '任务内容无效');
+      const pi = await instance(input.user, input.thread);
       return await pi.prompt(res, input.message);
     }
     fail(404, '接口不存在');

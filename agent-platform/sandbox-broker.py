@@ -10,16 +10,38 @@ import secrets
 import subprocess
 import threading
 import time
+import importlib.util
+
+web_spec = importlib.util.spec_from_file_location("web_access", Path(__file__).with_name("web-access.py"))
+web_access = importlib.util.module_from_spec(web_spec)
+web_spec.loader.exec_module(web_access)
+package_spec = importlib.util.spec_from_file_location("package_reader", Path(__file__).with_name("package-reader.py"))
+package_reader = importlib.util.module_from_spec(package_spec)
+package_spec.loader.exec_module(package_reader)
+quota_spec = importlib.util.spec_from_file_location("sandbox_quotas", Path(__file__).with_name("sandbox-quotas.py"))
+quota_module = importlib.util.module_from_spec(quota_spec); quota_spec.loader.exec_module(quota_module)
+web_slots = threading.BoundedSemaphore(4)
 
 ROOT = Path(os.environ.get("SANDBOX_ROOT", "/var/lib/copylee-sandboxes"))
 SECRET = os.environ["SANDBOX_SECRET"]
 IMAGE = os.environ.get("SANDBOX_IMAGE", "copylee-agent-sandbox:latest")
+NETWORK = os.environ.get("SANDBOX_NETWORK", "none")
+if NETWORK not in {"none", "copylee-agent-tools"}:
+    raise RuntimeError("Unsupported tool network")
+if NETWORK != "none":
+    subprocess.run(["iptables", "-C", "INPUT", "-s", "192.168.85.0/24", "-j", "DROP"], check=True)
+    subprocess.run(["iptables", "-C", "DOCKER-USER", "-s", "192.168.85.0/24", "-j", "COPYLEE-TOOLS"], check=True)
+    network_info = json.loads(subprocess.check_output(["docker", "network", "inspect", NETWORK]))[0]
+    if not network_info.get("Internal"):
+        raise RuntimeError("Tool network must be internal")
 USER = re.compile(r"^[a-f0-9]{64}$")
 leases = {}
 locks = {}
 guard = threading.RLock()
 slots = threading.BoundedSemaphore(4)
 CAPACITY = 16
+quotas = quota_module.Quotas(ROOT)
+active_memory = {}
 
 
 class Conflict(ValueError):
@@ -44,7 +66,7 @@ def workspace(user):
             if len(list(ROOT.glob("*.img"))) >= CAPACITY:
                 raise ValueError("沙箱用户容量已满，请联系管理员")
             with image.open("xb") as file:
-                file.truncate(256 * 1024 * 1024)
+                file.truncate(int(quotas.get(user)['disk_mib']) * 1024 * 1024)
             image.chmod(0o600)
             subprocess.run(["mkfs.ext4", "-q", "-F", "-m", "0", str(image)], check=True, timeout=30)
         mount.mkdir(mode=0o700, exist_ok=True)
@@ -56,16 +78,24 @@ def workspace(user):
 
 
 def run_tool(user, value, lease):
-    if value.get("op") not in {"read", "write", "mkdir", "access", "bash", "list", "file-read", "file-write"}:
+    if value.get('op') == 'quota-info': return quotas.status(user)
+    if value.get("op") == "web-fetch":
+        if not web_slots.acquire(blocking=False):
+            raise ValueError("联网请求繁忙，请稍后重试")
+        try:
+            return web_access.fetch_public(value.get("url"))
+        finally:
+            web_slots.release()
+    if value.get("op") not in {"read", "write", "mkdir", "access", "bash", "list", "file-read", "file-write", "file-manage", "toolchain-list", "toolchain-change"}:
         raise ValueError("工具不支持")
     lock = locks.setdefault(user, threading.Lock())
-    browsing = value.get("op") in {"list", "file-read", "file-write"}
+    browsing = value.get("op") in {"list", "file-read", "file-write", "file-manage", "toolchain-list", "toolchain-change"}
     # Pi may issue parallel tool calls; serialize them within the user's workspace.
     # File browsing never waits behind a long model tool and never cancels it.
     if browsing:
         if not lock.acquire(blocking=False):
             raise ValueError("工作区正在执行任务，请稍后刷新")
-    elif not lock.acquire(timeout=65):
+    elif not lock.acquire(timeout=185):
         raise ValueError("等待当前用户的工具执行超时")
     if not slots.acquire(blocking=False):
         lock.release()
@@ -75,22 +105,29 @@ def run_tool(user, value, lease):
         with guard:
             if leases.get(lease, {}).get("expires", 0) <= time.monotonic():
                 raise ValueError("执行授权已失效")
+            quota = quotas.get(user)
+            if sum(active_memory.values()) + quota['memory_mib'] > int(os.environ.get('SANDBOX_ACTIVE_MEMORY_MIB', '4096')):
+                raise ValueError("沙箱运行内存预算已满，请等待其他任务结束")
+            active_memory[user] = quota['memory_mib']
+            value = {**value, '_timeout_limit': quota['timeout']}
             created = subprocess.run([
                 "docker", "create", "-i", "--name", "cl-sandbox-" + user,
-                "--label", "copylee.sandbox=1", "--network", "none", "--read-only",
+                "--label", "copylee.sandbox=1", "--network", NETWORK, "--read-only",
+                "--sysctl", "net.ipv6.conf.all.disable_ipv6=1",
                 "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
-                "--memory", "256m", "--memory-swap", "256m", "--cpus", "0.5", "--pids-limit", "48",
-                "--ulimit", "nofile=128:128", "--ulimit", "fsize=134217728:134217728",
-                "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m,mode=1777", "--shm-size", "8m",
+                "--memory", str(quota['memory_mib']) + 'm', "--memory-swap", str(quota['memory_mib']) + 'm', "--cpus", str(quota['cpus']), "--pids-limit", str(quota['pids']),
+                "--ulimit", "nofile=256:256", "--ulimit", "fsize=134217728:134217728",
+                "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777", "--shm-size", "8m",
                 "--mount", f"type=bind,src={mount},dst=/workspace",
                 "--env", "HOME=/tmp", "--env", "PI_CODING_AGENT_DIR=/tmp/pi",
+                "--env", "HTTP_PROXY=http://192.168.85.2:3128", "--env", "HTTPS_PROXY=http://192.168.85.2:3128",
                 "--log-driver", "none", IMAGE], capture_output=True, timeout=15)
             if created.returncode:
                 raise ValueError("沙箱容器创建失败")
             proc = subprocess.Popen(["docker", "start", "-ai", "cl-sandbox-" + user],
                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
-            output, _ = proc.communicate(json.dumps(value).encode(), timeout=75)
+            output, _ = proc.communicate(json.dumps(value).encode(), timeout=quota['timeout'] + 15)
             if len(output) > 1500000:
                 raise ValueError("工具输出超限")
             result = json.loads(output)
@@ -105,6 +142,7 @@ def run_tool(user, value, lease):
             cancel(user)
             proc.wait(timeout=10)
     finally:
+        with guard: active_memory.pop(user, None)
         slots.release()
         lock.release()
 
@@ -131,9 +169,24 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, run_tool(user, value, token))
             if not hmac.compare_digest(token, SECRET):
                 return self.reply(401, {"error": "服务认证失败"})
+            if self.path == "/package":
+                if not web_slots.acquire(blocking=False):
+                    raise ValueError("包下载繁忙")
+                try:
+                    return self.reply(200, package_reader.read_package(value))
+                finally:
+                    web_slots.release()
             user = value.get("user", "")
             if not USER.fullmatch(user):
                 return self.reply(422, {"error": "用户无效"})
+            if self.path in {"/quota/get", "/quota/set"}:
+                user_lock = locks.setdefault(user, threading.Lock())
+                if not user_lock.acquire(blocking=False):
+                    return self.reply(409, {"error": "该用户正在运行工具，请先等待任务结束"})
+                try:
+                    return self.reply(200, quotas.save(user, value.get('quota', {})) if self.path.endswith('/set') else quotas.status(user))
+                finally:
+                    user_lock.release()
             with guard:
                 if self.path == "/lease":
                     token = secrets.token_urlsafe(48)

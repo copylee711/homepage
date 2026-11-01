@@ -1,0 +1,6 @@
+# Reuse the locked Python runtime layer already built for the runner; no keys or data.
+FROM copylee-agent-runner:latest
+WORKDIR /app
+COPY agent-platform/egress-proxy.py agent-platform/web-access.py ./
+USER 1000:1000
+CMD ["python3", "egress-proxy.py"]

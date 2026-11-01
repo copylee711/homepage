@@ -14,7 +14,7 @@ function close({ restore = false } = {}) {
 
 export function closeMenu(options) { close(options); }
 
-export function openMenu({ anchor, items, label = '对话操作' }) {
+export function openMenu({ anchor, items, label = '对话操作', point }) {
   close();
   if (!anchor) return;
   const menu = el('div', { class: 'menu', attrs: { role: 'menu', 'aria-label': label } });
@@ -36,7 +36,7 @@ export function openMenu({ anchor, items, label = '对话操作' }) {
     menu.append(button);
   }
   document.body.append(menu);
-  position(menu, anchor);
+  position(menu, anchor, point);
   anchor.setAttribute('aria-expanded', 'true');
   const cleanups = [];
   const record = { menu, anchor, cleanups };
@@ -82,7 +82,7 @@ export function openMenu({ anchor, items, label = '对话操作' }) {
   );
   requestAnimationFrame(() => focusAt(0));
 }
-function position(menu, anchor) {
+function position(menu, anchor, point) {
   const rect = anchor.getBoundingClientRect();
   const width = menu.offsetWidth || 196;
   const height = menu.offsetHeight || 240;
@@ -90,6 +90,10 @@ function position(menu, anchor) {
   if (left < 8) left = Math.max(8, rect.left);
   let top = rect.bottom + 6;
   if (top + height > window.innerHeight - 8) top = Math.max(8, rect.top - height - 6);
+  if (point) {
+    left = Math.max(8, Math.min(point.x, window.innerWidth - width - 8));
+    top = Math.max(8, Math.min(point.y, window.innerHeight - height - 8));
+  }
   menu.style.left = Math.round(left) + 'px';
   menu.style.top = Math.round(top) + 'px';
 }

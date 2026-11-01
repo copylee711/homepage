@@ -7,6 +7,8 @@ import { setupDialogs, bindConfirmDialog } from './dialogs.js';
 import { streamPrompt } from './stream.js';
 import { openMenu, closeMenu } from './menu.js';
 import { grantDate, workspaceReference } from './format.js';
+import { openPackages } from './packages.js';
+import { openToolchains } from './toolchains.js';
 
 const app = $('#app'), sidebarEl = $('#sidebar'), mainEl = $('#main'), scrim = $('#scrim');
 const notice = $('#notice'), noticeText = $('#notice-text'), noticeAction = $('#notice-action');
@@ -31,6 +33,8 @@ let lastUserText = '';
 let drawer = null;
 let noticeHandler = null;
 let workspaceRestoreTimer = null;
+let selectionVersion = 0;
+const conversationSnapshots = new Map();
 
 const transcript = new Transcript({
   container: messages,
@@ -83,6 +87,7 @@ const workspace = new WorkspacePanel({
   insert: $('#ws-insert'),
   onInsert: path => insertWorkspacePath(path),
   notice: (text, options) => toast(text, options),
+    confirm: options => dialogs.confirm(options),
   confirmOverwrite: path => dialogs.confirm({
     title: '覆盖已有文件',
     body: '工作区中已存在 “' + path + '”。覆盖会替换其现有内容，此操作无法撤销。',
@@ -135,7 +140,7 @@ function setWelcomeMode(mode) {
   const normal = mode !== 'permission';
   $('#welcome-title').textContent = normal ? '开始一段新对话' : '尚未开通执行权限';
   $('#welcome-text').textContent = normal
-    ? 'Pi 在隔离的工作区中读写文件、运行命令。沙箱没有网络，任务最长运行 10 分钟。'
+    ? 'Pi 在隔离的工作区中读写文件、运行命令。支持公网联网，可按需安装依赖；资源由管理员分配。'
     : '此账户可以登录，但尚未获得 Agent 执行权限。已有授权可能已过期或被撤销，请联系管理员开通。';
   $('#starters').hidden = !normal;
 }
@@ -150,7 +155,7 @@ function updateComposer() {
   stop.hidden = !busy;
   send.hidden = busy;
   taskState.textContent = busy ? (stopping ? '正在停止任务…' : 'Pi 正在处理任务…')
-    : auth?.can_execute ? '独立沙箱 · 无网络' : '尚未开通执行权限';
+    : auth?.can_execute ? '独立沙箱 · 公网联网' : '尚未开通执行权限';
 }
 function setBusy(value) {
   busy = value;
@@ -167,7 +172,7 @@ function syncHeader() {
   chatTitle.textContent = title;
   chatSubtitle.textContent = busy ? '正在生成回复…'
     : chat?.archived ? '已归档'
-      : auth?.can_execute ? '独立沙箱 · 无网络' : '暂无执行权限';
+      : auth?.can_execute ? '独立沙箱 · 公网联网' : '暂无执行权限';
   document.title = (busy ? '生成中 · ' : '') + title + ' — Copy Lee Agent';
   chatMenuButton.disabled = !chat || !auth?.can_execute;
   chatMenuButton.title = chat ? '对话操作' : '发送第一条消息后可管理对话';
@@ -176,6 +181,10 @@ function syncHeader() {
 function updateHeader() { syncHeader(); }
 
 function applyIdentity(value) {
+  if (auth && (auth.user?.id !== value.user?.id || !value.can_execute)) {
+    conversationSnapshots.clear(); workspace.snapshots.clear(); workspace.entries = [];
+    selectionVersion++; transcript.reset();
+  }
   auth = value;
   setCsrf(value.csrf);
   modelChip.textContent = value.model || 'Pi 模型';
@@ -186,6 +195,8 @@ function applyIdentity(value) {
       : value.can_execute ? '已授权 · 独立沙箱' : '无执行权限';
   $('#account-avatar').textContent = (value.user?.name || '·').slice(0, 1);
   $('#settings-button').hidden = !value.admin;
+  $('#packages-button').hidden = !value.admin;
+  $('#toolchains-button').hidden = !value.can_execute;
   $('#grants-button').hidden = !value.admin;
   $('#new-chat').disabled = busy || !value.can_execute;
   workspaceToggle.hidden = !value.can_execute;
@@ -233,6 +244,7 @@ function setChatUrl(id) {
 function startNew({ focus = true } = {}) {
   if (busy) { toast('任务正在运行，请先停止或等待完成。', { tone: 'warning' }); return; }
   closeMenu();
+    selectionVersion++;
   closeDrawer({ restore: false });
   chatId = crypto.randomUUID();
   lastUserText = '';
@@ -256,11 +268,17 @@ async function selectChat(id, { initial = false } = {}) {
   setChatUrl(id);
   sidebar.setActive(id);
   if (!initial) prompt.blur();
-  messageState('正在读取对话…', { spinner: true });
+    const selection = ++selectionVersion;
+    const cached = conversationSnapshots.get(id);
+    if (cached) { transcript.reset(); transcript.renderSession(cached.messages || []); transcript.setWelcome(!cached.messages?.length); }
+    else messageState('正在读取对话…', { spinner: true });
   clearNotice();
   syncHeader();
   try {
     const value = await get('/api/session?chat=' + encodeURIComponent(id));
+    if (selection !== selectionVersion || chatId !== id) return;
+    conversationSnapshots.delete(id); conversationSnapshots.set(id, value);
+    while (conversationSnapshots.size > 8) conversationSnapshots.delete(conversationSnapshots.keys().next().value);
     transcript.reset();
     const count = transcript.renderSession(value.messages || []);
     lastUserText = lastUser(value.messages || []);
@@ -277,6 +295,7 @@ async function selectChat(id, { initial = false } = {}) {
     followBottom(true, 'auto');
     announce('已打开对话：' + (sidebar.chats.find(chat => chat.id === id)?.title || '对话'));
   } catch (error) {
+      if (selection !== selectionVersion || chatId !== id) return;
     messageState(error.message || '无法读取对话。', {
       tone: 'error', actionLabel: '重试', action: () => void selectChat(id),
     });
@@ -373,6 +392,7 @@ async function sendPrompt(value, { retry = false, continuation = false } = {}) {
   if (!message) return;
   if (!chatId) startNew({ focus: false });
   const thread = chatId;
+    conversationSnapshots.delete(thread);
   const userArticle = transcript.addUser(message);
   lastUserText = message;
   prompt.value = '';
@@ -690,6 +710,8 @@ function bind() {
     catch (error) { toast(error.message, { tone: 'error' }); }
   });
   $('#settings-button').addEventListener('click', () => void dialogs.openSettings());
+  $('#packages-button').addEventListener('click', () => openPackages({ confirm: dialogs.confirm }));
+  $('#toolchains-button').addEventListener('click', () => openToolchains({ confirm: dialogs.confirm }));
   $('#grants-button').addEventListener('click', () => void dialogs.openGrants());
   $('#shortcuts-button').addEventListener('click', () => dialogs.openShortcuts());
   noticeAction.addEventListener('click', () => noticeHandler?.());
@@ -756,6 +778,17 @@ updateToggles();
       return;
     }
     await sidebar.load();
+    const tenant = auth.user.id;
+    setTimeout(() => {
+      if (auth?.user.id !== tenant || !auth.can_execute) return;
+      for (const chat of sidebar.chats.slice(0, 2)) {
+        if (chat.id === chatId) continue;
+        void get('/api/session?chat=' + encodeURIComponent(chat.id)).then(value => {
+          if (auth?.user.id === tenant && auth.can_execute && !value.busy && !conversationSnapshots.has(chat.id)) conversationSnapshots.set(chat.id, value);
+        }).catch(() => {});
+      }
+      if (!workspace.loading && !workspace.entries.length) void workspace.load('');
+    }, 1500);
     const id = new URLSearchParams(location.search).get('chat');
     if (id && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id)) await selectChat(id, { initial: true });
     else startNew({ focus: false });

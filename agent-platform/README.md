@@ -1,7 +1,7 @@
 # Pi Agent 平台
 
 入口为 `https://ai.copylee.cn`。gz 的 Caddy 负责 HTTPS 和 `forward_auth`；xa 通过受限
-SSH 反向隧道提供 gateway，Compose 管理 gateway 与 Pi runner。`agent.copylee.cn` 继续属于 SRP。
+SSH 反向隧道提供 gateway，Compose 管理 gateway、Pi runner 和公网出口。`agent.copylee.cn` 继续属于 SRP。
 
 ## 认证与权限
 
@@ -32,12 +32,35 @@ Caddy 转发至 xa 时只保留两个 ai 专属 Cookie，剥离既有 Cloud 兼�
 
 Pi 在受信 runner 中调用模型；禁用默认内置工具和自动扩展，只注册固定 `sandbox-extension.ts` 的
 read/write/edit/bash。runner 不挂载任何用户工作区，模型不能通过工具读写 runner 文件。
-扩展的所有文件和命令操作均经 host broker 转发进用户自己的临时 Docker 容器，四种工具没有本地回退。
-沙箱容器 network=none、UID 1000、只读根、cap_drop ALL、no-new-privileges、256 MiB 内存、0.5 CPU、
-48 PIDs；不含模型密钥、服务密钥、执行租约、Docker socket、宿主机配置或其他用户挂载。
-每次工具调用结束删除整个容器，后台/脱离进程也会终止；只有 /workspace 持久化。单条命令最多 60 秒，
-输出/单次文件读取最多 1 MiB，临时目录 16 MiB。沙箱没有网络，无法下载依赖或访问外部 API。
-每个用户的工作区是独立的 256 MiB ext4 镜像，同时限制数据量与 inode 数；最多 16 个用户镜像（约 4 GiB）。
+扩展的工作区文件和命令操作均经 host broker 转发进用户自己的临时 Docker 容器，没有任意本地回退。
+唯一的受信读取例外是管理员安装的 Markdown 资源精确路径白名单，让 Pi 能按需读取技能全文；
+只允许普通文件、大小 128 KiB 以内，不能列目录或读取供应商配置、进程环境及其他 runner 文件。
+沙箱容器使用独立 internal 网络、UID 1000、只读根、cap_drop ALL、no-new-privileges；
+默认 512 MiB 内存、1 CPU、96 PIDs、256 MiB 工作区、单条命令 180 秒。管理员可在用户授权列表中
+逐个分配磁盘、内存、CPU、进程数和命令时限。磁盘 64–16384 MiB，内存 64–4096 MiB，CPU 0.1–4，
+进程 16–256，命令时限 10–600 秒；任务仍最多 10 分钟。默认磁盘分配总预算 8192 MiB，
+同时运行工具的内存预算 4096 MiB，均由主机环境配置。配额不授予执行权限。
+配额保存在主机 root 专用 `quotas.json`；磁盘调整需要用户工具空闲，离线检查/resize2fs，缩容不足则拒绝，
+不删除数据强行缩容。每个用户独立 ext4 镜像，最多 16 个用户；新配额在下一次工具调用生效。
+容器不含模型密钥、服务密钥、执行租约、Docker socket、宿主机配置或其他用户挂载。
+每次调用后删除容器，后台/脱离进程终止；只有 /workspace 持久化。输出/单次文件读取最多 1 MiB，临时目录 64 MiB。
+
+工具经 `HTTP_PROXY/HTTPS_PROXY` 访问独立出口 `192.168.85.2:3128`，支持公网 HTTP 80 / HTTPS 443，
+包括 npm、pip、Git HTTPS 和 curl；SSH/Git 原生端口及直连不开放。出口每次解析并校验所有 IPv4 地址，
+拒绝内网/环回/链路本地/云元数据/保留网段，将连接固定到已校验 IP，重定向产生的新请求重新校验。
+IPv6 在工具容器关闭。`sandbox-network.sh` 给 INPUT 和 DOCKER-USER 添加专用拒绝规则，不清空已有规则；
+broker 在启动时验证 internal 网络和防火墙，缺少保护拒绝启动。工具不能连接宿主机、runner 或 broker。
+可配置出口经 Mihomo 的**独立强制代理 listener**：普通基于域名的规则无法匹配已固定的目标 IP。
+在 Mihomo 的 `listeners` 中添加 type=http、listen=192.168.84.1、port=17892、proxy=你的出口组，
+设置 `.env` 中 `SANDBOX_EGRESS_PROXY=192.168.84.1:17892`；broker 的 `SANDBOX_WEB_PROXY` 可用同一地址。
+监听仅绑定私有桥接地址；工具网段的宿主机 INPUT 始终拒绝。原有模型代理和路由规则不改动。
+`web_fetch` 提供有长度限制的网页纯文本读取，HTML 脚本不运行，返回内容作为外部数据。
+
+基础工具链为 Python/pip/venv、Node/npm、Git/curl、GCC/G++/make、Python 开发头文件、pkg-config、jq、zip/unzip。
+“工具链”面板可安装/移除固定版本 TypeScript、Prettier、ESLint、Ruff、pytest、uv，保存到自己的 `.tools/managed`，
+CLI 链接在 `.tools/bin`（自动加入 PATH）。安装任务在沙箱执行；面板定期重新鉴权并续租，失联 20 秒停止。
+Agent 可按任务需要自行下载依赖或其他工具链到 `/workspace`；Python 用 `.venv`，npm 本地安装。
+不开放 apt/root；Rust/Go/JDK 可从官方公开发行包装入工作区，需管理员分配足够磁盘/内存。
 最多同时运行 4 个工具，同用户并行工具自动串行，每用户同时只允许一个任务。
 对话另有限额：每用户最多 50 个对话、总计 32 MiB、单对话 4 MiB；运行中每 500 ms 检查，超限停止。
 达到容量后已有对话仍可读取，新增内容需联系管理员归档。正在初始化的 Pi 进程不能被当作空闲会话淘汰，
@@ -50,6 +73,26 @@ broker 是主机 root 控制面，拥有有限的固定 Docker 操作和 loop mo
 容器仍共享主机内核，并非虚拟机级隔离。
 
 ## 部署
+
+首次启用联网时，先 `docker compose up -d egress` 创建 internal 工具网络，再安装更新后的
+`agent-sandbox.service.example`（ExecStartPre 自动应用专用防火墙规则），最后设置
+`SANDBOX_NETWORK=copylee-agent-tools` 并启动 broker。不配置网络时维持 `none`，依赖下载失败关闭。
+Docker daemon 必须运行 iptables 后端并提供 DOCKER-USER；不同防火墙后端需先实现等价策略并测试。
+
+历史读取不启动 Pi；SDK 在服务就绪前预热。会话内存快照按文件 inode/size/mtime/ctime 失效，
+保留 Pi 的分支、压缩摘要和 context edit 语义；模型运行中直接读取 live 状态。
+客户端只在内存预加载两条最近历史和工作区根目录，切换时先显示快照再更新，无敏感浏览器持久存储。
+工作区读快照最多 2 秒，模型运行及写操作会失效；未命中的首次文件读取仍通过一次性容器。
+
+文件面板支持右键/Shift+F10/可见操作按钮、新建、移动重命名、删除空目录/文件、文本编辑。
+编辑上限 256 KiB，Ctrl/Cmd+S 保存，未保存退出确认；SHA-256 乐观锁拒绝覆盖其他操作的更新，
+原子替换避免空间不足留下半个文件。删除需确认，目录非空拒绝，不做隐式递归删除。
+
+“Pi 扩展市场”从 npm 的 `pi-package` 关键词目录搜索。管理员可固定版本安装/移除包内声明的
+Markdown 技能和提示词，SHA-512 校验，包压缩体 5 MiB/解压体 32 MiB/最多 30 文本资源。
+只解析归档，不在宿主机解包，不安装依赖、不运行 lifecycle 脚本；路径和链接受限。
+JS/TS 扩展能运行任意 Node 代码，不能直接加载进持有服务密钥的 runner；无文本资源的包明确拒绝，
+需要代码审查及隔离适配。已安装文本可影响模型行为，界面确认后对后续任务生效。
 
 在 xa 将仓库放到 `/opt/homepage`，复制 `.env.example` 为 `.env`，填入独立随机密钥和模型密钥。
 在 gz `/etc/copylee/backend.env` 设置 `COPYLEE_AGENT_URL=https://ai.copylee.cn` 以及相同的

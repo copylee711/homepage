@@ -1,0 +1,30 @@
+import { readFile } from 'node:fs/promises';
+import { fail } from './shared.mjs';
+
+// Process-local, bounded snapshots; never browser storage, never an execution lease.
+export class SessionSnapshots {
+  constructor(store, project) { this.store = store; this.project = project; this.cache = new Map(); }
+  async read(user, thread) {
+    let info;
+    try { info = await this.store.assertOwned(user, thread); }
+    catch (error) { if (error.status === 404) return []; throw error; }
+    if (info.size > 4 * 1024 * 1024) fail(413, '此对话超过读取上限');
+    const key = user + ':' + thread;
+    const version = `${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
+    const cached = this.cache.get(key);
+    if (cached?.version === version) return cached.messages;
+    const text = await readFile(this.store.file(user, thread), 'utf8');
+    const messages = await this.project(text);
+    this.cache.delete(key);
+    this.cache.set(key, { version, messages });
+    // At most 16 bounded 4 MiB sessions; a changed file invalidates on next read.
+    while (this.cache.size > 16) this.cache.delete(this.cache.keys().next().value);
+    return messages;
+  }
+}
+
+export async function projectSession(text) {
+  // Use Pi's canonical branch/compaction/context-edit semantics, not a flat JSONL scan.
+  const { SessionManager, parseSessionEntries } = await import('/opt/pi/node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js');
+  return SessionManager.inMemory('/tmp', {}, parseSessionEntries(text)).buildSessionContext().messages;
+}
