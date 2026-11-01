@@ -7,7 +7,7 @@ import { join } from 'node:path';
 const directory = await mkdtemp(join(tmpdir(), 'agent-providers-'));
 process.env.PROVIDER_DATA_DIR = directory;
 process.env.OPENCODE_API_KEY = 'test-only-provider-key';
-const { presets, normalizeProvider, saveProvider, publicProviders, proxyEnvironment } = await import('../providers.mjs');
+const { presets, normalizeProvider, normalizeProbeInput, saveProvider, deleteProvider, activateProvider, publicProviders, proxyEnvironment } = await import('../providers.mjs');
 test('keys are never returned, blank preserves key, changed host requires explicit key', async () => {
   const input = { ...presets[0], apiKey: 'saved-secret-for-tests' };
   const result = await saveProvider(input);
@@ -30,5 +30,24 @@ test('proxy route is explicit and inherited proxies cannot override direct mode'
   const proxy = proxyEnvironment(true, source);
   assert.equal(proxy.HTTPS_PROXY, 'http://192.168.84.1:17890');
   assert.equal(proxy.NODE_USE_ENV_PROXY, '1');
+});
+test('multi-model list,probe input security, activation, and provider deletion work cleanly', async () => {
+  await saveProvider({ id: 'custom-hub', name: 'Custom Hub', api: 'openai-completions', baseUrl: 'https://hub.example.com/v1', model: '', models: ['gpt-5', 'claude-sonnet-5-5', 'qwen3-max'], apiKey: 'hub-secret-key', proxy: false });
+  const pub = await publicProviders();
+  const hub = pub.providers.find(p => p.id === 'custom-hub');
+  assert.deepEqual(hub.models, ['gpt-5', 'claude-sonnet-5-5', 'qwen3-max']);
+  assert.equal(hub.model, 'gpt-5');
+  // Probe refuses SSRF / changed baseUrl without new key
+  await assert.rejects(normalizeProbeInput({ id: 'custom-hub', api: 'openai-completions', baseUrl: 'https://127.0.0.1/v1', apiKey: 'k' }));
+  await assert.rejects(normalizeProbeInput({ id: 'custom-hub', api: 'openai-completions', baseUrl: 'https://evil.example.com/v1', apiKey: '' }), /重新填写/);
+  const probeOk = await normalizeProbeInput({ id: 'custom-hub', api: 'openai-completions', baseUrl: 'https://hub.example.com/v1', apiKey: '' });
+  assert.equal(probeOk.apiKey, 'hub-secret-key');
+  // Activate secondary model
+  const sw = await activateProvider({ id: 'custom-hub', model: 'qwen3-max' });
+  assert.equal(sw.activeModel, 'qwen3-max');
+  // Delete provider falls back to remaining provider; last provider cannot be deleted
+  const afterDel = await deleteProvider('custom-hub');
+  assert.equal(afterDel.providers.some(p => p.id === 'custom-hub'), false);
+  await assert.rejects(deleteProvider('opencode-go'), /至少需要保留/);
 });
 test.after(async () => rm(directory, { recursive: true, force: true }));

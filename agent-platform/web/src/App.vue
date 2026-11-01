@@ -8,12 +8,9 @@ import Workspace from './components/Workspace.vue';
 import Toasts from './components/Toasts.vue';
 import ContextMenu from './components/ContextMenu.vue';
 import CommandPalette from './components/CommandPalette.vue';
-import ProviderDialog from './components/dialogs/ProviderDialog.vue';
-import GrantsDialog from './components/dialogs/GrantsDialog.vue';
+import ModalHost from './components/ModalHost.vue';
 import WebReadDialog from './components/dialogs/WebReadDialog.vue';
-import ShortcutsDialog from './components/dialogs/ShortcutsDialog.vue';
 import SettingsDialog from './components/dialogs/SettingsDialog.vue';
-import SimpleDialog from './components/dialogs/SimpleDialog.vue';
 import { useSession } from './stores/session';
 import { useUi } from './stores/ui';
 
@@ -26,7 +23,6 @@ const shellStyle = computed(() => ({
   '--sidebar-w': ui.sidebarW + 'px',
   '--workspace-w': ui.workspaceW + 'px',
 }));
-// Inline workspace only on wide screens; narrow screens use the mobile drawer.
 const workspaceVisible = computed(() => session.canExecute && ui.workspaceOpen && wide.value);
 
 function onResize() { wide.value = window.innerWidth > 1180; }
@@ -37,6 +33,7 @@ onMounted(() => {
   window.addEventListener('keydown', (e) => {
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); ui.commandOpen ? ui.closeCommand() : ui.openCommand(); }
+    if (mod && e.key === ',') { e.preventDefault(); ui.dialog === 'settings' ? ui.closeDialog() : ui.openSettings('general'); }
     if (mod && e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); session.startNew(); }
   });
 });
@@ -63,12 +60,8 @@ onMounted(() => {
     <ContextMenu />
     <CommandPalette v-if="ui.commandOpen" />
     <SettingsDialog v-if="ui.dialog === 'settings'" />
-    <ProviderDialog v-if="ui.dialog === 'provider'" />
-    <GrantsDialog v-if="ui.dialog === 'grants'" />
     <WebReadDialog v-if="ui.dialog === 'webread'" />
-    <ShortcutsDialog v-if="ui.dialog === 'shortcuts'" />
-    <SimpleDialog v-if="ui.dialog === 'packages'" title="扩展市场" body="扩展市场需要后端数据，预览环境暂不可用。" />
-    <SimpleDialog v-if="ui.dialog === 'toolchains'" title="工具链" body="工具链管理需要后端数据，预览环境暂不可用。" />
+    <ModalHost />
   </div>
 </template>
 
@@ -87,7 +80,6 @@ onMounted(() => {
 @keyframes drawer-in { from { transform: translateX(var(--from, -104%)); } to { transform: translateX(0); } }
 .mobile-drawer.right { --from: 104%; }
 
-@media (min-width: 861px) { .mobile-drawer.left, .scrim { } }
 @media (max-width: 860px) {
   .app { grid-template-columns: minmax(0, 1fr); }
   .app[data-sidebar] { grid-template-columns: minmax(0, 1fr); }

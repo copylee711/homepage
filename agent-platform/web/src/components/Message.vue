@@ -56,13 +56,13 @@ function resend() { if (isUser.value) useSession().send(userText.value, { retry:
 </template>
 
 <style>
-.message { min-width: 0; display: flex; align-items: flex-start; gap: 13px; animation: msg-in 300ms var(--ease) both; }
+.message { min-width: 0; display: flex; align-items: flex-start; gap: 11px; animation: msg-in 300ms var(--ease) both; }
 @keyframes msg-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-.message-avatar { width: 26px; height: 26px; flex: none; display: grid; place-items: center; margin-top: 22px; color: var(--ink); }
+.message-avatar { width: 24px; height: 24px; flex: none; display: grid; place-items: center; margin-top: 0; color: var(--ink); }
 .message-inner { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .message-user { justify-content: flex-end; }
 .message-user .message-inner { flex: 0 1 auto; align-items: flex-end; max-width: min(82%, 640px); }
-.message-meta { min-height: 18px; display: flex; align-items: center; gap: 7px; margin-bottom: 6px; color: var(--muted); font-size: 11px; }
+.message-meta { min-height: 24px; display: flex; align-items: center; gap: 7px; margin-bottom: 5px; color: var(--muted); font-size: 11px; }
 .message-author { font-size: 12px; font-weight: 600; color: var(--text-2); }
 .message-time { color: var(--faint); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 .message-action { display: inline-flex; align-items: center; gap: 4px; height: 25px; padding: 0 7px; border-radius: 7px; color: var(--muted); font-size: 10.5px; opacity: 0; transition: opacity var(--fast), background-color var(--fast), color var(--fast); }

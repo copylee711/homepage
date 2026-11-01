@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import Icon from './Icon.vue';
 import { useSession } from '../stores/session';
 import { useUi } from '../stores/ui';
@@ -17,12 +17,15 @@ const commands = computed<Cmd[]>(() => {
   const base: Cmd[] = [
     { id: 'new', icon: 'plus', label: '新建对话', hint: '⌘⇧O', run: () => session.startNew() },
     { id: 'theme', icon: ui.theme === 'dark' ? 'sun' : 'moon', label: ui.theme === 'dark' ? '切换到浅色主题' : '切换到深色主题', run: () => ui.toggleTheme() },
-    a?.can_execute ? { id: 'workspace', icon: 'panel-right', label: '打开工作区', run: () => ui.setWorkspaceOpen(true) } : null,
+    a?.can_execute ? { id: 'workspace', icon: 'panel-right', label: ui.workspaceOpen ? '关闭工作区' : '打开工作区', run: () => ui.setWorkspaceOpen(!ui.workspaceOpen) } : null,
     a?.can_execute ? { id: 'webread', icon: 'globe', label: '网页阅读', run: () => ui.openDialog('webread') } : null,
-    a?.admin ? { id: 'provider', icon: 'settings', label: '模型与供应商', run: () => ui.openDialog('provider') } : null,
-    a?.admin ? { id: 'grants', icon: 'users', label: '执行授权', run: () => ui.openDialog('grants') } : null,
-    a?.can_execute ? { id: 'toolchains', icon: 'code', label: '工具链', run: () => ui.openDialog('toolchains') } : null,
-    { id: 'shortcuts', icon: 'keyboard', label: '键盘快捷键', run: () => ui.openDialog('shortcuts') },
+    { id: 'settings', icon: 'settings', label: '打开设置', run: () => ui.openSettings('general') },
+    a?.admin ? { id: 'providers', icon: 'sparkle', label: '设置 · 模型与供应商', run: () => ui.openSettings('providers') } : null,
+    a?.admin ? { id: 'grants', icon: 'users', label: '设置 · 执行授权与配额', run: () => ui.openSettings('grants') } : null,
+    a?.admin ? { id: 'packages', icon: 'package', label: '设置 · 扩展市场', run: () => ui.openSettings('packages') } : null,
+    a?.can_execute ? { id: 'toolchains', icon: 'terminal', label: '设置 · 工具链', run: () => ui.openSettings('toolchains') } : null,
+    { id: 'archived', icon: 'archive', label: '设置 · 已归档对话', run: () => ui.openSettings('archived') },
+    { id: 'shortcuts', icon: 'keyboard', label: '设置 · 键盘快捷键', run: () => ui.openSettings('shortcuts') },
   ].filter(Boolean) as Cmd[];
   const q = query.value.trim().toLowerCase();
   const chatCmds: Cmd[] = session.chats
@@ -45,7 +48,6 @@ function onKey(e: KeyboardEvent) {
   else if (e.key === 'Escape') { e.preventDefault(); ui.closeCommand(); }
 }
 onMounted(() => { setTimeout(() => input.value?.focus(), 30); });
-onBeforeUnmount(() => {});
 </script>
 
 <template>

@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 let admin = true, granted = false;
-let lastRunner;
+let lastRunner, lastPrompt;
 const runner = createServer(async (req, res) => {
   let raw = ''; for await (const chunk of req) raw += chunk;
   lastRunner = { path: req.url, value: JSON.parse(raw) };
+  if (req.url === '/prompt') lastPrompt = lastRunner.value;
   assert.equal(req.headers['x-runner-secret'], 'b'.repeat(64));
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify(req.url === '/model' ? { label: 'DeepSeek V4.1 Flash' } : { ok: true, entries: [] }));
@@ -66,7 +67,7 @@ test('an execution grant never grants provider or user-management privileges', a
   for (const path of ['/api/providers', '/api/grants', '/api/packages', '/api/quotas?user_id=other']) {
     assert.equal((await fetch(base + path, { headers: { cookie } })).status, 403);
   }
-  for (const path of ['/api/providers/save', '/api/providers/test', '/api/grants/save', '/api/packages/change', '/api/quotas/save']) {
+  for (const path of ['/api/providers/save', '/api/providers/test', '/api/providers/models', '/api/providers/delete', '/api/providers/activate', '/api/grants/save', '/api/packages/change', '/api/quotas/save']) {
     assert.equal((await fetch(base + path, { method: 'POST', headers: { cookie,
       Origin: 'http://127.0.0.1', 'X-CSRF-Token': me.csrf }, body: JSON.stringify({ user_id: 'other', days: 30 }) })).status, 403);
   }
@@ -93,6 +94,14 @@ test('new file/chat endpoints enforce CSRF and derive tenant identity; local mod
   assert.equal((await fetch(base + '/', { headers })).status, 200);
   assert.equal((await fetch(base + '/assets/missing-abcdef.js', { headers })).status, 404);
   assert.equal((await fetch(base + '/', { redirect: 'manual' })).status, 302);
+  const promptHigh = await fetch(base + '/api/prompt', { method: 'POST', headers, body: JSON.stringify({ thread: '11111111-1111-4111-8111-111111111111', message: 'hello', thinking: 'high' }) });
+  assert.equal(promptHigh.status, 200);
+  await promptHigh.text();
+  assert.equal(lastPrompt.thinking, 'high');
+  const promptBad = await fetch(base + '/api/prompt', { method: 'POST', headers, body: JSON.stringify({ thread: '11111111-1111-4111-8111-111111111111', message: 'hello', thinking: 'invalid-level' }) });
+  assert.equal(promptBad.status, 200);
+  await promptBad.text();
+  assert.equal(lastPrompt.thinking, undefined);
   granted = false;
   assert.equal((await fetch(base + '/api/files', { headers })).status, 403);
   assert.equal((await fetch(base + '/api/chats/export', { headers })).status, 403);

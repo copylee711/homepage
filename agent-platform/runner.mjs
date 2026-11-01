@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
 import { body, equal, fail, json, modelLabel, required } from './shared.mjs';
-import { publicProviders, saveProvider, activeProvider, activateProvider, testProvider, proxyEnvironment, loadProviders } from './providers.mjs';
+import { publicProviders, saveProvider, deleteProvider, activeProvider, activateProvider, testProvider, discoverProviderModels, proxyEnvironment, loadProviders } from './providers.mjs';
 import { sandbox, sandboxTool } from './sandbox-client.mjs';
 import { sessionCapacity } from './session-limits.mjs';
 import { prepareSessionCwd } from './session-cwd.mjs';
@@ -94,7 +94,7 @@ class Pi {
       });
     });
   }
-  async prompt(res, message) {
+  async prompt(res, message, thinking) {
     if (deleting.has(this.key)) fail(409, '正在删除此对话');
     invalidateWorkspace(this.user);
     if (this.busy) fail(409, '当前任务尚未结束，请先停止或等待完成');
@@ -115,7 +115,12 @@ class Pi {
       catch { if (this.output === res) { res.write(JSON.stringify({ type: 'gateway_error', error: '对话存储达到上限，任务已停止。请联系管理员归档。' }) + '\n'); abort(); } }
       finally { checking = false; }
     }, 500);
-    try { await this.command('prompt', { message }); }
+    try {
+      if (typeof thinking === 'string' && ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(thinking)) {
+        await this.command('set_thinking_level', { level: thinking }).catch(() => {});
+      }
+      await this.command('prompt', { message });
+    }
     catch (error) { res.write(JSON.stringify({ type: 'gateway_error', error: error.message }) + '\n'); this.finish(); }
   }
 }
@@ -245,6 +250,18 @@ export const server = createServer(async (req, res) => {
       } finally { configuring = false; }
     }
     if (req.url === '/providers/test') return json(res, 200, await testProvider(input.config));
+    if (req.url === '/providers/models') return json(res, 200, await discoverProviderModels(input.config));
+    if (req.url === '/providers/delete') {
+      if (configuring) fail(409, '供应商正在更新，请稍后重试');
+      if ([...sessions.values()].some(entry => entry.pi.busy)) fail(409, '请先等待所有任务结束或停止任务，再删除供应商');
+      configuring = true;
+      try {
+        const result = await deleteProvider(input.id);
+        for (const entry of sessions.values()) entry.pi.proc?.kill();
+        sessions.clear();
+        return json(res, 200, result);
+      } finally { configuring = false; }
+    }
     if (req.url === '/providers/save') {
       if (configuring) fail(409, '供应商正在更新，请稍后重试');
       if ([...sessions.values()].some(entry => entry.pi.busy)) fail(409, '请先等待所有任务结束或停止任务，再修改供应商');
@@ -294,7 +311,7 @@ export const server = createServer(async (req, res) => {
     if (req.url === '/prompt') {
       if (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 20000) fail(422, '任务内容无效');
       const pi = await instance(input.user, input.thread);
-      return await pi.prompt(res, input.message);
+      return await pi.prompt(res, input.message, input.thinking);
     }
     fail(404, '接口不存在');
   } catch (error) {

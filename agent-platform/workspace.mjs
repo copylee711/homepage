@@ -37,7 +37,11 @@ async function run(user, op, fields) {
 export async function listWorkspace(user, path, fresh = false) {
   if (fresh) invalidateWorkspace(user);
   workspacePath(path, true);
-  return snapshot(user, 'list:' + path, () => run(user, 'list', { path }));
+  const result = await snapshot(user, 'list:' + path, () => run(user, 'list', { path }));
+  if (!path && Array.isArray(result?.entries)) {
+    return { ...result, entries: result.entries.filter(item => item.name !== 'lost+found' && item.path !== 'lost+found') };
+  }
+  return result;
 }
 export async function previewWorkspace(user, path, limit, fresh = false) {
   if (fresh) invalidateWorkspace(user);

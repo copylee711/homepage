@@ -249,9 +249,14 @@ export const server = createServer(async (req, res) => {
         const response = await runner('/files/manage', auth.user.id, { action: input.action, path: input.path, destination: input.destination });
         return json(res, 200, await response.json());
       }
-      if (['/api/providers/test', '/api/providers/save'].includes(url.pathname)) {
+      if (['/api/providers/test', '/api/providers/models', '/api/providers/save'].includes(url.pathname)) {
         const response = await runner(url.pathname.replace('/api', ''), auth.user.id, { config: input.config });
         if (url.pathname === '/api/providers/save') modelCache.expires = 0;
+        return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/providers/delete') {
+        const response = await runner('/providers/delete', auth.user.id, { id: input.id });
+        modelCache.expires = 0;
         return json(res, 200, await response.json());
       }
       if (url.pathname === '/api/providers/activate') {
@@ -273,6 +278,8 @@ export const server = createServer(async (req, res) => {
       }
       if (url.pathname === '/api/prompt') {
         if (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 20000) fail(422, '请输入 1–20000 个字符的任务');
+        const validThinking = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+        const thinking = typeof input.thinking === 'string' && validThinking.includes(input.thinking) ? input.thinking : undefined;
         const abort = new AbortController();
         res.once('close', () => abort.abort());
         let checking = false;
@@ -286,7 +293,7 @@ export const server = createServer(async (req, res) => {
           finally { checking = false; }
         }, 5000);
         try {
-          const response = await runner('/prompt', auth.user.id, { message: input.message, thread: input.thread }, abort.signal);
+          const response = await runner('/prompt', auth.user.id, { message: input.message, thread: input.thread, thinking }, abort.signal);
           res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Accel-Buffering': 'no' });
           await pipeline(Readable.fromWeb(response.body), res);
         } finally { clearInterval(timer); await runner('/cancel', auth.user.id, {}).catch(() => {}); }

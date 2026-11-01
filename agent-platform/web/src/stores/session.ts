@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { get, post, setCsrf, ApiError } from '../services/api';
 import { streamPrompt } from '../services/stream';
+import { useUi } from './ui';
 
 export interface Chat { id: string; title: string; updated: number; pinned?: boolean; archived?: boolean; }
 export interface Identity {
@@ -125,7 +126,7 @@ export const useSession = defineStore('session', {
       let received = false;
       try {
         const result = await streamPrompt({
-          thread, message, signal: controller.signal,
+          thread, message, thinking: useUi().thinkingLevel, signal: controller.signal,
           onEvent: (event) => { received = true; handleEvent(event, live); },
         });
         if (!result.settled && !this.stopping) throw new ApiError('连接在任务完成前关闭，请刷新对话查看实际结果。', 0);

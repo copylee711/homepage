@@ -1,14 +1,40 @@
 import { defineStore } from 'pinia';
-import { get, post } from '../services/api';
+import { get, post, ApiError } from '../services/api';
+import { formatBytes } from '../services/format';
+import { useUi } from './ui';
+
+export interface OpenFileTab {
+  path: string;
+  name: string;
+  size: number;
+  meta: string;
+  text: string;
+  draft: string;
+  revision: string | null;
+  binary: boolean;
+  truncated: boolean;
+  note: string;
+  loading: boolean;
+  editing: boolean;
+  saving: boolean;
+}
 
 function decodePreview(value: any): { text: string; binary: boolean } {
   try {
-    const bytes = Uint8Array.from(atob(value.data || value.content || ''), c => c.charCodeAt(0));
-    const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    const raw = value.data ?? value.content ?? '';
+    const bytes = Uint8Array.from(atob(raw), c => c.charCodeAt(0));
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes, { stream: value.truncated === true });
     return { text, binary: text.includes('\u0000') };
-  } catch { return { text: '', binary: true }; }
+  } catch {
+    return { text: '', binary: true };
+  }
 }
-function normalize(p: string) { return String(p || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, ''); }
+
+export function normalizeWsPath(p: string) {
+  return String(p || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+}
+
+export const FILES_TAB = '__files__';
 
 export const useWorkspace = defineStore('workspace', {
   state: () => ({
@@ -17,53 +43,205 @@ export const useWorkspace = defineStore('workspace', {
     loading: false,
     error: '',
     selected: null as string | null,
-    preview: null as null | { name: string; meta: string; text: string; note: string; binary: boolean },
+    tabs: [] as OpenFileTab[],
+    activeTab: FILES_TAB as string,
     snapshots: new Map<string, any>(),
-    previewSeq: 0,
   }),
+  getters: {
+    currentTab(state): OpenFileTab | null {
+      return state.tabs.find(t => t.path === state.activeTab) || state.tabs[0] || null;
+    },
+  },
   actions: {
     async load(path = '', fresh = false) {
-      const cached = this.snapshots.get(path);
-      if (cached) { this.apply(cached); } else { this.loading = true; }
+      path = normalizeWsPath(path);
+      const cached = !fresh ? this.snapshots.get(path) : undefined;
+      if (cached) this.apply(cached);
+      else this.loading = true;
       this.error = '';
       try {
-        const value = await get('/api/files?path=' + encodeURIComponent(normalize(path)) + (fresh ? '&fresh=1' : ''));
+        const value = await get('/api/files?path=' + encodeURIComponent(path) + (fresh ? '&fresh=1' : ''));
         this.snapshots.set(path, value);
+        while (this.snapshots.size > 24) {
+          const first = this.snapshots.keys().next().value;
+          if (first === undefined) break;
+          this.snapshots.delete(first);
+        }
         this.apply(value);
-      } catch (e: any) { this.error = e.message || '无法读取工作区'; }
-      finally { this.loading = false; }
-    },
-    apply(value: any) {
-      this.path = normalize(value.path);
-      this.entries = (Array.isArray(value.entries) ? value.entries : []).map((e: any) => ({ ...e, path: normalize(e.path) })).filter((e: any) => e.path);
-    },
-    navigate(path: string) { this.preview = null; this.selected = null; void this.load(normalize(path)); },
-    async previewFile(path: string) {
-      const seq = ++this.previewSeq;
-      path = normalize(path);
-      this.selected = path;
-      this.preview = { name: path.split('/').pop() || path, meta: '正在读取…', text: '', note: '', binary: false };
-      try {
-        const value = await get('/api/files/preview?path=' + encodeURIComponent(path) + '&limit=' + (64 * 1024));
-        if (seq !== this.previewSeq) return;
-        const { text, binary } = decodePreview(value);
-        this.preview = {
-          name: path.split('/').pop() || path,
-          meta: (value.size != null ? value.size + ' B' : '') + (value.truncated ? ' · 预览已截断' : ''),
-          text: binary ? '' : text, binary,
-          note: binary ? '这是二进制或非 UTF-8 文件，无法预览。' : (value.truncated ? '仅预览前 64 KiB。' : ''),
-        };
       } catch (e: any) {
-        if (seq !== this.previewSeq) return;
-        this.preview = { name: path.split('/').pop() || path, meta: e.message, text: '', note: '无法预览此文件。', binary: false };
+        this.error = e.message || '无法读取工作区';
+      } finally {
+        this.loading = false;
       }
     },
-    closePreview() { this.previewSeq++; this.selected = null; this.preview = null; },
+    apply(value: any) {
+      this.path = normalizeWsPath(value.path);
+      this.entries = (Array.isArray(value.entries) ? value.entries : [])
+        .map((e: any) => ({ ...e, path: normalizeWsPath(e.path) }))
+        .filter((e: any) => e.path && !(this.path === '' && (e.name === 'lost+found' || e.path === 'lost+found')));
+    },
+    navigate(path: string) {
+      this.activeTab = FILES_TAB;
+      void this.load(normalizeWsPath(path));
+    },
+    async openFile(path: string, startEditing = false) {
+      path = normalizeWsPath(path);
+      if (!path) return;
+      this.selected = path;
+      let tab = this.tabs.find(t => t.path === path);
+      if (!tab) {
+        tab = {
+          path,
+          name: path.split('/').pop() || path,
+          size: 0,
+          meta: '正在读取…',
+          text: '',
+          draft: '',
+          revision: null,
+          binary: false,
+          truncated: false,
+          note: '',
+          loading: true,
+          editing: false,
+          saving: false,
+        };
+        this.tabs.push(tab);
+        if (this.tabs.length > 8) {
+          const removable = this.tabs.findIndex(t => t.path !== path && t.draft === t.text);
+          if (removable >= 0) this.tabs.splice(removable, 1);
+        }
+      }
+      this.activeTab = path;
+      await this.reloadTab(path, startEditing);
+    },
+    async reloadTab(path: string, startEditing = false) {
+      const tab = this.tabs.find(t => t.path === path);
+      if (!tab) return;
+      tab.loading = true;
+      tab.note = '';
+      try {
+        const value = await get('/api/files/preview?path=' + encodeURIComponent(path) + '&limit=262144&fresh=1');
+        const current = this.tabs.find(t => t.path === path);
+        if (!current) return;
+        const { text, binary } = decodePreview(value);
+        current.size = Number(value.size ?? text.length);
+        current.binary = binary;
+        current.truncated = value.truncated === true;
+        current.revision = typeof value.revision === 'string' ? value.revision : null;
+        current.text = binary ? '' : text;
+        current.draft = current.text;
+        current.meta = formatBytes(current.size) + (current.truncated ? ' · 已截断' : '');
+        current.note = binary
+          ? '二进制或非 UTF-8 文件，无法直接预览文本。'
+          : current.truncated
+            ? '文件超过 256 KiB，仅展示前 256 KiB（只读）。'
+            : '';
+        if (startEditing && !binary && !current.truncated) current.editing = true;
+      } catch (e: any) {
+        const current = this.tabs.find(t => t.path === path);
+        if (!current) return;
+        current.meta = e.message || '读取失败';
+        current.note = '无法读取此文件。';
+      } finally {
+        const current = this.tabs.find(t => t.path === path);
+        if (current) current.loading = false;
+      }
+    },
+    async closeTab(path: string, force = false): Promise<boolean> {
+      const idx = this.tabs.findIndex(t => t.path === path);
+      if (idx < 0) return true;
+      const tab = this.tabs[idx];
+      if (!force && tab.editing && tab.draft !== tab.text) {
+        const ok = await useUi().confirm({
+          title: '放弃未保存更改',
+          message: `文件“${tab.name}”有未保存的更改，确定放弃并关闭标签页？`,
+          confirmText: '放弃并关闭',
+          danger: true,
+        });
+        if (!ok) return false;
+      }
+      const nextIdx = this.tabs.findIndex(t => t.path === path);
+      if (nextIdx >= 0) this.tabs.splice(nextIdx, 1);
+      if (this.activeTab === path) {
+        const next = this.tabs[nextIdx] || this.tabs[nextIdx - 1];
+        this.activeTab = next ? next.path : FILES_TAB;
+      }
+      if (this.selected === path) this.selected = this.activeTab === FILES_TAB ? null : this.activeTab;
+      return true;
+    },
+    async saveTab(path: string) {
+      const tab = this.tabs.find(t => t.path === path);
+      if (!tab || tab.saving) return;
+      tab.saving = true;
+      try {
+        const res = await post('/api/files/upload', {
+          path: tab.path,
+          content: tab.draft,
+          overwrite: true,
+          revision: tab.revision || undefined,
+        });
+        tab.text = tab.draft;
+        tab.size = new TextEncoder().encode(tab.draft).length;
+        tab.meta = formatBytes(tab.size);
+        if (res.revision) tab.revision = res.revision;
+        this.snapshots.clear();
+        void this.load(this.path, true);
+      } finally {
+        tab.saving = false;
+      }
+    },
     async upload(name: string, content: string, overwrite: boolean) {
-      const target = (this.path ? this.path + '/' : '') + name.replace(/[\\/\u0000-\u001f\u007f]/g, '-');
-      await post('/api/files/upload', { path: target, content, overwrite });
+      const clean = name.replace(/[\\/\u0000-\u001f\u007f]/g, '-');
+      const target = (this.path ? this.path + '/' : '') + clean;
+      try {
+        await post('/api/files/upload', { path: target, content, overwrite });
+      } catch (err: any) {
+        if (!overwrite && err instanceof ApiError && err.status === 409) {
+          const ok = await useUi().confirm({ title: '覆盖已存在文件', message: `文件“${clean}”已存在，是否覆盖？`, confirmText: '覆盖', danger: true });
+          if (!ok) return false;
+          await post('/api/files/upload', { path: target, content, overwrite: true });
+        } else {
+          throw err;
+        }
+      }
       this.snapshots.clear();
-      await this.load(this.path);
+      await this.load(this.path, true);
+      await this.openFile(target);
+      return true;
+    },
+    async createFile(relPath: string) {
+      const target = normalizeWsPath(relPath);
+      if (!target) return;
+      await post('/api/files/upload', { path: target, content: '', overwrite: false });
+      this.snapshots.clear();
+      await this.load(this.path, true);
+      await this.openFile(target, true);
+    },
+    async createDir(relPath: string) {
+      const target = normalizeWsPath(relPath);
+      if (!target) return;
+      await post('/api/files/manage', { action: 'mkdir', path: target });
+      this.snapshots.clear();
+      await this.load(this.path, true);
+    },
+    async renameEntry(oldPath: string, newPath: string) {
+      const dest = normalizeWsPath(newPath);
+      if (!dest || dest === oldPath) return;
+      await post('/api/files/manage', { action: 'move', path: oldPath, destination: dest });
+      const tab = this.tabs.find(t => t.path === oldPath);
+      if (tab) {
+        tab.path = dest;
+        tab.name = dest.split('/').pop() || dest;
+        if (this.activeTab === oldPath) this.activeTab = dest;
+      }
+      this.snapshots.clear();
+      await this.load(this.path, true);
+    },
+    async deleteEntry(entryPath: string) {
+      await post('/api/files/manage', { action: 'delete', path: entryPath });
+      this.closeTab(entryPath, true);
+      this.snapshots.clear();
+      await this.load(this.path, true);
     },
   },
 });

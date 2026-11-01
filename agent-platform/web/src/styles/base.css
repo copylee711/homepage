@@ -11,8 +11,79 @@ button, input, textarea, select { font: inherit; color: inherit; }
 button { border: 0; background: none; padding: 0; cursor: pointer; }
 button:disabled { cursor: not-allowed; }
 a { color: var(--accent-ink); }
-svg { flex: none; }
+svg { flex: none; display: block; }
 ::selection { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+
+/* Custom browser-free checkboxes & clean number inputs */
+input[type='checkbox'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  min-height: 16px !important;
+  padding: 0 !important;
+  margin: 0;
+  flex: none;
+  display: inline-grid;
+  place-content: center;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: background-color var(--fast), border-color var(--fast), box-shadow var(--fast);
+}
+input[type='checkbox']:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+input[type='checkbox']::before {
+  content: '';
+  width: 9px;
+  height: 5.5px;
+  border-left: 1.8px solid var(--surface);
+  border-bottom: 1.8px solid var(--surface);
+  transform: translateY(-0.8px) rotate(-45deg) scale(0);
+  transition: transform 120ms var(--ease);
+}
+input[type='checkbox']:checked {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+input[type='checkbox']:checked::before {
+  transform: translateY(-0.8px) rotate(-45deg) scale(1);
+}
+input[type='checkbox']:focus-visible {
+  outline: 0;
+  box-shadow: var(--ring);
+}
+
+input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+
+/* Smooth theme switch: View Transition circular reveal + CSS fallback */
+html.vt-theme::view-transition-old(root),
+html.vt-theme::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+html.vt-theme::view-transition-old(root) { z-index: 1; }
+html.vt-theme::view-transition-new(root) { z-index: 9999; }
+
+html.theme-transitioning,
+html.theme-transitioning body,
+html.theme-transitioning .sidebar,
+html.theme-transitioning .main,
+html.theme-transitioning .topbar,
+html.theme-transitioning .composer,
+html.theme-transitioning .workspace,
+html.theme-transitioning .dialog,
+html.theme-transitioning .settings-nav,
+html.theme-transitioning .user-bubble,
+html.theme-transitioning .thinking,
+html.theme-transitioning .iris-modal {
+  transition: background-color 280ms var(--ease), color 280ms var(--ease), border-color 280ms var(--ease), box-shadow 280ms var(--ease) !important;
+}
 
 * { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
 *::-webkit-scrollbar { width: 11px; height: 11px; }

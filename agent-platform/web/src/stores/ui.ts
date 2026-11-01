@@ -1,38 +1,112 @@
 import { defineStore } from 'pinia';
 
 export type Tone = 'info' | 'success' | 'warning' | 'error';
+export type SettingsTab = 'general' | 'providers' | 'grants' | 'packages' | 'toolchains' | 'archived' | 'shortcuts';
+export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'max';
 export interface Toast { id: number; message: string; tone: Tone; action?: { label: string; run: () => void } | null; }
+
+export interface ModalState {
+  kind: 'confirm' | 'prompt';
+  title: string;
+  message?: string;
+  defaultValue?: string;
+  placeholder?: string;
+  confirmText?: string;
+  cancelText?: string;
+  danger?: boolean;
+  maxLength?: number;
+  resolve: (value: any) => void;
+}
+
+const VALID_THINKING: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'max'];
 
 function readLS(key: string, fallback: string) { try { return localStorage.getItem(key) || fallback; } catch { return fallback; } }
 function readNum(key: string, fallback: number) { const v = Number(readLS(key, '')); return Number.isFinite(v) && v > 0 ? v : fallback; }
+function readThinking(): ThinkingLevel {
+  const v = readLS('iris-thinking', 'medium') as ThinkingLevel;
+  return VALID_THINKING.includes(v) ? v : 'medium';
+}
 
 let toastSeq = 0;
+let themeTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** Cross-cutting UI state: theme, panel widths & visibility, toasts, which
-    dialog/command-palette is open. Components bind to this. */
 export const useUi = defineStore('ui', {
   state: () => ({
     theme: (document.documentElement.dataset.theme as 'light' | 'dark') || 'light',
+    thinkingLevel: readThinking() as ThinkingLevel,
     sidebarOpen: readLS('iris-sidebar', 'open') !== 'closed',
-    sidebarW: readNum('iris-sidebar-w', 268),
+    sidebarW: readNum('iris-sidebar-w', 264),
     workspaceOpen: readLS('iris-workspace', 'closed') === 'open',
-    workspaceW: readNum('iris-workspace-w', 360),
+    workspaceW: readNum('iris-workspace-w', 380),
+    workspaceDual: readLS('iris-workspace-dual', 'off') === 'on',
     mobileDrawer: null as null | 'sidebar' | 'workspace',
     toasts: [] as Toast[],
-    dialog: null as null | string,   // 'provider' | 'grants' | 'webread' | 'shortcuts' | 'packages' | 'toolchains' | 'settings'
+    dialog: null as null | string,
+    settingsTab: 'general' as SettingsTab,
     commandOpen: false,
     context: null as null | { x: number; y: number; items: any[] },
+    modal: null as ModalState | null,
   }),
   actions: {
-    toggleTheme() {
-      this.theme = this.theme === 'dark' ? 'light' : 'dark';
-      document.documentElement.dataset.theme = this.theme;
-      try { localStorage.setItem('iris-theme', this.theme); } catch {}
+    setTheme(next: 'light' | 'dark', event?: MouseEvent) {
+      if (this.theme === next) return;
+      const root = document.documentElement;
+      const apply = () => {
+        this.theme = next;
+        root.dataset.theme = next;
+        try { localStorage.setItem('iris-theme', next); } catch {}
+      };
+      const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+      const startVT = (document as any).startViewTransition?.bind(document);
+      if (startVT && !reduce) {
+        const x = event?.clientX ?? Math.round(window.innerWidth - 68);
+        const y = event?.clientY ?? 29;
+        const endRadius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+        root.classList.add('vt-theme');
+        try {
+          const vt = startVT(() => { apply(); });
+          vt.ready?.then(() => {
+            root.animate(
+              { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${Math.ceil(endRadius)}px at ${x}px ${y}px)`] },
+              { duration: 420, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', pseudoElement: '::view-transition-new(root)' },
+            );
+          }).catch(() => {});
+          vt.finished?.finally(() => root.classList.remove('vt-theme'));
+          return;
+        } catch {
+          root.classList.remove('vt-theme');
+        }
+      }
+      if (!reduce) {
+        if (themeTimer) clearTimeout(themeTimer);
+        root.classList.add('theme-transitioning');
+        themeTimer = setTimeout(() => { root.classList.remove('theme-transitioning'); themeTimer = null; }, 340);
+      }
+      apply();
+    },
+    toggleTheme(event?: MouseEvent) {
+      this.setTheme(this.theme === 'dark' ? 'light' : 'dark', event);
+    },
+    setThinkingLevel(level: ThinkingLevel) {
+      if (!VALID_THINKING.includes(level)) return;
+      this.thinkingLevel = level;
+      try { localStorage.setItem('iris-thinking', level); } catch {}
     },
     setSidebarOpen(open: boolean) { this.sidebarOpen = open; try { localStorage.setItem('iris-sidebar', open ? 'open' : 'closed'); } catch {} },
     setSidebarW(w: number) { this.sidebarW = Math.max(220, Math.min(420, Math.round(w))); try { localStorage.setItem('iris-sidebar-w', String(this.sidebarW)); } catch {} },
     setWorkspaceOpen(open: boolean) { this.workspaceOpen = open; try { localStorage.setItem('iris-workspace', open ? 'open' : 'closed'); } catch {} },
-    setWorkspaceW(w: number) { this.workspaceW = Math.max(280, Math.min(640, Math.round(w))); try { localStorage.setItem('iris-workspace-w', String(this.workspaceW)); } catch {} },
+    setWorkspaceW(w: number) {
+      const max = this.workspaceDual ? 920 : 680;
+      const min = this.workspaceDual ? 520 : 300;
+      this.workspaceW = Math.max(min, Math.min(max, Math.round(w)));
+      try { localStorage.setItem('iris-workspace-w', String(this.workspaceW)); } catch {}
+    },
+    setWorkspaceDual(dual: boolean) {
+      this.workspaceDual = dual;
+      try { localStorage.setItem('iris-workspace-dual', dual ? 'on' : 'off'); } catch {}
+      if (dual && this.workspaceW < 560) this.setWorkspaceW(620);
+      else if (!dual && this.workspaceW > 520) this.setWorkspaceW(380);
+    },
     toast(message: string, opts: { tone?: Tone; action?: Toast['action']; duration?: number } = {}) {
       const id = ++toastSeq;
       const item: Toast = { id, message, tone: opts.tone || 'info', action: opts.action || null };
@@ -42,7 +116,15 @@ export const useUi = defineStore('ui', {
       return id;
     },
     dismissToast(id: number) { this.toasts = this.toasts.filter(t => t.id !== id); },
-    openDialog(name: string) { this.dialog = name; },
+    openSettings(tab: SettingsTab = 'general') { this.settingsTab = tab; this.dialog = 'settings'; },
+    openDialog(name: string) {
+      const tabMap: Record<string, SettingsTab> = {
+        provider: 'providers', providers: 'providers', grants: 'grants',
+        packages: 'packages', toolchains: 'toolchains', archived: 'archived', shortcuts: 'shortcuts',
+      };
+      if (tabMap[name]) { this.openSettings(tabMap[name]); return; }
+      this.dialog = name;
+    },
     closeDialog() { this.dialog = null; },
     openCommand() { this.commandOpen = true; },
     closeCommand() { this.commandOpen = false; },
@@ -53,5 +135,23 @@ export const useUi = defineStore('ui', {
       this.context = { x: event.clientX, y: event.clientY, items: usable };
     },
     closeContext() { this.context = null; },
+    confirm(opts: string | { title: string; message?: string; confirmText?: string; cancelText?: string; danger?: boolean }): Promise<boolean> {
+      if (this.modal) this.modal.resolve(this.modal.kind === 'confirm' ? false : null);
+      const normalized = typeof opts === 'string' ? { title: '确认操作', message: opts } : opts;
+      return new Promise<boolean>((resolve) => {
+        this.modal = { kind: 'confirm', ...normalized, resolve };
+      });
+    },
+    prompt(opts: { title: string; message?: string; defaultValue?: string; placeholder?: string; confirmText?: string; cancelText?: string; maxLength?: number }): Promise<string | null> {
+      if (this.modal) this.modal.resolve(this.modal.kind === 'confirm' ? false : null);
+      return new Promise<string | null>((resolve) => {
+        this.modal = { kind: 'prompt', ...opts, resolve };
+      });
+    },
+    resolveModal(value: any) {
+      const cur = this.modal;
+      this.modal = null;
+      cur?.resolve(value);
+    },
   },
 });

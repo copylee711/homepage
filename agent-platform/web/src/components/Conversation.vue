@@ -65,7 +65,7 @@ onMounted(() => nextTick(() => toBottom(false)));
         </article>
       </div>
     </div>
-    <button v-if="showJump" class="jump-latest" @click="toBottom()"><Icon name="arrow-down" :size="15" /><span>回到最新</span></button>
+    <button v-if="showJump" type="button" class="jump-latest" aria-label="回到最新" title="回到最新" @click="toBottom()"><Icon name="arrow-down" :size="16" /></button>
   </div>
 </template>
 
@@ -79,6 +79,6 @@ onMounted(() => nextTick(() => toBottom(false)));
 .status-error { color: var(--danger); }
 .working-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); animation: breathe 1.7s ease-in-out infinite; }
 @keyframes breathe { 0%, 100% { opacity: 1; box-shadow: 0 0 0 3px var(--accent-soft); } 50% { opacity: 0.5; box-shadow: 0 0 0 6px transparent; } }
-.jump-latest { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface); color: var(--text-2); font-size: 12px; box-shadow: var(--shadow-lg); }
-.jump-latest:hover { border-color: var(--line-strong); color: var(--text); }
+.jump-latest { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-2); border-radius: 50%; background: var(--surface); color: var(--text-2); box-shadow: var(--shadow-lg); transition: border-color var(--fast), color var(--fast), transform var(--fast); }
+.jump-latest:hover { border-color: var(--line-strong); color: var(--text); transform: translateX(-50%) translateY(-1px); }
 </style>

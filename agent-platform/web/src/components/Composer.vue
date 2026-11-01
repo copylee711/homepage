@@ -15,6 +15,7 @@ const modelOpen = ref(false);
 const canSend = computed(() => !session.busy && session.canExecute && text.value.trim().length > 0);
 const placeholder = computed(() => session.canExecute ? '描述任务，或接着聊…' : '此账户尚未获得 Iris 执行权限');
 const stateText = computed(() => session.busy ? (session.stopping ? '正在停止任务…' : 'Iris 正在处理任务…') : (session.canExecute ? '' : '尚未开通执行权限'));
+const effortLabel = computed(() => ({ off: '', low: '低', medium: '中', high: '高', max: '极高' }[ui.thinkingLevel] || ''));
 
 function autosize() {
   const el = area.value; if (!el) return;
@@ -43,9 +44,10 @@ function onKeydown(e: KeyboardEvent) {
         <button type="button" class="composer-icon-btn" aria-label="添加文件引用" title="引用工作区文件" @click="ui.setWorkspaceOpen(true)"><Icon name="plus" :size="18" /></button>
         <span class="composer-spacer"></span>
         <span v-if="text.length > 16000" class="composer-count">{{ text.length }} / 20000</span>
-        <button ref="chipEl" type="button" class="model-chip" title="模型与供应商" @click="modelOpen = !modelOpen">
+        <button ref="chipEl" type="button" class="model-chip" title="切换模型与思考强度" @click="modelOpen = !modelOpen">
           <span class="model-dot"></span>
           <span class="model-chip-label">{{ session.modelLabel }}</span>
+          <span v-if="effortLabel" class="model-chip-effort">{{ effortLabel }}</span>
           <Icon name="chevron-down" :size="12" />
         </button>
         <button v-if="!session.busy" type="submit" class="send" :disabled="!canSend" aria-label="发送任务" title="发送任务"><Icon name="arrow-up" :size="17" /></button>
@@ -70,9 +72,10 @@ function onKeydown(e: KeyboardEvent) {
 .composer-icon-btn { width: 34px; height: 34px; flex: none; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-2); border-radius: 10px; color: var(--muted); transition: background-color var(--fast), color var(--fast), border-color var(--fast); }
 .composer-icon-btn:hover { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); border-color: var(--line-strong); }
 .composer-count { flex: none; color: var(--faint); font-size: 10px; font-variant-numeric: tabular-nums; }
-.model-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; height: 30px; padding: 0 9px 0 10px; overflow: hidden; border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface); color: var(--text-2); font-size: 11.5px; font-weight: 520; transition: border-color var(--fast), background-color var(--fast); }
+.model-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 256px; height: 30px; padding: 0 9px 0 10px; overflow: hidden; border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface); color: var(--text-2); font-size: 11.5px; font-weight: 520; transition: border-color var(--fast), background-color var(--fast); }
 .model-chip:hover { border-color: var(--line-strong); background: color-mix(in srgb, var(--text) 3%, transparent); }
 .model-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-chip-effort { flex: none; padding: 1px 5px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); font-size: 10px; font-weight: 600; line-height: 1.3; }
 .model-chip .model-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--ok); }
 .model-chip svg { color: var(--faint); }
 .send { flex: none; width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--ink); color: var(--surface); transition: transform var(--fast), opacity var(--fast), filter var(--fast); }

@@ -3,12 +3,10 @@
 .sidebar .icon-button:hover:not(:disabled) { background: var(--sidebar-hover); color: var(--sidebar-text); }
 
 .sidebar-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 40px; padding: 0 4px; margin-bottom: 14px; }
-.brand { display: inline-flex; align-items: center; gap: 11px; min-width: 0; color: var(--sidebar-text); text-decoration: none; border-radius: 10px; }
-.brand-mark { width: 30px; height: 30px; flex: none; display: grid; place-items: center; color: var(--ink); }
-.brand-mark svg { width: 26px; height: 26px; }
-.brand-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.12; }
-.brand-name { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; }
-.brand-sub { font-size: 10.5px; font-weight: 500; color: var(--sidebar-muted); white-space: nowrap; }
+.brand { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--sidebar-text); text-decoration: none; border-radius: 10px; }
+.brand-mark { width: 28px; height: 28px; flex: none; display: inline-flex; align-items: center; justify-content: center; color: var(--ink); }
+.brand-mark svg { width: 22px; height: 22px; display: block; }
+.brand-name { font-size: 17px; font-weight: 700; line-height: 1; letter-spacing: -0.01em; white-space: nowrap; }
 
 .icon-button { width: 34px; height: 34px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; color: var(--text-2); transition: background-color var(--fast), color var(--fast), opacity var(--fast); }
 .icon-button:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 7%, transparent); color: var(--text); }

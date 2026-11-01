@@ -18,7 +18,7 @@ function openChatMenu(e: MouseEvent) {
   chatMenu.value = { anchor: e.currentTarget as HTMLElement, items: [
     { icon: 'download', label: '导出 Markdown', action: () => exp(c.id, 'md') },
     { icon: 'download', label: '导出 JSON', action: () => exp(c.id, 'json') },
-    { icon: session.currentChat?.archived ? 'archive' : 'archive', label: c.archived ? '取消归档' : '归档对话', action: () => arch(c.id, !c.archived) },
+    { icon: 'archive', label: c.archived ? '取消归档' : '归档对话', action: () => arch(c.id, !c.archived) },
   ] };
 }
 function exp(id: string, format: string) { const a = document.createElement('a'); a.href = '/api/chats/export?chat=' + encodeURIComponent(id) + '&format=' + format; a.click(); }
@@ -35,13 +35,13 @@ function toggleWorkspace() {
     <button class="icon-button only-mobile" aria-label="显示导航" @click="ui.mobileDrawer = 'sidebar'"><Icon name="menu" /></button>
     <div class="chat-heading">
       <h1>{{ title }}</h1>
-      <p>{{ subtitle }}</p>
+      <p v-if="subtitle">{{ subtitle }}</p>
     </div>
     <div class="topbar-actions">
       <button v-if="session.canExecute" class="icon-button" aria-label="网页阅读" title="网页阅读" @click="ui.openDialog('webread')"><Icon name="globe" /></button>
       <button class="icon-button" :disabled="!session.currentChat" aria-label="对话操作" title="对话操作" @click="openChatMenu"><Icon name="more-horizontal" /></button>
-      <button class="icon-button" :aria-label="ui.theme === 'dark' ? '切换到浅色' : '切换到深色'" :title="ui.theme === 'dark' ? '浅色' : '深色'" @click="ui.toggleTheme()">
-        <Icon :name="ui.theme === 'dark' ? 'sun' : 'moon'" />
+      <button class="icon-button theme-btn" :aria-label="ui.theme === 'dark' ? '切换到浅色' : '切换到深色'" :title="ui.theme === 'dark' ? '浅色' : '深色'" @click="ui.toggleTheme($event)">
+        <Icon :key="ui.theme" :name="ui.theme === 'dark' ? 'sun' : 'moon'" />
       </button>
       <button v-if="session.canExecute" class="icon-button" aria-label="工作区" title="工作区" @click="toggleWorkspace"><Icon name="panel-right" /></button>
     </div>
@@ -51,10 +51,12 @@ function toggleWorkspace() {
 
 <style>
 .topbar { min-width: 0; height: var(--header-h); display: flex; align-items: center; gap: 8px; padding: 0 16px; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(18px) saturate(1.1); -webkit-backdrop-filter: blur(18px) saturate(1.1); z-index: 5; }
-.chat-heading { flex: 1; min-width: 0; display: flex; flex-direction: column; padding-left: 2px; }
+.chat-heading { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 2px; }
 .chat-heading h1 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 650; line-height: 1.35; letter-spacing: -0.01em; }
 .chat-heading p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; line-height: 1.3; }
 .topbar-actions { display: flex; align-items: center; gap: 3px; flex: none; }
+.theme-btn svg { animation: theme-icon-in 260ms var(--ease); }
+@keyframes theme-icon-in { from { opacity: 0.4; transform: rotate(-45deg) scale(0.82); } to { opacity: 1; transform: none; } }
 .only-mobile { display: none; }
 @media (max-width: 860px) { .only-mobile { display: inline-flex; } }
 </style>

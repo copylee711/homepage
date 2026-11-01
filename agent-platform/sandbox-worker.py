@@ -50,6 +50,8 @@ def list_workspace(raw):
     entries, truncated = [], False
     with os.scandir(target) as scan:
         for entry in scan:
+            if target == ROOT and entry.name == "lost+found":
+                continue
             try:
                 info = entry.stat(follow_symlinks=False)
             except OSError:

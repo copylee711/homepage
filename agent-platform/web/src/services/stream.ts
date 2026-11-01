@@ -2,15 +2,15 @@ import { ApiError, getCsrf } from './api';
 
 // Parses the runner's NDJSON prompt stream. Handles UTF-8 split across chunks and
 // records split across arbitrary network boundaries.
-export async function streamPrompt({ thread, message, signal, onEvent }: {
-  thread: string; message: string; signal: AbortSignal; onEvent: (event: any) => void;
+export async function streamPrompt({ thread, message, thinking, signal, onEvent }: {
+  thread: string; message: string; thinking?: string; signal: AbortSignal; onEvent: (event: any) => void;
 }): Promise<{ settled: boolean }> {
   let response: Response;
   try {
     response = await fetch('/api/prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrf() },
-      body: JSON.stringify({ thread, message }),
+      body: JSON.stringify({ thread, message, thinking }),
       signal, credentials: 'same-origin', redirect: 'error',
     });
   } catch (error: any) {
