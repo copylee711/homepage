@@ -116,7 +116,7 @@ def run_tool(user, value, lease):
                 "--sysctl", "net.ipv6.conf.all.disable_ipv6=1",
                 "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
                 "--memory", str(quota['memory_mib']) + 'm', "--memory-swap", str(quota['memory_mib']) + 'm', "--cpus", str(quota['cpus']), "--pids-limit", str(quota['pids']),
-                "--ulimit", "nofile=256:256", "--ulimit", "fsize=134217728:134217728",
+                "--ulimit", "nofile=256:256", "--ulimit", f"fsize={quota['disk_mib'] * 1048576}:{quota['disk_mib'] * 1048576}",
                 "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777", "--shm-size", "8m",
                 "--mount", f"type=bind,src={mount},dst=/workspace",
                 "--env", "HOME=/tmp", "--env", "PI_CODING_AGENT_DIR=/tmp/pi",
