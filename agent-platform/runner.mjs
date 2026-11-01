@@ -3,8 +3,8 @@ import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
 import { body, equal, fail, json, modelLabel, required } from './shared.mjs';
-import { publicProviders, saveProvider, activeProvider, testProvider, proxyEnvironment, loadProviders } from './providers.mjs';
-import { sandbox } from './sandbox-client.mjs';
+import { publicProviders, saveProvider, activeProvider, activateProvider, testProvider, proxyEnvironment, loadProviders } from './providers.mjs';
+import { sandbox, sandboxTool } from './sandbox-client.mjs';
 import { sessionCapacity } from './session-limits.mjs';
 import { prepareSessionCwd } from './session-cwd.mjs';
 import { ChatStore } from './conversations.mjs';
@@ -204,6 +204,18 @@ export const server = createServer(async (req, res) => {
       return json(res, 200, { label: modelLabel(config?.model || model.split('/').pop()) });
     }
     if (req.url === '/providers') return json(res, 200, await publicProviders());
+    if (req.url === '/greeting') {
+      // Rotate a small curated set (≤16 chars). Cheap, deterministic-ish by time
+      // so it varies across visits without spending model tokens.
+      const lines = ['今天想做点什么？', '把任务交给我吧', '准备好了，说说想法', '需要我做什么？', '一起把它完成吧', '有什么可以帮你的？', '从哪里开始？'];
+      return json(res, 200, { text: lines[Math.floor(Date.now() / 3.6e6) % lines.length] });
+    }
+    if (req.url === '/web-read') {
+      if (typeof input.url !== 'string' || !/^https?:\/\//i.test(input.url) || input.url.length > 2048) fail(422, '请输入有效的网址');
+      const lease = (await sandbox('/lease', input.user)).token;
+      const result = await sandboxTool(lease, { op: 'web-fetch', url: input.url }, 30000);
+      return json(res, 200, { url: input.url, title: result.title || input.url, text: String(result.text || result.content || ''), bytes: result.bytes || 0 });
+    }
     if (req.url === '/quotas' || req.url === '/quotas/save') {
       if (typeof input.target !== 'string' || !input.target || input.target.length > 128) fail(422, '用户标识无效');
       const target = createHash('sha256').update(input.target).digest('hex');
@@ -239,6 +251,18 @@ export const server = createServer(async (req, res) => {
       configuring = true;
       try {
         const result = await saveProvider(input.config);
+        for (const entry of sessions.values()) entry.pi.proc?.kill();
+        sessions.clear();
+        return json(res, 200, result);
+      } finally { configuring = false; }
+    }
+    if (req.url === '/providers/activate') {
+      if (configuring) fail(409, '供应商正在更新，请稍后重试');
+      if ([...sessions.values()].some(entry => entry.pi.busy)) fail(409, '请先等待所有任务结束或停止任务，再切换模型');
+      configuring = true;
+      try {
+        const result = await activateProvider({ id: input.id, model: input.model });
+        // New sessions must pick up the newly active model.
         for (const entry of sessions.values()) entry.pi.proc?.kill();
         sessions.clear();
         return json(res, 200, result);

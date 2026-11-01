@@ -67,9 +67,22 @@ async function runner(path, user, payload, signal) {
   }
   return response;
 }
-const assets = new Map([['/', ['index.html', 'text/html']], ['/style.css', ['style.css', 'text/css']],
-  ['/tokens.css', ['tokens.css', 'text/css']], ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
-  ['/fonts/outfit-latin.woff2', ['fonts/outfit-latin.woff2', 'font/woff2']]]);
+// The console is a Vite SPA built into web/dist. Serve hashed assets with long
+// cache; everything else falls back to index.html (client-side app, no routing).
+const distRoot = new URL('./web/dist/', import.meta.url);
+const mimeByExt = {
+  '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
+  '.svg': 'image/svg+xml', '.json': 'application/json', '.woff2': 'font/woff2', '.woff': 'font/woff',
+  '.ttf': 'font/ttf', '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.map': 'application/json',
+};
+function distAsset(pathname) {
+  // Only serve real files under dist; reject traversal. Unknown paths → SPA shell.
+  const clean = pathname.replace(/\?.*$/, '');
+  if (clean === '/' || !/^\/[A-Za-z0-9._\-/]+$/.test(clean) || clean.includes('..')) return null;
+  const ext = clean.slice(clean.lastIndexOf('.'));
+  if (!mimeByExt[ext]) return null;
+  return { rel: clean.replace(/^\//, ''), type: mimeByExt[ext], immutable: clean.startsWith('/assets/') };
+}
 const modelCache = { label: '', expires: 0 };
 async function modelName(user) {
   if (Date.now() < modelCache.expires) return modelCache.label;
@@ -199,6 +212,9 @@ export const server = createServer(async (req, res) => {
       if (url.pathname === '/api/providers' && req.method === 'GET') {
         const response = await runner('/providers', auth.user.id, {}); return json(res, 200, await response.json());
       }
+      if (url.pathname === '/api/greeting' && req.method === 'GET') {
+        const response = await runner('/greeting', auth.user.id, {}); return json(res, 200, await response.json());
+      }
       if (url.pathname === '/api/session' && req.method === 'GET') {
         const response = await runner('/session', auth.user.id, { thread: url.searchParams.get('chat') }); return json(res, 200, await response.json());
       }
@@ -238,6 +254,16 @@ export const server = createServer(async (req, res) => {
         if (url.pathname === '/api/providers/save') modelCache.expires = 0;
         return json(res, 200, await response.json());
       }
+      if (url.pathname === '/api/providers/activate') {
+        const response = await runner('/providers/activate', auth.user.id, { id: input.id, model: input.model });
+        modelCache.expires = 0;
+        return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/web-read') {
+        if (typeof input.url !== 'string' || !/^https?:\/\//i.test(input.url) || input.url.length > 2048) fail(422, '请输入有效的网址');
+        const response = await runner('/web-read', auth.user.id, { url: input.url });
+        return json(res, 200, await response.json());
+      }
       if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete'].includes(url.pathname)) {
         const response = await runner(url.pathname.replace('/api', ''), auth.user.id, input);
         return json(res, 200, await response.json());
@@ -268,15 +294,22 @@ export const server = createServer(async (req, res) => {
       }
       fail(404, '接口不存在');
     }
-    let asset = assets.get(url.pathname);
-    if (!asset && /^\/js\/[a-z0-9-]+\.js$/.test(url.pathname)) asset = [url.pathname.slice(1), 'text/javascript'];
-    if (!asset || req.method !== 'GET') fail(404, '页面不存在');
-    let data;
-    try { data = await readFile(new URL('./web/' + asset[0], import.meta.url)); }
-    catch (error) { if (error.code === 'ENOENT') fail(404, '页面不存在'); throw error; }
-    const type = asset[1];
-    res.writeHead(200, { 'Content-Type': type.startsWith('text/') ? type + '; charset=utf-8' : type });
-    res.end(data);
+    if (req.method !== 'GET') fail(404, '页面不存在');
+    const asset = distAsset(url.pathname);
+    if (asset) {
+      let data;
+      try { data = await readFile(new URL(asset.rel, distRoot)); }
+      catch (error) { if (error.code === 'ENOENT') fail(404, '页面不存在'); throw error; }
+      const headers = { 'Content-Type': asset.type.startsWith('text/') || asset.type === 'application/json' ? asset.type + '; charset=utf-8' : asset.type };
+      // Hashed build assets are immutable; the shell and other files stay no-store.
+      headers['Cache-Control'] = asset.immutable ? 'public, max-age=31536000, immutable' : 'no-store';
+      res.writeHead(200, headers);
+      return res.end(data);
+    }
+    // SPA fallback: any non-asset GET renders the app shell.
+    const shell = await readFile(new URL('index.html', distRoot));
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(shell);
   } catch (error) {
     if (res.headersSent) return res.destroy();
     if (error.status === 401 && !req.url.startsWith('/api/')) return redirect(res, '/auth/login');

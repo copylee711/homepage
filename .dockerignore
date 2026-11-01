@@ -11,3 +11,7 @@ agent-platform/data/
 agent-platform/workspace/
 agent-platform/node_modules/
 agent-platform/tests/
+agent-platform/web/node_modules/
+agent-platform/web/dist/
+agent-platform/web/_vanilla_ref/
+agent-platform/web/.vite/

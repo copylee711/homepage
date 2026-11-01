@@ -1,0 +1,169 @@
+<script setup lang="ts">
+import { ref, computed, nextTick } from 'vue';
+import Icon from './Icon.vue';
+import DropMenu from './DropMenu.vue';
+import type { MenuItem } from './DropMenu.vue';
+import { useSession, type Chat } from '../stores/session';
+import { useUi } from '../stores/ui';
+import { groupChats, formatShort } from '../services/format';
+import { post } from '../services/api';
+
+const session = useSession();
+const ui = useUi();
+const emit = defineEmits<{ openModel: []; }>();
+
+const query = ref('');
+const searchOpen = ref(false);
+const searchInput = ref<HTMLInputElement | null>(null);
+
+function toggleSearch() {
+  searchOpen.value = !searchOpen.value;
+  if (searchOpen.value) nextTick(() => searchInput.value?.focus());
+  else query.value = '';
+}
+
+const groups = computed(() => {
+  const q = query.value.trim().toLowerCase();
+  const filtered = session.chats
+    .filter(c => c.archived !== true)
+    .filter(c => !q || (c.title || '').toLowerCase().includes(q));
+  return groupChats(filtered);
+});
+
+const accountMenuAnchor = ref<HTMLElement | null>(null);
+const chatMenu = ref<{ anchor: HTMLElement; items: MenuItem[] } | null>(null);
+const accountMenu = ref<MenuItem[] | null>(null);
+
+function pickChat(c: Chat) { void session.selectChat(c.id); if (ui.mobileDrawer) ui.mobileDrawer = null; }
+
+async function rename(c: Chat) {
+  const title = prompt('重命名对话', c.title || '');
+  if (title == null) return;
+  const t = title.replace(/\s+/g, ' ').trim();
+  if (!t || t.length > 80) return;
+  try { await post('/api/chats/rename', { thread: c.id, title: t }); await session.loadChats(); }
+  catch (e: any) { ui.toast(e.message, { tone: 'error' }); }
+}
+async function togglePin(c: Chat) { try { await post('/api/chats/pin', { thread: c.id, pinned: !c.pinned }); await session.loadChats(); } catch (e: any) { ui.toast(e.message, { tone: 'error' }); } }
+async function toggleArchive(c: Chat) { try { await post('/api/chats/archive', { thread: c.id, archived: !c.archived }); await session.loadChats(); ui.toast(c.archived ? '已恢复对话' : '已归档对话', { tone: 'success' }); } catch (e: any) { ui.toast(e.message, { tone: 'error' }); } }
+function exportChat(c: Chat, format: string) { const a = document.createElement('a'); a.href = '/api/chats/export?chat=' + encodeURIComponent(c.id) + '&format=' + format; a.click(); ui.toast('已开始导出 ' + (format === 'json' ? 'JSON' : 'Markdown'), { tone: 'success' }); }
+async function removeChat(c: Chat) {
+  if (!confirm('删除“' + c.title + '”？此操作无法撤销，但会保留工作区文件。')) return;
+  try { await post('/api/chats/delete', { thread: c.id }); session.chats = session.chats.filter(x => x.id !== c.id); if (session.chatId === c.id) session.startNew(); ui.toast('对话已删除', { tone: 'success' }); }
+  catch (e: any) { ui.toast(e.message, { tone: 'error' }); }
+}
+
+function chatItems(c: Chat): MenuItem[] {
+  return [
+    { icon: 'edit', label: '重命名', action: () => rename(c) },
+    { icon: 'pin', label: c.pinned ? '取消置顶' : '置顶对话', action: () => togglePin(c) },
+    { icon: 'download', label: '导出 Markdown', action: () => exportChat(c, 'md') },
+    { icon: 'download', label: '导出 JSON', action: () => exportChat(c, 'json') },
+    { icon: 'archive', label: c.archived ? '取消归档' : '归档对话', action: () => toggleArchive(c) },
+    { icon: 'trash', label: '删除对话', danger: true, action: () => removeChat(c) },
+  ];
+}
+function openChatMenu(e: MouseEvent, c: Chat) { chatMenu.value = { anchor: e.currentTarget as HTMLElement, items: chatItems(c) }; }
+function chatContext(e: MouseEvent, c: Chat) { ui.openContext(e, [{ header: c.title || '对话' }, ...chatItems(c)]); }
+
+function openAccountMenu() {
+  const a = session.auth;
+  accountMenu.value = [
+    { icon: 'settings', label: '设置', action: () => ui.openDialog('settings') },
+    a?.admin ? { icon: 'code', label: '模型与供应商', action: () => ui.openDialog('provider') } : null,
+    a?.admin ? { icon: 'users', label: '执行授权', action: () => ui.openDialog('grants') } : null,
+    a?.admin ? { icon: 'package', label: '扩展市场', action: () => ui.openDialog('packages') } : null,
+    a?.can_execute ? { icon: 'code', label: '工具链', action: () => ui.openDialog('toolchains') } : null,
+    a?.can_execute ? { icon: 'globe', label: '网页阅读', action: () => ui.openDialog('webread') } : null,
+    { icon: 'logout', label: '退出登录', danger: true, action: logout },
+  ].filter(Boolean) as MenuItem[];
+}
+async function logout() { try { await post('/auth/logout', {}); location.assign('/auth/login'); } catch (e: any) { ui.toast(e.message, { tone: 'error' }); } }
+
+// resize handle
+function startResize(e: PointerEvent) {
+  e.preventDefault();
+  const move = (ev: PointerEvent) => ui.setSidebarW(ev.clientX);
+  const up = () => { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.body.style.cursor = ''; };
+  document.addEventListener('pointermove', move); document.addEventListener('pointerup', up);
+  document.body.style.cursor = 'col-resize';
+}
+
+const avatarUrl = computed(() => session.auth?.user?.avatar || '');
+const accountRole = computed(() => {
+  const a = session.auth; if (!a) return '';
+  if (a.admin) return '管理员 · 独立沙箱';
+  if (a.can_execute && a.grant_expires_at) return '已授权';
+  return a.can_execute ? '已授权 · 独立沙箱' : '无执行权限';
+});
+</script>
+
+<template>
+  <aside class="sidebar" aria-label="对话导航">
+    <div class="sidebar-head">
+      <a class="brand" href="/" aria-label="Iris 首页">
+        <span class="brand-mark"><Icon name="iris" :size="21" /></span>
+        <span class="brand-text"><span class="brand-name">Iris</span><span class="brand-sub">Agent 工作台</span></span>
+      </a>
+      <button class="icon-button" aria-label="收起导航" title="收起导航" @click="ui.setSidebarOpen(false)"><Icon name="panel-left" /></button>
+    </div>
+
+    <button class="new-chat" :disabled="session.busy || !session.canExecute" @click="session.startNew()">
+      <Icon name="plus" :size="18" /><span>新对话</span>
+    </button>
+
+    <button class="command-trigger" @click="ui.openCommand()">
+      <span class="search-icon"><Icon name="search" :size="15" /></span>
+      <span>搜索与命令</span><kbd>⌘K</kbd>
+    </button>
+
+    <div class="chat-list-head">
+      <span class="chat-list-label">对话</span>
+      <div class="chat-list-filter" :class="{ 'is-open': searchOpen }">
+        <input v-if="searchOpen" ref="searchInput" v-model="query" type="search" placeholder="筛选对话" autocomplete="off" spellcheck="false" maxlength="80" aria-label="筛选对话" @blur="query || (searchOpen = false)">
+        <button class="icon-button mini" :aria-label="searchOpen ? '关闭筛选' : '筛选对话'" :title="searchOpen ? '关闭筛选' : '筛选对话'" @click="toggleSearch">
+          <Icon :name="searchOpen ? 'x' : 'search'" :size="15" />
+        </button>
+      </div>
+    </div>
+
+    <nav class="chat-list" aria-label="对话列表">
+      <div v-if="session.chatsLoading" class="list-state"><span class="spinner"></span><span>正在读取对话…</span></div>
+      <p v-else-if="session.chatsError" class="list-empty">{{ session.chatsError }}</p>
+      <p v-else-if="!groups.length" class="list-empty">{{ query ? '没有匹配的对话。' : view === 'archived' ? '没有已归档的对话。' : '还没有对话，发送第一条任务后会出现在这里。' }}</p>
+      <section v-for="g in groups" :key="g.key" class="chat-group">
+        <h2 class="chat-group-title">{{ g.label }}</h2>
+        <ul class="chat-items">
+          <li v-for="c in g.chats" :key="c.id" class="chat-item" :class="{ 'is-active': c.id === session.chatId }">
+            <button class="chat-select" :aria-current="c.id === session.chatId ? 'page' : undefined" :title="c.title" @click="pickChat(c)" @contextmenu="e => chatContext(e, c)">
+              <span class="chat-title">{{ c.title || '新对话' }}</span>
+              <span class="chat-meta"><span class="chat-time">{{ formatShort(c.updated) }}</span><Icon v-if="c.pinned" name="pin" :size="12" /><Icon v-if="c.archived" name="archive" :size="12" /></span>
+            </button>
+            <button class="icon-button chat-more" aria-label="对话操作" @click="e => openChatMenu(e, c)"><Icon name="more-horizontal" /></button>
+          </li>
+        </ul>
+      </section>
+    </nav>
+
+    <div class="sidebar-foot">
+      <button ref="accountMenuAnchor" class="account" aria-haspopup="menu" @click="openAccountMenu">
+        <span class="account-avatar" :class="{ 'has-image': avatarUrl }">
+          <img v-if="avatarUrl" :src="avatarUrl" alt="" class="account-avatar-img">
+          <template v-else>{{ (session.auth?.user?.name || '·').slice(0, 1) }}</template>
+        </span>
+        <span class="account-copy">
+          <strong>{{ session.auth?.user?.name || '账户' }}</strong>
+          <small>{{ accountRole }}</small>
+        </span>
+        <span class="account-caret"><Icon name="chevron-up" :size="15" /></span>
+      </button>
+    </div>
+
+    <div class="resize-handle resize-sidebar" role="separator" aria-orientation="vertical" aria-label="调整导航宽度" @pointerdown="startResize"></div>
+
+    <DropMenu v-if="chatMenu" :anchor="chatMenu.anchor" :items="chatMenu.items" label="对话操作" @close="chatMenu = null" />
+    <DropMenu v-if="accountMenu && accountMenuAnchor" :anchor="accountMenuAnchor" :items="accountMenu" label="账户与设置" up @close="accountMenu = null" />
+  </aside>
+</template>
+
+<style src="./sidebar.css"></style>

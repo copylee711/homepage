@@ -23,7 +23,7 @@ Caddy 转发至 xa 时只保留两个 ai 专属 Cookie，剥离既有 Cloud 兼�
 - `compose.yaml`：服务、资源限制与回环端口；不挂载 Docker socket、宿主机目录或 SSH 密钥到 runner。
 - `Dockerfile.*`、`package-lock.json`：固定 Node 版本、Pi 1.4.0 及锁定 npm 依赖，安装禁用生命周期脚本。
 - `gateway.mjs`：SSO、权限、CSRF、流式代理；`runner.mjs`：Pi RPC、会话和工作目录。
-- `web/`：聊天控制台和管理员供应商设置。颜色从主仓库 `src/styles/tokens.css` 在构建时复制。
+- `web/`：Iris 控制台，Vue 3 + Vite 单页应用（`src/` 源码、`package.json`、`vite.config.mjs`）。`Dockerfile.gateway` 多阶段构建先 `npm ci && npm run build` 生成 `web/dist/`，网关据此提供静态资源；`web/dist`、`web/node_modules` 不进构建上下文。自建中性设计令牌，不再复制主站 `tokens.css`。
 - `.env.example`、`Caddyfile.example`、`*.service.example`：配置模板；必须按实际环境生成。
 - 服务器 `.env`：客户端密钥、内部 runner 密钥、OpenCode Go 密钥，root 0600，禁止提交。
 - `data/providers.json`、`data/agent/models.json`：管理员保存的供应商密钥，服务用户 0600；不回显给浏览器。
@@ -206,6 +206,7 @@ docker exec -i RUNNER_CONTAINER node --input-type=module < tests/sandbox-live.mj
 才替换内容。所有文件操作均通过独立用户租约进入沙箱，路径和符号链接在容器内限制到 `/workspace`；
 runner 不挂载工作区。浏览时沙箱正在运行命令会提示稍后刷新，不会停止模型任务。
 
-静态文件在 `web/js/`、`web/fonts/` 与 `web/style.css` 中，网关使用明确路径规则提供服务；字体
-本地打包并附许可证，无 CDN 或新增运行时依赖。新代码需要同时重建 gateway、runner 和 sandbox
-镜像，并更新主机 broker 脚本；只替换页面无法启用文件 API。UI/权限行为见 `UX-CONTRACT.md`。
+控制台是 Vue 3 + Vite 构建到 `web/dist/` 的单页应用，网关对 `/assets/*` 哈希资源返回不可变缓存、
+其余路径回退到 `index.html`（客户端应用，无服务端路由）；KaTeX 与字体本地打包，无 CDN 或新增运行时
+依赖。改前端只需重建 gateway 镜像（多阶段会重新 `npm run build`）；文件/执行 API 仍需同时重建
+runner 和 sandbox 镜像并更新主机 broker 脚本。UI/权限行为见 `UX-CONTRACT.md`。
