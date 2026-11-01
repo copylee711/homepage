@@ -15,6 +15,7 @@ import { listWorkspace, previewWorkspace, downloadWorkspace, uploadWorkspace, ma
 
 const secret = required('RUNNER_SECRET');
 const sessions = new Map();
+const deleting = new Set();
 const chats = new ChatStore({ sessionsRoot: '/data/sessions', metaRoot: '/data/chat-meta' });
 const snapshots = new SessionSnapshots(chats, projectSession);
 // Pay the SDK import cost at service startup, before readiness, never on a click.
@@ -94,10 +95,12 @@ class Pi {
     });
   }
   async prompt(res, message) {
+    if (deleting.has(this.key)) fail(409, '正在删除此对话');
     invalidateWorkspace(this.user);
     if (this.busy) fail(409, '当前任务尚未结束，请先停止或等待完成');
     if ([...sessions.values()].some(entry => entry.pi !== this && entry.pi.user === this.user && entry.pi.busy)) fail(409, '每个用户同时只能运行一个任务');
     await sessionCapacity(`/data/sessions/${this.user}`, this.thread);
+    if (deleting.has(this.key)) fail(409, '正在删除此对话');
     // Recheck after the asynchronous capacity read before claiming this user's task.
     if ([...sessions.values()].some(entry => entry.pi.user === this.user && entry.pi.busy)) fail(409, '每个用户同时只能运行一个任务');
     this.busy = true; this.output = res;
@@ -117,11 +120,13 @@ class Pi {
   }
 }
 async function instance(user, thread) {
+  const key = user + ':' + thread;
+  if (deleting.has(key)) fail(409, '正在删除此对话');
   if (toolchainBusy(user)) fail(409, '工具链正在安装，请等待完成');
   if (configuring) fail(409, '正在更新供应商，请稍后重试');
   await sessionCapacity(`/data/sessions/${user}`, thread, { readExisting: true });
   if (toolchainBusy(user)) fail(409, '工具链正在安装，请等待完成');
-  const key = user + ':' + thread;
+  if (deleting.has(key)) fail(409, '正在删除此对话');
   let entry = sessions.get(key);
   if (entry) {
     await entry.ready;
@@ -141,7 +146,35 @@ async function instance(user, thread) {
     });
   }
   entry.touched = Date.now();
-  await entry.ready; return entry.pi;
+  await entry.ready;
+  if (deleting.has(key)) fail(409, '正在删除此对话');
+  return entry.pi;
+}
+async function deleteChat(user, thread) {
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(thread || '')) fail(422, '对话标识无效');
+  const key = user + ':' + thread;
+  if (deleting.has(key)) fail(409, '正在删除此对话');
+  deleting.add(key);
+  try {
+    const entry = sessions.get(key);
+    if (entry) {
+      await entry.ready.catch(() => {});
+      if (entry.pi.busy) fail(409, '此对话正在运行，请先停止任务');
+      const proc = entry.pi.proc;
+      if (proc?.pid && proc.exitCode === null && proc.signalCode === null) {
+        let force, deadline;
+        try {
+          const exited = new Promise(resolve => proc.once('exit', resolve));
+          proc.kill(); force = setTimeout(() => proc.kill('SIGKILL'), 1500);
+          await Promise.race([exited, new Promise((_, reject) => { deadline = setTimeout(() => reject(Object.assign(new Error('未能关闭对话进程，请稍后重试'), { status: 503 })), 5000); })]);
+        } finally { clearTimeout(force); clearTimeout(deadline); }
+      }
+      if (sessions.get(key) === entry) sessions.delete(key);
+    }
+    const result = await chats.delete(user, thread);
+    snapshots.forget(user, thread);
+    return result;
+  } finally { deleting.delete(key); }
 }
 async function cancel(user) {
   cancelToolchain(user);
@@ -215,6 +248,7 @@ export const server = createServer(async (req, res) => {
     if (req.url === '/chats/rename') return json(res, 200, await chats.rename(input.user, input.thread, input.title));
     if (req.url === '/chats/pin') return json(res, 200, await chats.setPinned(input.user, input.thread, input.pinned));
     if (req.url === '/chats/archive') return json(res, 200, await chats.setArchived(input.user, input.thread, input.archived));
+    if (req.url === '/chats/delete') return json(res, 200, await deleteChat(input.user, input.thread));
     if (req.url === '/chats/export') return json(res, 200, await chats.export(input.user, input.thread, input.format, await secretValues()));
     // Workspace calls use an independent short lease; they never cancel model work.
     if (req.url.startsWith('/files/') && [...sessions.values()].some(entry => entry.pi.user === input.user && entry.pi.busy)) invalidateWorkspace(input.user);

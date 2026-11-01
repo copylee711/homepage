@@ -114,6 +114,18 @@ export class ChatStore {
       return item;
     });
   }
+  async delete(user, thread) {
+    return this.serialize(user, async () => {
+      await this.assertOwned(user, thread);
+      const meta = await this.loadMeta(user);
+      // Exact owned files only. Never recursively delete a user-controlled path.
+      await unlink(this.file(user, thread));
+      await unlink(this.file(user, thread) + '.cwd-backup').catch(error => { if (error.code !== 'ENOENT') throw error; });
+      delete meta.chats[thread];
+      await this.saveMeta(user, meta);
+      return { ok: true };
+    });
+  }
   async list(user) {
     const directory = this.directory(user);
     await mkdir(directory, { recursive: true, mode: 0o700 });

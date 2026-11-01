@@ -238,7 +238,7 @@ export const server = createServer(async (req, res) => {
         if (url.pathname === '/api/providers/save') modelCache.expires = 0;
         return json(res, 200, await response.json());
       }
-      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive'].includes(url.pathname)) {
+      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete'].includes(url.pathname)) {
         const response = await runner(url.pathname.replace('/api', ''), auth.user.id, input);
         return json(res, 200, await response.json());
       }

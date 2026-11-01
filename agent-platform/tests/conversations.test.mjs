@@ -29,6 +29,21 @@ await mkdir(join(sessionsRoot, b), { recursive: true });
 await writeFile(join(sessionsRoot, a, idA + '.jsonl'), session('帮我查看工作区'));
 await writeFile(join(sessionsRoot, b, idB + '.jsonl'), session('另一个用户的秘密对话'));
 const store = new ChatStore({ sessionsRoot, metaRoot });
+
+test('permanent deletion removes only the owned history, backup and metadata', async () => {
+  const id = '33333333-3333-4333-8333-333333333333';
+  await writeFile(store.file(a, id), session('delete me'));
+  await writeFile(store.file(a, id) + '.cwd-backup', 'old header');
+  await store.rename(a, id, '删除测试'); await store.setArchived(a, id, true);
+  await assert.rejects(store.delete(b, id), error => error.status === 404);
+  await assert.rejects(store.delete(a, '../escape'), error => error.status === 422);
+  await store.delete(a, id);
+  await assert.rejects(readFile(store.file(a, id)), { code: 'ENOENT' });
+  await assert.rejects(readFile(store.file(a, id) + '.cwd-backup'), { code: 'ENOENT' });
+  assert.equal((await store.loadMeta(a)).chats[id], undefined);
+  assert.ok((await store.list(b)).some(chat => chat.id === idB));
+  await assert.rejects(store.delete(a, id), error => error.status === 404);
+});
 after(async () => rm(root, { recursive: true, force: true }));
 
 test('chat metadata is per user and survives a new store instance', async () => {

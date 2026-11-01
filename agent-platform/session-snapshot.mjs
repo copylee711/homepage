@@ -4,6 +4,7 @@ import { fail } from './shared.mjs';
 // Process-local, bounded snapshots; never browser storage, never an execution lease.
 export class SessionSnapshots {
   constructor(store, project) { this.store = store; this.project = project; this.cache = new Map(); }
+  forget(user, thread) { this.cache.delete(user + ':' + thread); }
   async read(user, thread) {
     let info;
     try { info = await this.store.assertOwned(user, thread); }

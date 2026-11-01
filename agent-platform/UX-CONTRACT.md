@@ -71,6 +71,9 @@ Escape closes idle dialogs and focus returns to their trigger.
   rename, pin/unpin, archive/unarchive and Markdown/JSON export. Metadata is server-side
   in `/data/chat-meta/<user hash>.json`; Pi history is preserved. Archive does not free
   storage quota. Export omits provider replay metadata and masks known service model keys.
+- Both sidebar and header menus offer permanent deletion with explicit confirmation.
+  Deletion removes that owned JSONL, its cwd backup and metadata, releases history quota
+  and clears snapshots; workspace files remain. Active generation must stop first.
 - Menus support arrows/Home/End/Escape. Native dialogs keep focus; asynchronous mutations
   disable repeat submission, preserve entered values on error and announce outcomes.
 - Retry resends the last user task; continue appends an explicit instruction. Neither

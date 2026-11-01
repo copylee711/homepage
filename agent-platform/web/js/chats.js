@@ -4,7 +4,7 @@ import { formatShort, groupChats } from './format.js';
 import { openMenu } from './menu.js';
 
 export class ChatSidebar {
-  constructor({ list, search, clear, activeTab, archivedTab, empty, onSelect, onRename, onArchive, onNotice, onMutated }) {
+  constructor({ list, search, clear, activeTab, archivedTab, empty, onSelect, onRename, onArchive, onDelete, onNotice, onMutated }) {
     this.list = list;
     this.search = search;
     this.clear = clear;
@@ -13,6 +13,7 @@ export class ChatSidebar {
     this.onSelect = onSelect;
     this.onRename = onRename;
     this.onArchive = onArchive;
+    this.onDelete = onDelete;
     this.onNotice = onNotice;
     this.onMutated = onMutated;
     this.chats = [];
@@ -141,6 +142,7 @@ export class ChatSidebar {
           { icon: 'download', label: '导出 Markdown', action: () => this.exportChat(chat, 'md') },
           { icon: 'download', label: '导出 JSON', action: () => this.exportChat(chat, 'json') },
           { icon: 'archive', label: chat.archived ? '取消归档' : '归档对话', action: () => this.toggleArchive(chat) },
+          { icon: 'trash', label: '删除对话', danger: true, disabled: this.busy && chat.id === this.activeId, action: () => this.onDelete?.(chat) },
         ],
       });
     });

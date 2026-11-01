@@ -66,6 +66,16 @@ const sidebar = new ChatSidebar({
   },
   onNotice: (text, options) => toast(text, options),
   onMutated: event => { if (event.chat.id === chatId) syncHeader(); },
+  onDelete: async chat => {
+    if (!await dialogs.confirm({ title: '删除“' + chat.title + '”？', body: '将永久删除此对话的消息与工具记录，并释放对话存储配额。工作区文件会保留。此操作无法撤销。', confirmLabel: '删除对话', tone: 'danger' })) return;
+    try {
+      await post('/api/chats/delete', { thread: chat.id });
+      conversationSnapshots.delete(chat.id);
+      sidebar.chats = sidebar.chats.filter(item => item.id !== chat.id); sidebar.render();
+      if (chatId === chat.id) startNew({ focus: false });
+      toast('对话已删除', { tone: 'success' });
+    } catch (error) { toast(error.message, { tone: 'error' }); }
+  },
 });
 
 const workspace = new WorkspacePanel({
@@ -660,6 +670,7 @@ function openChatMenu() {
       { icon: 'download', label: '导出 Markdown', action: () => sidebar.exportChat(chat, 'md') },
       { icon: 'download', label: '导出 JSON', action: () => sidebar.exportChat(chat, 'json') },
       { icon: 'archive', label: chat.archived ? '取消归档' : '归档对话', action: () => sidebar.toggleArchive(chat) },
+      { icon: 'trash', label: '删除对话', danger: true, disabled: busy, action: () => sidebar.onDelete?.(chat) },
     ],
   });
 }
