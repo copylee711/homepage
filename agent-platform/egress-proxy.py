@@ -12,7 +12,7 @@ import http.client
 spec = importlib.util.spec_from_file_location('web_access', Path(__file__).with_name('web-access.py'))
 web = importlib.util.module_from_spec(spec); spec.loader.exec_module(web)
 slots = threading.BoundedSemaphore(16)
-MAX_TRANSFER = 64 * 1024 * 1024
+MAX_TRANSFER = 1024 * 1024 * 1024
 
 def connect(address, port):
     upstream = os.environ.get('EGRESS_UPSTREAM_PROXY', '')
@@ -39,7 +39,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200, 'Connection Established'); self.end_headers(); self.wfile.flush()
             self.close_connection = True
             remote.setblocking(False); self.connection.setblocking(False)
-            end = time.monotonic() + 120
+            end = time.monotonic() + 600
             total = 0
             with selectors.DefaultSelector() as poll:
                 poll.register(self.connection, selectors.EVENT_READ, remote)
