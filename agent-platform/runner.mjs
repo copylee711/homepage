@@ -291,12 +291,26 @@ export const server = createServer(async (req, res) => {
     if (req.url === '/chats/archive') return json(res, 200, await chats.setArchived(input.user, input.thread, input.archived));
     if (req.url === '/chats/delete') return json(res, 200, await deleteChat(input.user, input.thread));
     if (req.url === '/chats/export') return json(res, 200, await chats.export(input.user, input.thread, input.format, await secretValues()));
+    if (req.url === '/chats/fork') {
+      const target = input.targetThread || randomUUID();
+      return json(res, 200, await chats.fork(input.user, input.thread, target, input.title));
+    }
+    if (req.url === '/chats/truncate') {
+      const result = await chats.truncate(input.user, input.thread, Number(input.keepMessages) || 0);
+      snapshots.forget(input.user, input.thread);
+      const live = sessions.get(input.user + ':' + input.thread);
+      if (live) {
+        live.pi.proc?.kill();
+        sessions.delete(input.user + ':' + input.thread);
+      }
+      return json(res, 200, result);
+    }
     // Workspace calls use an independent short lease; they never cancel model work.
     if (req.url.startsWith('/files/') && [...sessions.values()].some(entry => entry.pi.user === input.user && entry.pi.busy)) invalidateWorkspace(input.user);
     if (req.url === '/files/list') return json(res, 200, await listWorkspace(input.user, input.path, input.fresh === true));
     if (req.url === '/files/preview') return json(res, 200, await previewWorkspace(input.user, input.path, input.limit, input.fresh === true));
     if (req.url === '/files/download') return json(res, 200, await downloadWorkspace(input.user, input.path));
-    if (req.url === '/files/upload') return json(res, 200, await uploadWorkspace(input.user, input.path, input.content, input.overwrite === true, input.revision));
+    if (req.url === '/files/upload') return json(res, 200, await uploadWorkspace(input.user, input.path, input.content, input.overwrite === true, input.revision, input.encoding));
     if (req.url === '/files/manage') return json(res, 200, await manageWorkspace(input.user, input));
     if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(input.thread || '')) fail(422, '对话标识无效');
     if (req.url === '/session') {

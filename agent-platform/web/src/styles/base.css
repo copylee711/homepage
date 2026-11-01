@@ -12,7 +12,7 @@ button { border: 0; background: none; padding: 0; cursor: pointer; }
 button:disabled { cursor: not-allowed; }
 a { color: var(--accent-ink); }
 svg { flex: none; display: block; }
-::selection { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 
 /* Custom browser-free checkboxes & clean number inputs */
 input[type='checkbox'] {
@@ -53,7 +53,7 @@ input[type='checkbox']:checked::before {
 }
 input[type='checkbox']:focus-visible {
   outline: 0;
-  box-shadow: var(--ring);
+  border-color: var(--line-focus);
 }
 
 input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
@@ -85,15 +85,28 @@ html.theme-transitioning .iris-modal {
   transition: background-color 280ms var(--ease), color 280ms var(--ease), border-color 280ms var(--ease), box-shadow 280ms var(--ease) !important;
 }
 
-* { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
-*::-webkit-scrollbar { width: 11px; height: 11px; }
+/* Ultra-thin, buttonless unobtrusive scrollbars.
+   NOTE: Do NOT set scrollbar-width/scrollbar-color on WebKit/Blink, because Chromium 121+
+   disables ::-webkit-scrollbar and restores OS arrow buttons whenever scrollbar-width is set! */
+*::-webkit-scrollbar { width: 5px; height: 5px; }
+*::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 *::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 9px; border: 3px solid transparent; background-clip: padding-box; }
-*::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); background-clip: padding-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-hover);
+}
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+}
 
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:focus-visible { outline: 1px solid var(--line-focus); outline-offset: 2px; }
+input:focus-visible, textarea:focus-visible { outline: none; }
 .sr-only { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 19px; padding: 0 5px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg-tint); color: var(--muted); font-family: var(--font); font-size: 10.5px; line-height: 1; white-space: nowrap; }
+kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 19px; padding: 0 5px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-tint); color: var(--muted); font-family: var(--font); font-size: 10.5px; line-height: 1; white-space: nowrap; }
 
 .spinner { width: 15px; height: 15px; flex: none; border: 2px solid color-mix(in srgb, var(--accent) 24%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: iris-spin 0.72s linear infinite; }
 @keyframes iris-spin { to { transform: rotate(360deg); } }

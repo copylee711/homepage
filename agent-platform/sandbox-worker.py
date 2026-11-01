@@ -16,8 +16,9 @@ import importlib.util
 tool_spec = importlib.util.spec_from_file_location('toolchains_worker', Path(__file__).with_name('toolchains-worker.py'))
 toolchains_worker = importlib.util.module_from_spec(tool_spec); tool_spec.loader.exec_module(toolchains_worker)
 
-LIMIT = 1024 * 1024
+LIMIT = 15 * 1024 * 1024
 MAX_WRITE = 256 * 1024
+MAX_ATTACHMENT_WRITE = 15 * 1024 * 1024
 MAX_ENTRIES = 500
 ROOT = Path(os.environ.get("SANDBOX_WORKSPACE", "/workspace")).resolve()
 
@@ -95,15 +96,27 @@ def read_file(raw, value):
 
 def write_file(raw, value):
     content = value.get("content")
-    if not isinstance(content, str) or content.count("\x00"):
-        raise ValueError("仅支持写入文本文件")
-    data = content.encode("utf-8")
-    if len(data) > MAX_WRITE:
-        raise ValueError("文件超过 256 KiB 上限")
+    if not isinstance(content, str):
+        raise ValueError("文件内容无效")
+    encoding = value.get("encoding")
+    if encoding == "base64":
+        try:
+            data = base64.b64decode(content)
+        except Exception:
+            raise ValueError("Base64 数据格式错误")
+        if len(data) > MAX_ATTACHMENT_WRITE:
+            raise ValueError("附件超过 15 MiB 上限")
+    else:
+        if content.count("\x00"):
+            raise ValueError("仅支持写入文本文件")
+        data = content.encode("utf-8")
+        if len(data) > MAX_WRITE:
+            raise ValueError("文件超过 256 KiB 上限")
     path = candidate(raw)
-    # The parent must exist and resolve inside /workspace; the final component is
-    # opened with O_NOFOLLOW so a symlink cannot redirect the write elsewhere.
-    parent, _ = inside(path.parent)
+    parent, _ = inside(path.parent, must_exist=False)
+    if not parent.exists():
+        parent.mkdir(parents=True, exist_ok=True)
+    parent, _ = inside(parent, must_exist=True)
     name = path.name
     if not name or name in {".", ".."} or "/" in name or "\\" in name:
         raise ValueError("文件名无效")

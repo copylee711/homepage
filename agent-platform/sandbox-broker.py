@@ -156,7 +156,7 @@ class Handler(BaseHTTPRequestHandler):
             if ipaddress.ip_address(self.client_address[0]) not in ipaddress.ip_network("192.168.84.0/24"):
                 return self.reply(403, {"error": "来源无效"})
             size = int(self.headers.get("Content-Length", 0))
-            if not 0 < size <= 512 * 1024:
+            if not 0 < size <= 16 * 1024 * 1024:
                 return self.reply(413, {"error": "请求过大"})
             value = json.loads(self.rfile.read(size))
             token = self.headers.get("Authorization", "").removeprefix("Bearer ")

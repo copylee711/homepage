@@ -73,7 +73,8 @@ const distRoot = new URL('./web/dist/', import.meta.url);
 const mimeByExt = {
   '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
   '.svg': 'image/svg+xml', '.json': 'application/json', '.woff2': 'font/woff2', '.woff': 'font/woff',
-  '.ttf': 'font/ttf', '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.map': 'application/json',
+  '.ttf': 'font/ttf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+  '.webp': 'image/webp', '.bmp': 'image/bmp', '.ico': 'image/x-icon', '.map': 'application/json',
 };
 function distAsset(pathname) {
   // Only serve real files under dist; reject traversal. Unknown paths → SPA shell.
@@ -108,10 +109,18 @@ function attachment(name) {
   const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
 }
-function sendFile(res, file) {
+function sendFile(res, file, inline = false) {
   const buffer = Buffer.from(file.data || '', 'base64');
-  res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': buffer.length,
-    'Content-Disposition': attachment(downloadName(file.name)) });
+  const ext = (file.name || '').slice((file.name || '').lastIndexOf('.')).toLowerCase();
+  const type = mimeByExt[ext] || 'application/octet-stream';
+  const headers = { 'Content-Type': type, 'Content-Length': buffer.length };
+  if (!inline) {
+    headers['Content-Disposition'] = attachment(downloadName(file.name));
+  } else {
+    headers['Content-Disposition'] = 'inline';
+    headers['Cache-Control'] = 'private, max-age=300';
+  }
+  res.writeHead(200, headers);
   res.end(buffer);
 }
 function sendExport(res, value) {
@@ -156,8 +165,31 @@ export const server = createServer(async (req, res) => {
       }
     }
     const auth = await identity(req);
+    if (url.pathname === '/api/avatar' && req.method === 'GET') {
+      const avatarPath = typeof auth.user?.avatar === 'string' ? auth.user.avatar.trim() : '';
+      if (!avatarPath || !/^\/media\/avatars\/[A-Za-z0-9._-]+\.(webp|png|jpe?g|gif)$/i.test(avatarPath)) {
+        fail(404, '暂无头像');
+      }
+      try {
+        const target = new URL(avatarPath, homepage);
+        const response = await fetch(target, { signal: AbortSignal.timeout(6000) });
+        if (!response.ok) fail(404, '头像文件不存在');
+        const ctype = response.headers.get('content-type') || 'image/webp';
+        const buffer = Buffer.from(await response.arrayBuffer());
+        res.writeHead(200, {
+          'Content-Type': ctype,
+          'Content-Length': buffer.length,
+          'Cache-Control': 'private, max-age=3600',
+        });
+        return res.end(buffer);
+      } catch {
+        fail(404, '无法读取头像');
+      }
+    }
     if (url.pathname === '/api/me' && req.method === 'GET') {
-      return json(res, 200, { user: auth.user, admin: auth.admin, can_execute: auth.can_execute,
+      const user = auth.user ? { ...auth.user } : null;
+      if (user && user.avatar) user.avatar = '/api/avatar';
+      return json(res, 200, { user, admin: auth.admin, can_execute: auth.can_execute,
         grant_expires_at: auth.grant_expires_at, csrf: csrf(auth.token), model: await modelName(auth.user.id) });
     }
     if (url.pathname === '/auth/logout' && req.method === 'POST') {
@@ -207,7 +239,7 @@ export const server = createServer(async (req, res) => {
       }
       if (url.pathname === '/api/files/download' && req.method === 'GET') {
         const response = await runner('/files/download', auth.user.id, { path: filePath(url) });
-        return sendFile(res, await response.json());
+        return sendFile(res, await response.json(), url.searchParams.get('inline') === '1');
       }
       if (url.pathname === '/api/providers' && req.method === 'GET') {
         const response = await runner('/providers', auth.user.id, {}); return json(res, 200, await response.json());
@@ -221,12 +253,24 @@ export const server = createServer(async (req, res) => {
       if (req.method !== 'POST') fail(405, '请求方法不支持');
       writeAccess(req, auth);
       if (url.pathname === '/api/files/upload') {
-        const input = await body(req, 512 * 1024);
+        const input = await body(req, 20 * 1024 * 1024);
         if (typeof input.path !== 'string' || !input.path || input.path.length > 1024 || /[\u0000\r\n]/.test(input.path)) fail(422, '工作区路径无效');
-        if (typeof input.content !== 'string') fail(422, '请选择文本文件');
-        if (Buffer.byteLength(input.content, 'utf8') > 256 * 1024) fail(413, '上传文件不能超过 256 KiB');
-        if (input.content.includes('\u0000')) fail(422, '暂不支持上传二进制文件');
-        const response = await runner('/files/upload', auth.user.id, { path: input.path, content: input.content, overwrite: input.overwrite === true, revision: input.revision });
+        if (typeof input.content !== 'string') fail(422, '请选择文件内容');
+        const isBase64 = input.encoding === 'base64';
+        if (isBase64) {
+          const byteLen = Math.floor(input.content.length * 0.75);
+          if (byteLen > 15 * 1024 * 1024) fail(413, '上传文件不能超过 15 MiB');
+        } else {
+          if (Buffer.byteLength(input.content, 'utf8') > 256 * 1024) fail(413, '上传文件不能超过 256 KiB');
+          if (input.content.includes('\u0000')) fail(422, '暂不支持上传二进制文件');
+        }
+        const response = await runner('/files/upload', auth.user.id, {
+          path: input.path,
+          content: input.content,
+          encoding: input.encoding,
+          overwrite: input.overwrite === true,
+          revision: input.revision,
+        });
         return json(res, 200, await response.json());
       }
       const input = await body(req);
@@ -269,7 +313,7 @@ export const server = createServer(async (req, res) => {
         const response = await runner('/web-read', auth.user.id, { url: input.url });
         return json(res, 200, await response.json());
       }
-      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete'].includes(url.pathname)) {
+      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/chats/fork', '/api/chats/truncate'].includes(url.pathname)) {
         const response = await runner(url.pathname.replace('/api', ''), auth.user.id, input);
         return json(res, 200, await response.json());
       }

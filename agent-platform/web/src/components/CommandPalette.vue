@@ -17,7 +17,7 @@ const commands = computed<Cmd[]>(() => {
   const base: Cmd[] = [
     { id: 'new', icon: 'plus', label: '新建对话', hint: '⌘⇧O', run: () => session.startNew() },
     { id: 'theme', icon: ui.theme === 'dark' ? 'sun' : 'moon', label: ui.theme === 'dark' ? '切换到浅色主题' : '切换到深色主题', run: () => ui.toggleTheme() },
-    a?.can_execute ? { id: 'workspace', icon: 'panel-right', label: ui.workspaceOpen ? '关闭工作区' : '打开工作区', run: () => ui.setWorkspaceOpen(!ui.workspaceOpen) } : null,
+    a?.can_execute ? { id: 'workspace', icon: 'panel-right', label: ui.workspaceOpen ? '关闭 /workspace' : '打开 /workspace', run: () => ui.setWorkspaceOpen(!ui.workspaceOpen) } : null,
     a?.can_execute ? { id: 'webread', icon: 'globe', label: '网页阅读', run: () => ui.openDialog('webread') } : null,
     { id: 'settings', icon: 'settings', label: '打开设置', run: () => ui.openSettings('general') },
     a?.admin ? { id: 'providers', icon: 'sparkle', label: '设置 · 模型与供应商', run: () => ui.openSettings('providers') } : null,

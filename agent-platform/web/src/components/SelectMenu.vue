@@ -173,7 +173,7 @@ onBeforeUnmount(close);
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line-2);
   border-radius: 10px;
   background: var(--surface-2);
   color: var(--text);
@@ -199,8 +199,7 @@ onBeforeUnmount(close);
 .iris-select.is-open,
 .iris-select:focus-visible {
   outline: 0;
-  border-color: var(--accent);
-  box-shadow: var(--ring);
+  border-color: var(--line-focus);
   background: var(--surface);
 }
 .iris-select:disabled {

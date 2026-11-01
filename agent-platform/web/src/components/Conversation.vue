@@ -44,7 +44,7 @@ onMounted(() => nextTick(() => toBottom(false)));
 
 <template>
   <div class="stage">
-    <div class="conversation" ref="scroller" tabindex="0" aria-label="对话内容" @scroll.passive="onScroll">
+    <div class="conversation" :class="{ 'is-empty': session.isEmpty && !session.loadingChat }" ref="scroller" tabindex="0" aria-label="对话内容" @scroll.passive="onScroll">
       <WelcomeHero v-if="session.isEmpty && !session.loadingChat" />
       <div v-else class="messages">
         <div v-if="session.loadingChat" class="conversation-state"><span class="spinner"></span><span>正在读取对话…</span></div>
@@ -72,6 +72,7 @@ onMounted(() => nextTick(() => toBottom(false)));
 <style>
 .stage { position: relative; min-height: 0; flex: 1; display: flex; overflow: hidden; }
 .conversation { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 clamp(16px, 4vw, 40px); scroll-behavior: smooth; overscroll-behavior: contain; }
+.conversation.is-empty { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
 .messages { width: 100%; max-width: 760px; margin: 0 auto; padding: 30px 0 44px; display: flex; flex-direction: column; gap: 30px; }
 .conversation-state { padding: 40px 0; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: 12.5px; }
 .message-status { min-height: 18px; display: flex; align-items: center; gap: 8px; margin-top: 9px; color: var(--muted); font-size: 11.5px; }

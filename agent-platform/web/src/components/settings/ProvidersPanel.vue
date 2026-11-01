@@ -513,6 +513,7 @@ onMounted(async () => {
 .probe-drawer { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .probe-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .probe-search { flex: 1; min-width: 160px; display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: var(--muted); }
+.probe-search:focus-within { border-color: var(--line-focus); }
 .probe-search input { flex: 1; min-width: 0; min-height: 0; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 12px; box-shadow: none !important; }
 .probe-actions { display: flex; align-items: center; gap: 10px; }
 .link-btn { color: var(--text-2); font-size: 11.5px; font-weight: 550; padding: 2px 4px; border-radius: 5px; }

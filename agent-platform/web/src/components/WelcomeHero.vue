@@ -21,7 +21,7 @@ onMounted(async () => { if (session.canExecute) greeting.value = await loadGreet
 </template>
 
 <style>
-.welcome { width: 100%; max-width: 740px; margin: 0 auto; padding: clamp(52px, 13vh, 128px) 0 36px; display: flex; flex-direction: column; align-items: center; text-align: center; animation: welcome-in 440ms var(--ease) both; }
+.welcome { width: 100%; max-width: 740px; margin: 0 auto; padding: 0 0 28px; display: flex; flex-direction: column; align-items: center; text-align: center; animation: welcome-in 440ms var(--ease) both; }
 @keyframes welcome-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 .welcome-mark { width: 56px; height: 56px; display: grid; place-items: center; margin-bottom: 18px; color: var(--ink); animation: mark-float 5s ease-in-out infinite; }
 .welcome-mark svg { width: 48px; height: 48px; }

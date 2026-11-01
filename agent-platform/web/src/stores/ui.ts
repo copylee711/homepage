@@ -5,6 +5,12 @@ export type SettingsTab = 'general' | 'providers' | 'grants' | 'packages' | 'too
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'max';
 export interface Toast { id: number; message: string; tone: Tone; action?: { label: string; run: () => void } | null; }
 
+export interface LightboxState {
+  url: string;
+  name?: string;
+  size?: number;
+}
+
 export interface ModalState {
   kind: 'confirm' | 'prompt';
   title: string;
@@ -39,6 +45,8 @@ export const useUi = defineStore('ui', {
     workspaceOpen: readLS('iris-workspace', 'closed') === 'open',
     workspaceW: readNum('iris-workspace-w', 380),
     workspaceDual: readLS('iris-workspace-dual', 'off') === 'on',
+    chatDensity: (readLS('iris-chat-density', 'cozy') as 'cozy' | 'compact'),
+    chatGroupByDate: readLS('iris-chat-group', 'on') !== 'off',
     mobileDrawer: null as null | 'sidebar' | 'workspace',
     toasts: [] as Toast[],
     dialog: null as null | string,
@@ -46,6 +54,7 @@ export const useUi = defineStore('ui', {
     commandOpen: false,
     context: null as null | { x: number; y: number; items: any[] },
     modal: null as ModalState | null,
+    lightbox: null as LightboxState | null,
   }),
   actions: {
     setTheme(next: 'light' | 'dark', event?: MouseEvent) {
@@ -107,6 +116,20 @@ export const useUi = defineStore('ui', {
       if (dual && this.workspaceW < 560) this.setWorkspaceW(620);
       else if (!dual && this.workspaceW > 520) this.setWorkspaceW(380);
     },
+    setChatDensity(density: 'cozy' | 'compact') {
+      this.chatDensity = density;
+      try { localStorage.setItem('iris-chat-density', density); } catch {}
+    },
+    toggleChatDensity() {
+      this.setChatDensity(this.chatDensity === 'compact' ? 'cozy' : 'compact');
+    },
+    setChatGroupByDate(on: boolean) {
+      this.chatGroupByDate = on;
+      try { localStorage.setItem('iris-chat-group', on ? 'on' : 'off'); } catch {}
+    },
+    toggleChatGroupByDate() {
+      this.setChatGroupByDate(!this.chatGroupByDate);
+    },
     toast(message: string, opts: { tone?: Tone; action?: Toast['action']; duration?: number } = {}) {
       const id = ++toastSeq;
       const item: Toast = { id, message, tone: opts.tone || 'info', action: opts.action || null };
@@ -152,6 +175,13 @@ export const useUi = defineStore('ui', {
       const cur = this.modal;
       this.modal = null;
       cur?.resolve(value);
+    },
+    openLightbox(opts: { url: string; name?: string; size?: number } | string) {
+      if (typeof opts === 'string') this.lightbox = { url: opts };
+      else this.lightbox = opts;
+    },
+    closeLightbox() {
+      this.lightbox = null;
     },
   },
 });

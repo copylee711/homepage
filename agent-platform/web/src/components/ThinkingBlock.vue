@@ -18,10 +18,11 @@ function toggle() {
 <template>
   <div class="thinking" :class="['is-' + mode]">
     <button type="button" class="thinking-head" :aria-expanded="isOpen" @click="toggle">
-      <Icon name="sparkle" :size="14" /><span>思考过程</span>
+      <Icon class="thinking-icon" name="sparkle" :size="13" />
+      <span class="thinking-label">思考过程</span>
       <span class="thinking-toggle">
         <span>{{ isOpen ? '收起' : '展开' }}</span>
-        <Icon class="thinking-chevron" name="chevron-down" :size="14" />
+        <Icon class="thinking-chevron" name="chevron-right" :size="13" />
       </span>
     </button>
     <div v-show="mode !== 'collapsed'" class="thinking-body">{{ text }}</div>
@@ -29,22 +30,65 @@ function toggle() {
 </template>
 
 <style>
-.thinking { margin: 10px 0; border: 1px solid var(--line-2); border-radius: 13px; background: var(--surface-2); overflow: hidden; }
-.thinking-head { display: flex; align-items: center; gap: 7px; width: 100%; padding: 8px 12px; color: var(--muted); font-size: 11.5px; font-weight: 550; text-align: left; cursor: pointer; transition: background-color var(--fast); }
-.thinking-head:hover { background: color-mix(in srgb, var(--text) 3.5%, transparent); }
-.thinking-head > svg { color: var(--accent); }
-.thinking-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; color: var(--faint); font-size: 10.5px; }
-.thinking-chevron { transition: transform var(--dur) var(--ease); }
+.thinking {
+  margin: 4px 0 13px;
+}
+.thinking-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 5px;
+  margin-left: -5px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 540;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color var(--fast), color var(--fast);
+}
+.thinking-head:hover {
+  background: color-mix(in srgb, var(--text) 4.5%, transparent);
+  color: var(--text-2);
+}
+.thinking-icon {
+  color: var(--muted);
+  opacity: 0.85;
+}
+.thinking-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 2px;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 480;
+}
+.thinking-chevron {
+  transition: transform var(--dur) var(--ease);
+}
 .thinking.is-preview .thinking-chevron,
-.thinking.is-expanded .thinking-chevron { transform: rotate(180deg); }
+.thinking.is-expanded .thinking-chevron {
+  transform: rotate(90deg);
+}
 
-.thinking-body { padding: 0 13px 11px; color: var(--text-2); font-size: 12.5px; line-height: 1.68; white-space: pre-wrap; overflow-wrap: anywhere; }
+.thinking-body {
+  margin: 3px 0 2px 9px;
+  padding: 1px 8px 2px 13px;
+  border-left: 1.5px solid var(--line-2);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.68;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 /* Initial few-line scrollable preview (only on first appearance) */
 .thinking.is-preview .thinking-body {
-  max-height: 5.6em;
+  max-height: 5.5em;
   overflow-y: auto;
-  -webkit-mask-image: linear-gradient(to bottom, #000 68%, transparent);
-  mask-image: linear-gradient(to bottom, #000 68%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 66%, transparent);
+  mask-image: linear-gradient(to bottom, #000 66%, transparent);
 }
 /* Full expansion after re-opening */
 .thinking.is-expanded .thinking-body {

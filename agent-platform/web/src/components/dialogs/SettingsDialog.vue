@@ -99,6 +99,28 @@ async function remove(c: any) {
 
           <div class="setting-row">
             <div class="setting-info">
+              <strong>对话列表视图</strong>
+              <span>选择侧边栏对话记录的显示密度</span>
+            </div>
+            <div class="seg">
+              <button type="button" :class="{ 'is-on': ui.chatDensity !== 'compact' }" @click="ui.setChatDensity('cozy')">舒适</button>
+              <button type="button" :class="{ 'is-on': ui.chatDensity === 'compact' }" @click="ui.setChatDensity('compact')">紧凑</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <strong>按时间分组</strong>
+              <span>将对话按今天、昨天、最近等时间段分组显示</span>
+            </div>
+            <div class="seg">
+              <button type="button" :class="{ 'is-on': ui.chatGroupByDate }" @click="ui.setChatGroupByDate(true)">分组</button>
+              <button type="button" :class="{ 'is-on': !ui.chatGroupByDate }" @click="ui.setChatGroupByDate(false)">平铺</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
               <strong>思考强度</strong>
               <span>控制支持推理的模型的默认思考深度</span>
             </div>
@@ -115,23 +137,8 @@ async function remove(c: any) {
 
           <div class="setting-row">
             <div class="setting-info">
-              <strong>当前模型</strong>
-              <span>{{ session.modelLabel }}</span>
-            </div>
-            <button
-              type="button"
-              class="btn btn-quiet btn-sm"
-              :disabled="!session.isAdmin"
-              @click="session.isAdmin && (ui.settingsTab = 'providers')"
-            >
-              {{ session.isAdmin ? '配置模型与供应商' : '由管理员统一配置' }}
-            </button>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-info">
-              <strong>工作区布局</strong>
-              <span>打开文件时使用标签页或双栏并排预览</span>
+              <strong>workspace 布局</strong>
+              <span>打开文件时使用单栏标签页或双右栏并排预览</span>
             </div>
             <div class="seg">
               <button type="button" :class="{ 'is-on': !ui.workspaceDual }" @click="ui.setWorkspaceDual(false)">标签页</button>
@@ -191,6 +198,7 @@ async function remove(c: any) {
 .settings-tab.is-active svg { color: var(--ink); }
 
 .settings-stage { min-width: 0; min-height: 0; height: 100%; overflow: hidden; display: flex; flex-direction: column; }
+.settings-pad { padding: 18px 22px; overflow-y: auto; flex: 1; min-height: 0; }
 
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
 .setting-row:last-child { border-bottom: 0; }
@@ -198,8 +206,8 @@ async function remove(c: any) {
 .setting-info strong { font-size: 13.5px; font-weight: 600; }
 .setting-info span { color: var(--muted); font-size: 12px; }
 
-.seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line-2); }
-.seg button { height: 28px; padding: 0 12px; border-radius: 7px; color: var(--muted); font-size: 12px; font-weight: 540; }
+.seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: color-mix(in srgb, var(--text) 4.8%, transparent); }
+.seg button { height: 28px; padding: 0 12px; border-radius: 7px; color: var(--muted); font-size: 12px; font-weight: 540; transition: background-color var(--fast), color var(--fast); }
 .seg button.is-on { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
 
 .archive-list { display: flex; flex-direction: column; }
@@ -216,7 +224,40 @@ async function remove(c: any) {
 
 @media (max-width: 720px) {
   .settings-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-  .settings-nav { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px 10px; }
-  .settings-tab { white-space: nowrap; padding: 7px 11px; }
+  .settings-nav { flex-direction: row; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch; border-right: 0; border-bottom: 1px solid var(--line); padding: 7px 10px; gap: 4px; }
+  .settings-nav::-webkit-scrollbar { display: none; }
+  .settings-tab { flex: none; white-space: nowrap; padding: 6px 12px; font-size: 12.5px; }
+}
+
+@media (max-width: 640px) {
+  .settings-pad { padding: 12px 16px 36px; }
+  .setting-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 13px 0;
+  }
+  .setting-row .seg {
+    width: 100%;
+    display: flex;
+  }
+  .setting-row .seg button {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    text-align: center;
+    padding: 0 4px;
+    font-size: 12px;
+    height: 32px;
+  }
+  .archive-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .archive-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 </style>

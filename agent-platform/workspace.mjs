@@ -55,17 +55,24 @@ export async function downloadWorkspace(user, path) {
   if (result.truncated || result.size > MAX_DOWNLOAD) fail(413, '文件超过 1 MiB 下载上限，未下载截断内容');
   return { ...result, name: fileName(path) };
 }
-export async function uploadWorkspace(user, path, content, overwrite = false, revision) {
+export async function uploadWorkspace(user, path, content, overwrite = false, revision, encoding) {
   invalidateWorkspace(user);
   workspacePath(path);
-  if (typeof content !== 'string') fail(422, '请选择文本文件');
-  if (Buffer.byteLength(content, 'utf8') > MAX_UPLOAD) fail(413, '上传文件不能超过 256 KiB');
-  if (content.includes('\u0000')) fail(422, '暂不支持上传二进制文件');
+  if (typeof content !== 'string') fail(422, '请选择文件');
+  const isBase64 = encoding === 'base64';
+  if (isBase64) {
+    const byteLen = Math.floor(content.length * 0.75);
+    if (byteLen > 15 * 1024 * 1024) fail(413, '上传文件不能超过 15 MiB');
+  } else {
+    if (Buffer.byteLength(content, 'utf8') > MAX_UPLOAD) fail(413, '上传文件不能超过 256 KiB');
+    if (content.includes('\u0000')) fail(422, '暂不支持上传二进制文件');
+  }
   if (overwrite !== true && overwrite !== false) fail(422, '覆盖参数无效');
   if (revision !== undefined && (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision))) fail(422, '文件版本无效');
-  const result = await run(user, 'file-write', { path, content, overwrite, revision });
+  const result = await run(user, 'file-write', { path, content, overwrite, revision, encoding });
   invalidateWorkspace(user);
-  return { ...result, name: fileName(path), size: Buffer.byteLength(content, 'utf8'), overwritten: overwrite };
+  const size = isBase64 ? Math.floor(content.length * 0.75) : Buffer.byteLength(content, 'utf8');
+  return { ...result, name: fileName(path), size, overwritten: overwrite };
 }
 export async function manageWorkspace(user, input) {
   invalidateWorkspace(user);

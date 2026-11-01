@@ -17,6 +17,22 @@ export interface OpenFileTab {
   loading: boolean;
   editing: boolean;
   saving: boolean;
+  isImage?: boolean;
+  imageUrl?: string;
+}
+
+export function isImageFile(name: string) {
+  return /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(name || '');
+}
+
+function imageMime(name: string) {
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  const map: Record<string, string> = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+    gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+    bmp: 'image/bmp', ico: 'image/x-icon',
+  };
+  return map[ext] || 'image/png';
 }
 
 function decodePreview(value: any): { text: string; binary: boolean } {
@@ -123,20 +139,26 @@ export const useWorkspace = defineStore('workspace', {
         const value = await get('/api/files/preview?path=' + encodeURIComponent(path) + '&limit=262144&fresh=1');
         const current = this.tabs.find(t => t.path === path);
         if (!current) return;
+        const isImg = isImageFile(current.name);
+        const rawB64 = value.data || '';
         const { text, binary } = decodePreview(value);
-        current.size = Number(value.size ?? text.length);
-        current.binary = binary;
+        current.size = Number(value.size ?? (isImg && rawB64 ? Math.floor(rawB64.length * 0.75) : text.length));
+        current.isImage = isImg;
+        current.binary = !isImg && binary;
+        current.imageUrl = isImg ? (rawB64 ? `data:${imageMime(current.name)};base64,${rawB64}` : `/api/files/download?path=${encodeURIComponent(path)}&inline=1`) : undefined;
         current.truncated = value.truncated === true;
         current.revision = typeof value.revision === 'string' ? value.revision : null;
         current.text = binary ? '' : text;
         current.draft = current.text;
         current.meta = formatBytes(current.size) + (current.truncated ? ' · 已截断' : '');
-        current.note = binary
-          ? '二进制或非 UTF-8 文件，无法直接预览文本。'
-          : current.truncated
-            ? '文件超过 256 KiB，仅展示前 256 KiB（只读）。'
-            : '';
-        if (startEditing && !binary && !current.truncated) current.editing = true;
+        current.note = isImg
+          ? ''
+          : binary
+            ? '二进制或非 UTF-8 文件，无法直接预览文本。'
+            : current.truncated
+              ? '文件超过 256 KiB，仅展示前 256 KiB（只读）。'
+              : '';
+        if (startEditing && !binary && !isImg && !current.truncated) current.editing = true;
       } catch (e: any) {
         const current = this.tabs.find(t => t.path === path);
         if (!current) return;
@@ -239,9 +261,25 @@ export const useWorkspace = defineStore('workspace', {
     },
     async deleteEntry(entryPath: string) {
       await post('/api/files/manage', { action: 'delete', path: entryPath });
-      this.closeTab(entryPath, true);
+      void this.closeTab(entryPath, true);
       this.snapshots.clear();
       await this.load(this.path, true);
+    },
+    async deleteEntries(paths: string[]) {
+      const deleted: string[] = [];
+      const failed: Array<{ path: string; error: string }> = [];
+      for (const p of paths) {
+        try {
+          await post('/api/files/manage', { action: 'delete', path: p });
+          void this.closeTab(p, true);
+          deleted.push(p);
+        } catch (err: any) {
+          failed.push({ path: p, error: err?.message || '删除失败' });
+        }
+      }
+      this.snapshots.clear();
+      await this.load(this.path, true);
+      return { deleted, failed };
     },
   },
 });

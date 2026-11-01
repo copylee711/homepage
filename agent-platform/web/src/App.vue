@@ -42,14 +42,12 @@ onMounted(() => {
 <template>
   <div class="app" :style="shellStyle" :data-sidebar="ui.sidebarOpen ? 'open' : 'closed'" :data-workspace="workspaceVisible ? 'open' : 'closed'">
     <Sidebar class="app-sidebar" />
-    <main class="main">
-      <div class="main-col">
-        <TopBar />
-        <Conversation />
-        <Composer />
-      </div>
-      <Workspace v-if="workspaceVisible" />
+    <main class="main-col">
+      <TopBar />
+      <Conversation />
+      <Composer />
     </main>
+    <Workspace v-if="session.canExecute" class="app-workspace" />
 
     <!-- mobile drawers -->
     <div v-if="ui.mobileDrawer" class="scrim" @click="ui.mobileDrawer = null"></div>
@@ -66,23 +64,73 @@ onMounted(() => {
 </template>
 
 <style>
-.app { height: 100dvh; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); overflow: hidden; transition: grid-template-columns var(--slow) var(--ease); }
-.app[data-sidebar='closed'] { grid-template-columns: 0 minmax(0, 1fr); }
-.app-sidebar { min-width: 0; }
-.app[data-sidebar='closed'] .app-sidebar { opacity: 0; pointer-events: none; }
-.main { grid-column: 2; min-width: 0; min-height: 0; height: 100dvh; display: flex; overflow: hidden; background: var(--bg); }
-.main-col { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.app {
+  height: 100dvh;
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--workspace-w);
+  overflow: hidden;
+  transition: grid-template-columns var(--slow) var(--ease);
+}
+.app[data-sidebar='closed'] {
+  grid-template-columns: 0 minmax(0, 1fr) var(--workspace-w);
+}
+.app[data-workspace='closed'] {
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) 0;
+}
+.app[data-sidebar='closed'][data-workspace='closed'] {
+  grid-template-columns: 0 minmax(0, 1fr) 0;
+}
+
+.app-sidebar {
+  min-width: 0;
+  overflow: hidden;
+  transition: opacity var(--dur) var(--ease);
+}
+.app[data-sidebar='closed'] .app-sidebar {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.main-col {
+  min-width: 0;
+  min-height: 0;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.app-workspace {
+  min-width: 0;
+  overflow: hidden;
+  transition: opacity var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.app[data-workspace='closed'] .app-workspace {
+  opacity: 0;
+  pointer-events: none;
+  border-left-color: transparent;
+}
 
 .scrim { position: fixed; inset: 0; z-index: 50; background: rgba(12, 13, 18, 0.48); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
-.mobile-drawer { position: fixed; top: 0; bottom: 0; z-index: 60; box-shadow: var(--shadow-lg); animation: drawer-in var(--slow) var(--ease); }
-.mobile-drawer.left { left: 0; width: min(86vw, 316px); }
-.mobile-drawer.right { right: 0; width: min(92vw, 404px); }
+.mobile-drawer { position: fixed; top: 0; bottom: 0; z-index: 60; box-shadow: 0 18px 56px rgba(0, 0, 0, 0.42), var(--shadow-lg); animation: drawer-in var(--slow) var(--ease); overflow: hidden; }
+.mobile-drawer.left { left: 0; width: min(86vw, 320px); border-radius: 0 22px 22px 0; border-right: 1px solid var(--line); }
+.mobile-drawer.right { right: 0; width: min(92vw, 404px); border-radius: 22px 0 0 22px; border-left: 1px solid var(--line); }
+.mobile-drawer .sidebar, .mobile-drawer .workspace { border-radius: inherit; width: 100%; }
 @keyframes drawer-in { from { transform: translateX(var(--from, -104%)); } to { transform: translateX(0); } }
 .mobile-drawer.right { --from: 104%; }
 
 @media (max-width: 860px) {
-  .app { grid-template-columns: minmax(0, 1fr); }
-  .app[data-sidebar] { grid-template-columns: minmax(0, 1fr); }
-  .app > .app-sidebar { display: none; }
+  .app,
+  .app[data-sidebar='open'],
+  .app[data-sidebar='closed'],
+  .app[data-workspace='open'],
+  .app[data-workspace='closed'],
+  .app[data-sidebar='closed'][data-workspace='closed'] {
+    grid-template-columns: 1fr;
+  }
+  .app-sidebar { display: none; }
+  .app-workspace { display: none; }
+  .main-col { width: 100%; }
 }
 </style>

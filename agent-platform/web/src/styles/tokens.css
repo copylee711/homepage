@@ -1,87 +1,89 @@
 /* Iris design tokens — standalone neutral monochrome (ChatGPT/Claude/Kimi look).
-   Light + dark. No colored gradients; ink is primary, accent is a restrained
-   neutral blue used only for links/focus. */
+   Light + dark. Soft hairlines, subtle surface contrast, zero harsh borders. */
 :root {
   color-scheme: light;
   --bg: #ffffff;
   --surface: #ffffff;
-  --surface-2: #f7f7f8;
-  --sidebar: #f7f7f8;
-  --sidebar-2: #ececec;
-  --sidebar-text: #2c2c30;
-  --sidebar-muted: #76767d;
-  --sidebar-line: #e8e8ea;
-  --sidebar-hover: rgba(20, 20, 24, 0.05);
-  --sidebar-active: rgba(20, 20, 24, 0.09);
+  --surface-2: #f6f6f7;
+  --sidebar: #f8f8f9;
+  --sidebar-2: rgba(20, 20, 26, 0.042);
+  --sidebar-text: #2a2a2e;
+  --sidebar-muted: #76767e;
+  --sidebar-line: rgba(20, 20, 26, 0.05);
+  --sidebar-hover: rgba(20, 20, 26, 0.045);
+  --sidebar-active: rgba(20, 20, 26, 0.08);
 
   --text: #1d1d1f;
   --text-2: #55565c;
   --muted: #76767d;
-  --faint: #a0a0a8;
-  --line: #ececed;
-  --line-2: #e4e4e6;
-  --line-strong: #d6d6d9;
+  --faint: #a1a1aa;
+  --line: rgba(20, 20, 26, 0.052);
+  --line-2: rgba(20, 20, 26, 0.078);
+  --line-strong: rgba(20, 20, 26, 0.12);
+  --line-focus: rgba(20, 20, 26, 0.175);
 
   --ink: #1d1d1f;
   --accent: #2b6cb0;
   --accent-ink: #2b6cb0;
-  --accent-soft: rgba(43, 108, 176, 0.09);
-  --accent-softer: rgba(43, 108, 176, 0.05);
+  --accent-soft: rgba(43, 108, 176, 0.085);
+  --accent-softer: rgba(43, 108, 176, 0.045);
   --on-accent: #ffffff;
 
-  --ok: #1a8a4e; --ok-soft: rgba(26, 138, 78, 0.1);
-  --warn: #9a6a00; --warn-soft: rgba(154, 106, 0, 0.1);
-  --danger: #cf3b31; --danger-soft: rgba(207, 59, 49, 0.1);
+  --ok: #1a8a4e; --ok-soft: rgba(26, 138, 78, 0.09);
+  --warn: #9a6a00; --warn-soft: rgba(154, 106, 0, 0.09);
+  --danger: #cf3b31; --danger-soft: rgba(207, 59, 49, 0.09);
 
   --btn-bg: #1d1d1f; --btn-fg: #ffffff;
-  --bg-tint: #f1f1f2;
+  --bg-tint: rgba(20, 20, 26, 0.04);
   --code-bg: #f7f7f8;
 
   --radius: 18px; --radius-md: 14px; --radius-sm: 10px; --radius-xs: 8px;
 
-  --shadow-sm: 0 1px 2px rgba(17, 18, 28, 0.05), 0 1px 1px rgba(17, 18, 28, 0.04);
-  --shadow: 0 4px 12px -4px rgba(17, 18, 28, 0.1), 0 2px 6px -3px rgba(17, 18, 28, 0.08);
-  --shadow-lg: 0 24px 60px -28px rgba(17, 18, 28, 0.32), 0 8px 24px -16px rgba(17, 18, 28, 0.16);
-  --ring: 0 0 0 3px rgba(29, 29, 31, 0.12);
+  --shadow-sm: 0 1px 2px rgba(17, 18, 28, 0.04);
+  --shadow: 0 6px 20px -6px rgba(17, 18, 28, 0.08), 0 2px 6px -3px rgba(17, 18, 28, 0.05);
+  --shadow-lg: 0 24px 60px -26px rgba(17, 18, 28, 0.26), 0 8px 24px -16px rgba(17, 18, 28, 0.12);
+  --ring: 0 0 0 0 transparent;
 
-  --sidebar-w: 268px; --workspace-w: 360px; --header-h: 58px;
+  --sidebar-w: 268px; --workspace-w: 360px; --header-h: 56px;
   --ease: cubic-bezier(0.22, 0.75, 0.24, 1);
   --fast: 130ms; --dur: 220ms; --slow: 320ms;
 
   --font: 'Outfit Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'HarmonyOS Sans SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
-  /* Elevated serif stack for large display headings (CJK-aware system serifs). */
   --font-display: 'Outfit Variable', Georgia, 'Source Han Serif SC', 'Source Han Serif CN',
     'Noto Serif CJK SC', 'Noto Serif SC', 'Songti SC', STSong, 'SimSun', serif;
 
-  --scrollbar-thumb: #d4d4da; --scrollbar-hover: #b9b9c1;
+  --scrollbar-thumb: rgba(20, 20, 26, 0.12);
+  --scrollbar-hover: rgba(20, 20, 26, 0.24);
 }
 
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --bg: #1a1a1c; --surface: #202022; --surface-2: #242427;
-  --sidebar: #141416; --sidebar-2: #2a2a2d; --sidebar-text: #e6e6e9;
-  --sidebar-muted: #9a9aa2; --sidebar-line: rgba(255, 255, 255, 0.07);
-  --sidebar-hover: rgba(255, 255, 255, 0.06); --sidebar-active: rgba(255, 255, 255, 0.11);
+  --bg: #18181a; --surface: #1f1f22; --surface-2: #252529;
+  --sidebar: #141416; --sidebar-2: rgba(255, 255, 255, 0.05); --sidebar-text: #e6e6e9;
+  --sidebar-muted: #96969f; --sidebar-line: rgba(255, 255, 255, 0.05);
+  --sidebar-hover: rgba(255, 255, 255, 0.055); --sidebar-active: rgba(255, 255, 255, 0.1);
 
-  --text: #ececed; --text-2: #b6b6bd; --muted: #8e8e97; --faint: #65656d;
-  --line: rgba(255, 255, 255, 0.08); --line-2: rgba(255, 255, 255, 0.11); --line-strong: rgba(255, 255, 255, 0.18);
+  --text: #ececed; --text-2: #b6b6bd; --muted: #8b8b94; --faint: #63636b;
+  --line: rgba(255, 255, 255, 0.055); --line-2: rgba(255, 255, 255, 0.082); --line-strong: rgba(255, 255, 255, 0.125);
+  --line-focus: rgba(255, 255, 255, 0.185);
 
   --ink: #ececed; --accent: #6aa3dd; --accent-ink: #7fb0e3;
-  --accent-soft: rgba(106, 163, 221, 0.16); --accent-softer: rgba(106, 163, 221, 0.09);
+  --accent-soft: rgba(106, 163, 221, 0.14); --accent-softer: rgba(106, 163, 221, 0.08);
 
-  --ok: #4ad07f; --ok-soft: rgba(74, 208, 127, 0.14);
-  --warn: #e0b254; --warn-soft: rgba(224, 178, 84, 0.14);
-  --danger: #ff6b61; --danger-soft: rgba(255, 107, 97, 0.14);
+  --ok: #4ad07f; --ok-soft: rgba(74, 208, 127, 0.13);
+  --warn: #e0b254; --warn-soft: rgba(224, 178, 84, 0.13);
+  --danger: #ff6b61; --danger-soft: rgba(255, 107, 97, 0.13);
 
-  --btn-bg: #ececed; --btn-fg: #1a1a1c; --bg-tint: #2c2c30; --code-bg: #161618;
+  --btn-bg: #ececed; --btn-fg: #18181a; --bg-tint: rgba(255, 255, 255, 0.055); --code-bg: #141416;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow: 0 6px 18px -8px rgba(0, 0, 0, 0.6);
-  --shadow-lg: 0 28px 70px -30px rgba(0, 0, 0, 0.82), 0 10px 28px -18px rgba(0, 0, 0, 0.6);
-  --ring: 0 0 0 3px rgba(255, 255, 255, 0.14);
-  --scrollbar-thumb: rgba(255, 255, 255, 0.16); --scrollbar-hover: rgba(255, 255, 255, 0.28);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow: 0 6px 20px -8px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 28px 70px -30px rgba(0, 0, 0, 0.8), 0 10px 28px -18px rgba(0, 0, 0, 0.55);
+  --ring: 0 0 0 0 transparent;
+  --scrollbar-thumb: rgba(255, 255, 255, 0.11);
+  --scrollbar-hover: rgba(255, 255, 255, 0.24);
 }
 
 @font-face {

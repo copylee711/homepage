@@ -50,8 +50,8 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey));
 .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .field-grid > .field { margin-top: 0; }
 .field-label { color: var(--text-2); font-size: 12px; font-weight: 560; line-height: 1.4; }
-.field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), .field textarea { width: 100%; min-height: 39px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 10px; outline: 0; background: var(--surface-2); color: var(--text); font-size: 13px; transition: border-color var(--fast), box-shadow var(--fast), background-color var(--fast); }
-.field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus, .field textarea:focus { border-color: var(--accent); box-shadow: var(--ring); background: var(--surface); }
+.field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), .field textarea { width: 100%; min-height: 39px; padding: 8px 12px; border: 1px solid var(--line-2); border-radius: 10px; outline: 0; background: var(--surface-2); color: var(--text); font-size: 13px; transition: border-color var(--fast), box-shadow var(--fast), background-color var(--fast); }
+.field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus, .field textarea:focus { border-color: var(--line-focus); background: var(--surface); }
 .field input[aria-invalid="true"] { border-color: var(--danger); }
 .field-error { color: var(--danger); font-size: 11px; }
 .hint { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.55; }
@@ -67,8 +67,43 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey));
 .provider-status { margin: 11px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
 .provider-status.is-success { color: var(--ok); }
 .provider-status.is-error { color: var(--danger); }
-@media (max-width: 600px) {
-  .field-grid { grid-template-columns: minmax(0, 1fr); }
-  .dialog-xl { height: 92dvh; }
+@media (max-width: 640px) {
+  .dialog-backdrop {
+    padding: 0;
+    align-items: flex-end;
+  }
+  .dialog {
+    width: 100%;
+    max-width: 100%;
+    max-height: 92dvh;
+    height: 92dvh;
+    border-radius: 20px 20px 0 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-right: 0;
+    animation: sheet-up 240ms var(--ease);
+  }
+  .dialog-wide, .dialog-xl {
+    width: 100%;
+    max-width: 100%;
+    height: 92dvh;
+    max-height: 92dvh;
+  }
+  @keyframes sheet-up {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+  .dialog-heading {
+    padding: 14px 16px 12px;
+  }
+  .dialog-body {
+    padding: 14px 16px 24px;
+  }
+  .dialog-xl .dialog-body {
+    padding: 0;
+  }
+  .field-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

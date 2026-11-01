@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import Icon from './Icon.vue';
 import DropMenu from './DropMenu.vue';
 import type { MenuItem } from './DropMenu.vue';
@@ -15,10 +15,20 @@ const query = ref('');
 const searchOpen = ref(false);
 const searchInput = ref<HTMLInputElement | null>(null);
 
-function toggleSearch() {
-  searchOpen.value = !searchOpen.value;
-  if (searchOpen.value) nextTick(() => searchInput.value?.focus());
-  else query.value = '';
+function openSearch() {
+  searchOpen.value = true;
+  nextTick(() => searchInput.value?.focus());
+}
+
+function closeSearch() {
+  searchOpen.value = false;
+  query.value = '';
+}
+
+function onSearchBlur() {
+  if (!query.value.trim()) {
+    closeSearch();
+  }
 }
 
 const groups = computed(() => {
@@ -26,7 +36,7 @@ const groups = computed(() => {
   const filtered = session.chats
     .filter(c => c.archived !== true)
     .filter(c => !q || (c.title || '').toLowerCase().includes(q));
-  return groupChats(filtered);
+  return groupChats(filtered, ui.chatGroupByDate);
 });
 
 const accountMenuAnchor = ref<HTMLElement | null>(null);
@@ -81,7 +91,9 @@ function startResize(e: PointerEvent) {
   document.body.style.cursor = 'col-resize';
 }
 
+const avatarError = ref(false);
 const avatarUrl = computed(() => session.auth?.user?.avatar || '');
+watch(avatarUrl, () => { avatarError.value = false; });
 </script>
 
 <template>
@@ -103,22 +115,72 @@ const avatarUrl = computed(() => session.auth?.user?.avatar || '');
       <span>搜索与命令</span><kbd>⌘K</kbd>
     </button>
 
-    <div class="chat-list-head">
-      <span class="chat-list-label">对话</span>
+    <div class="chat-list-head" :class="{ 'is-searching': searchOpen }">
+      <span v-if="!searchOpen" class="chat-list-label">对话</span>
       <div class="chat-list-filter" :class="{ 'is-open': searchOpen }">
-        <input v-if="searchOpen" ref="searchInput" v-model="query" type="search" placeholder="筛选对话" autocomplete="off" spellcheck="false" maxlength="80" aria-label="筛选对话" @blur="query || (searchOpen = false)">
-        <button class="icon-button mini" :aria-label="searchOpen ? '关闭筛选' : '筛选对话'" :title="searchOpen ? '关闭筛选' : '筛选对话'" @click="toggleSearch">
-          <Icon :name="searchOpen ? 'x' : 'search'" :size="15" />
+        <input
+          v-if="searchOpen"
+          ref="searchInput"
+          v-model="query"
+          type="search"
+          placeholder="筛选对话…"
+          autocomplete="off"
+          spellcheck="false"
+          maxlength="80"
+          aria-label="筛选对话"
+          @blur="onSearchBlur"
+          @keydown.esc="closeSearch"
+        >
+        <button
+          v-if="searchOpen"
+          type="button"
+          class="icon-button mini"
+          aria-label="关闭筛选"
+          title="关闭筛选"
+          @mousedown.prevent
+          @click="closeSearch"
+        >
+          <Icon name="x" :size="15" />
         </button>
+        <template v-else>
+          <button
+            type="button"
+            class="icon-button mini"
+            :aria-label="ui.chatGroupByDate ? '取消按时间分组 (平铺显示)' : '按时间分组显示'"
+            :title="ui.chatGroupByDate ? '时间分组 (开)' : '时间分组 (关)'"
+            :class="{ 'is-dim': !ui.chatGroupByDate }"
+            @click="ui.toggleChatGroupByDate()"
+          >
+            <Icon name="calendar" :size="15" />
+          </button>
+          <button
+            type="button"
+            class="icon-button mini"
+            :aria-label="ui.chatDensity === 'compact' ? '切换为舒适视图' : '切换为紧凑视图'"
+            :title="ui.chatDensity === 'compact' ? '紧凑视图' : '舒适视图'"
+            @click="ui.toggleChatDensity()"
+          >
+            <Icon :name="ui.chatDensity === 'compact' ? 'list-compact' : 'list'" :size="15" />
+          </button>
+          <button
+            type="button"
+            class="icon-button mini"
+            aria-label="筛选对话"
+            title="筛选对话"
+            @click="openSearch"
+          >
+            <Icon name="search" :size="15" />
+          </button>
+        </template>
       </div>
     </div>
 
-    <nav class="chat-list" aria-label="对话列表">
+    <nav class="chat-list" :class="{ 'is-compact': ui.chatDensity === 'compact' }" aria-label="对话列表">
       <div v-if="session.chatsLoading" class="list-state"><span class="spinner"></span><span>正在读取对话…</span></div>
       <p v-else-if="session.chatsError" class="list-empty">{{ session.chatsError }}</p>
       <p v-else-if="!groups.length" class="list-empty">{{ query ? '没有匹配的对话。' : '还没有对话，发送第一条消息后会出现在这里。' }}</p>
       <section v-for="g in groups" :key="g.key" class="chat-group">
-        <h2 class="chat-group-title">{{ g.label }}</h2>
+        <h2 v-if="g.label" class="chat-group-title">{{ g.label }}</h2>
         <ul class="chat-items">
           <li v-for="c in g.chats" :key="c.id" class="chat-item" :class="{ 'is-active': c.id === session.chatId }">
             <button class="chat-select" :aria-current="c.id === session.chatId ? 'page' : undefined" :title="c.title" @click="pickChat(c)" @contextmenu="e => chatContext(e, c)">
@@ -133,8 +195,8 @@ const avatarUrl = computed(() => session.auth?.user?.avatar || '');
 
     <div class="sidebar-foot">
       <button ref="accountMenuAnchor" class="account" aria-haspopup="menu" @click="openAccountMenu">
-        <span class="account-avatar" :class="{ 'has-image': avatarUrl }">
-          <img v-if="avatarUrl" :src="avatarUrl" alt="" class="account-avatar-img">
+        <span class="account-avatar" :class="{ 'has-image': avatarUrl && !avatarError }">
+          <img v-if="avatarUrl && !avatarError" :src="avatarUrl" alt="" class="account-avatar-img" @error="avatarError = true">
           <template v-else>{{ (session.auth?.user?.name || '·').slice(0, 1) }}</template>
         </span>
         <span class="account-copy">

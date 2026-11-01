@@ -126,6 +126,56 @@ export class ChatStore {
       return { ok: true };
     });
   }
+  async fork(user, sourceThread, targetThread, title) {
+    if (!validThread(targetThread)) fail(422, '新对话标识无效');
+    return this.serialize(user, async () => {
+      await this.assertOwned(user, sourceThread);
+      const meta = await this.loadMeta(user);
+      const sourceFile = this.file(user, sourceThread);
+      const targetFile = this.file(user, targetThread);
+      const content = await readFile(sourceFile, 'utf8');
+      const lines = content.split('\n');
+      if (lines[0]) {
+        try {
+          const header = JSON.parse(lines[0]);
+          if (header.type === 'session') {
+            header.id = targetThread;
+            lines[0] = JSON.stringify(header);
+          }
+        } catch {}
+      }
+      await writeFile(targetFile, lines.join('\n'), { mode: 0o600 });
+      const newTitle = normalizeTitle(title || (meta.chats[sourceThread]?.title || '对话') + ' (分支)');
+      meta.chats[targetThread] = { title: newTitle, updatedAt: Date.now() };
+      await this.saveMeta(user, meta);
+      return { ok: true, id: targetThread, title: newTitle };
+    });
+  }
+  async truncate(user, thread, keepMessagesCount) {
+    return this.serialize(user, async () => {
+      await this.assertOwned(user, thread);
+      const sourceFile = this.file(user, thread);
+      const content = await readFile(sourceFile, 'utf8');
+      const lines = content.split('\n');
+      const kept = [];
+      let msgCount = 0;
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const item = JSON.parse(line);
+          if (item.type === 'message') {
+            if (msgCount >= keepMessagesCount) continue;
+            msgCount++;
+          }
+          kept.push(line);
+        } catch {
+          kept.push(line);
+        }
+      }
+      await writeFile(sourceFile, kept.join('\n') + '\n', { mode: 0o600 });
+      return { ok: true, keptMessages: msgCount };
+    });
+  }
   async list(user) {
     const directory = this.directory(user);
     await mkdir(directory, { recursive: true, mode: 0o700 });

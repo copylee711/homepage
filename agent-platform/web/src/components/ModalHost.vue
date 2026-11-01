@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useUi } from '../stores/ui';
+import ImageLightbox from './ImageLightbox.vue';
 
 const ui = useUi();
 const inputEl = ref<HTMLInputElement | null>(null);
@@ -82,6 +83,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey, true));
         </div>
       </form>
     </div>
+    <ImageLightbox v-if="ui.lightbox" :item="ui.lightbox" @close="ui.closeLightbox" />
   </teleport>
 </template>
 
@@ -130,7 +132,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey, true));
   min-height: 39px;
   margin-top: 2px;
   padding: 8px 12px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line-2);
   border-radius: 10px;
   outline: 0;
   background: var(--surface-2);
@@ -139,8 +141,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey, true));
   transition: border-color var(--fast), box-shadow var(--fast), background-color var(--fast);
 }
 .iris-modal-input:focus {
-  border-color: var(--accent);
-  box-shadow: var(--ring);
+  border-color: var(--line-focus);
   background: var(--surface);
 }
 .iris-modal-actions {

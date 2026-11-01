@@ -153,10 +153,10 @@ onBeforeUnmount(() => {
 .model-menu-item .mm-check { flex: none; color: var(--ink); display: flex; }
 .model-menu-empty { margin: 0; padding: 18px 14px; display: flex; align-items: center; justify-content: center; gap: 8px; text-align: center; color: var(--muted); font-size: 12.5px; }
 
-.model-menu-thinking { flex: none; display: flex; flex-direction: column; gap: 7px; padding: 9px 11px 10px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--surface-2) 55%, var(--surface)); }
-.mm-thinking-head { display: flex; align-items: center; gap: 5px; padding: 0 2px; color: var(--muted); font-size: 11px; font-weight: 600; }
-.mm-thinking-head svg { color: var(--accent); }
-.thinking-seg { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; padding: 2px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface-2); }
+.model-menu-thinking { flex: none; display: flex; flex-direction: column; gap: 7px; padding: 9px 12px 10px; border-top: 1px solid var(--line); }
+.mm-thinking-head { display: flex; align-items: center; gap: 5px; padding: 0 1px; color: var(--muted); font-size: 11px; font-weight: 580; }
+.mm-thinking-head svg { color: var(--muted); }
+.thinking-seg { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; padding: 2.5px; border-radius: 9px; background: color-mix(in srgb, var(--text) 4.8%, transparent); }
 .thinking-seg button { height: 26px; border-radius: 6.5px; color: var(--muted); font-size: 11.5px; font-weight: 550; transition: background-color var(--fast), color var(--fast), box-shadow var(--fast); }
 .thinking-seg button:hover { color: var(--text); }
 .thinking-seg button.is-on { background: var(--surface); color: var(--text); font-weight: 620; box-shadow: var(--shadow-sm); }

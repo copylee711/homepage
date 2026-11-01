@@ -1,27 +1,55 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue';
 import Icon from './Icon.vue';
+import MarkdownView from './MarkdownView.vue';
 import DropMenu, { type MenuItem } from './DropMenu.vue';
 import { useWorkspace, FILES_TAB, type OpenFileTab } from '../stores/workspace';
 import { useUi } from '../stores/ui';
+import { useSession } from '../stores/session';
 import { formatBytes } from '../services/format';
 import { highlightInto } from '../services/highlight.js';
 
 const ws = useWorkspace();
 const ui = useUi();
+const session = useSession();
 
 const dragover = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 const addAnchor = ref<HTMLElement | null>(null);
 const addMenu = ref<MenuItem[] | null>(null);
 const codeRef = ref<HTMLElement | null>(null);
+const fileListRef = ref<HTMLElement | null>(null);
+const mdSourceMode = ref<Record<string, boolean>>({});
+
+// Multi-select & Rubber-band Marquee state
+const selectedPaths = ref<string[]>([]);
+const lastAnchorPath = ref<string>('');
+const marquee = ref<{ active: boolean; x: number; y: number; w: number; h: number }>({
+  active: false, x: 0, y: 0, w: 0, h: 0,
+});
+let suppressNextClick = false;
+
+const selectedSet = computed(() => new Set(selectedPaths.value));
+const selectedEntries = computed(() => ws.entries.filter(e => selectedSet.value.has(e.path)));
+const selectedFiles = computed(() => selectedEntries.value.filter(e => e.type !== 'dir'));
+
+watch(() => ws.path, () => {
+  selectedPaths.value = [];
+  lastAnchorPath.value = '';
+});
+watch(() => ws.entries, (entries) => {
+  if (!selectedPaths.value.length) return;
+  const valid = new Set(entries.map(e => e.path));
+  const filtered = selectedPaths.value.filter(p => valid.has(p));
+  if (filtered.length !== selectedPaths.value.length) selectedPaths.value = filtered;
+});
 
 const isMobileDrawer = computed(() => !!ui.mobileDrawer);
 const isDual = computed(() => ui.workspaceDual && !isMobileDrawer.value);
 
 const crumbs = computed(() => {
   const parts = ws.path ? ws.path.split('/').filter(Boolean) : [];
-  const out = [{ label: '工作区', path: '' }];
+  const out = [{ label: '/workspace', path: '' }];
   let built = '';
   for (const p of parts) {
     built = built ? built + '/' + p : p;
@@ -43,28 +71,237 @@ function extLang(name: string) {
   const map: Record<string, string> = {
     py: 'py', js: 'js', mjs: 'js', cjs: 'js', ts: 'ts', tsx: 'tsx', jsx: 'jsx',
     json: 'json', sh: 'sh', bash: 'sh', zsh: 'sh', css: 'css', scss: 'scss',
-    html: 'html', vue: 'html', svg: 'xml', xml: 'xml', md: 'md', yml: 'yaml', yaml: 'yaml',
+    html: 'html', htm: 'html', vue: 'vue', svg: 'xml', xml: 'xml', md: 'md', markdown: 'md', mdx: 'md', yml: 'yaml', yaml: 'yaml', rb: 'ruby', diff: 'diff', patch: 'diff', env: 'env', ini: 'ini', conf: 'conf',
     rs: 'rust', go: 'go', c: 'c', h: 'c', cpp: 'cpp', java: 'java', sql: 'sql', toml: 'toml',
   };
   return map[ext] || ext;
 }
 
+function isMarkdownFile(name: string) {
+  return /\.(md|markdown|mdx)$/i.test(name || '');
+}
+
+const showRenderedMd = computed(() => {
+  const tab = activeFileTab.value;
+  if (!tab || tab.editing || tab.binary || tab.isImage || tab.loading) return false;
+  return isMarkdownFile(tab.name) && !mdSourceMode.value[tab.path];
+});
+
+function toggleMdMode(path: string) {
+  mdSourceMode.value = { ...mdSourceMode.value, [path]: !mdSourceMode.value[path] };
+}
+
 function renderHighlight() {
   const el = codeRef.value;
   const tab = activeFileTab.value;
-  if (!el || !tab || tab.editing || tab.binary || tab.loading) return;
-  highlightInto(el, tab.text, extLang(tab.name));
+  if (!el || !tab || tab.editing || tab.binary || tab.isImage || tab.loading || showRenderedMd.value) return;
+  highlightInto(el, tab.text || '', extLang(tab.name));
 }
 
 watch(
-  () => [activeFileTab.value?.path, activeFileTab.value?.text, activeFileTab.value?.editing, activeFileTab.value?.loading, isDual.value],
+  () => [activeFileTab.value?.path, activeFileTab.value?.text, activeFileTab.value?.editing, activeFileTab.value?.loading, isDual.value, showRenderedMd.value],
   () => { void nextTick(renderHighlight); },
-  { immediate: true }
+  { immediate: true, flush: 'post' }
 );
 
 function openEntry(e: any) {
   if (e.type === 'dir') ws.navigate(e.path);
   else void ws.openFile(e.path);
+}
+
+function onRowClick(ev: MouseEvent, e: any) {
+  if (suppressNextClick) {
+    ev.preventDefault();
+    return;
+  }
+  if (ev.ctrlKey || ev.metaKey) {
+    ev.preventDefault();
+    const next = new Set(selectedPaths.value);
+    if (next.has(e.path)) next.delete(e.path);
+    else next.add(e.path);
+    selectedPaths.value = [...next];
+    lastAnchorPath.value = e.path;
+    return;
+  }
+  if (ev.shiftKey && ws.entries.length) {
+    ev.preventDefault();
+    const anchor = lastAnchorPath.value || ws.selected || ws.entries[0]?.path || e.path;
+    const i1 = ws.entries.findIndex(x => x.path === anchor);
+    const i2 = ws.entries.findIndex(x => x.path === e.path);
+    if (i1 >= 0 && i2 >= 0) {
+      const [lo, hi] = i1 <= i2 ? [i1, i2] : [i2, i1];
+      const next = new Set(ev.ctrlKey || ev.metaKey ? selectedPaths.value : []);
+      for (let i = lo; i <= hi; i++) next.add(ws.entries[i].path);
+      selectedPaths.value = [...next];
+      return;
+    }
+  }
+  selectedPaths.value = [];
+  lastAnchorPath.value = e.path;
+  openEntry(e);
+}
+
+// Desktop rubber-band marquee selection inside .file-list
+function onListPointerDown(ev: PointerEvent) {
+  if (ev.button !== 0 || ev.pointerType === 'touch') return;
+  const listEl = fileListRef.value;
+  if (!listEl) return;
+  if ((ev.target as HTMLElement | null)?.closest('.ws-batch-bar')) return;
+
+  listEl.focus({ preventScroll: true });
+  const startClientX = ev.clientX;
+  const startClientY = ev.clientY;
+  const r0 = listEl.getBoundingClientRect();
+  if (ev.clientX - r0.left > listEl.clientWidth) return;
+
+  const originX = ev.clientX - r0.left + listEl.scrollLeft;
+  const originY = ev.clientY - r0.top + listEl.scrollTop;
+  const additive = ev.ctrlKey || ev.metaKey || ev.shiftKey;
+  const initialSet = new Set(additive ? selectedPaths.value : []);
+  let started = false;
+
+  const updateMarquee = (moveEv: PointerEvent) => {
+    const dx = moveEv.clientX - startClientX;
+    const dy = moveEv.clientY - startClientY;
+    if (!started) {
+      if (Math.hypot(dx, dy) < 5) return;
+      started = true;
+      suppressNextClick = true;
+      document.body.style.userSelect = 'none';
+    }
+    const r = listEl.getBoundingClientRect();
+    if (moveEv.clientY < r.top + 24) listEl.scrollTop -= 10;
+    else if (moveEv.clientY > r.bottom - 24) listEl.scrollTop += 10;
+
+    const maxW = Math.max(listEl.scrollWidth, listEl.clientWidth);
+    const maxH = Math.max(listEl.scrollHeight, listEl.clientHeight);
+    const curX = Math.max(0, Math.min(maxW, moveEv.clientX - r.left + listEl.scrollLeft));
+    const curY = Math.max(0, Math.min(maxH, moveEv.clientY - r.top + listEl.scrollTop));
+
+    const x = Math.min(originX, curX);
+    const y = Math.min(originY, curY);
+    const w = Math.abs(curX - originX);
+    const h = Math.abs(curY - originY);
+    marquee.value = { active: true, x, y, w, h };
+
+    const rows = listEl.querySelectorAll<HTMLElement>('.file-row[data-entry-path]');
+    const hitPaths = new Set<string>();
+    rows.forEach((row) => {
+      const p = row.dataset.entryPath;
+      if (!p) return;
+      const rr = row.getBoundingClientRect();
+      const rx1 = rr.left - r.left + listEl.scrollLeft;
+      const ry1 = rr.top - r.top + listEl.scrollTop;
+      const rx2 = rx1 + rr.width;
+      const ry2 = ry1 + rr.height;
+      if (rx1 <= x + w && rx2 >= x && ry1 <= y + h && ry2 >= y) {
+        hitPaths.add(p);
+      }
+    });
+
+    if (moveEv.ctrlKey || moveEv.metaKey) {
+      const next = new Set(initialSet);
+      for (const p of hitPaths) {
+        if (next.has(p)) next.delete(p);
+        else next.add(p);
+      }
+      selectedPaths.value = [...next];
+    } else {
+      selectedPaths.value = [...new Set([...initialSet, ...hitPaths])];
+    }
+  };
+
+  const finishMarquee = (upEv: PointerEvent) => {
+    window.removeEventListener('pointermove', updateMarquee);
+    window.removeEventListener('pointerup', finishMarquee);
+    window.removeEventListener('pointercancel', finishMarquee);
+    document.body.style.userSelect = '';
+
+    if (started) {
+      marquee.value = { active: false, x: 0, y: 0, w: 0, h: 0 };
+      setTimeout(() => { suppressNextClick = false; }, 0);
+    } else {
+      const clickedRow = (upEv.target as HTMLElement | null)?.closest('.file-row');
+      if (!clickedRow && !additive && selectedPaths.value.length) {
+        selectedPaths.value = [];
+      }
+    }
+  };
+
+  window.addEventListener('pointermove', updateMarquee);
+  window.addEventListener('pointerup', finishMarquee);
+  window.addEventListener('pointercancel', finishMarquee);
+}
+
+function selectAllEntries() {
+  selectedPaths.value = ws.entries.map(e => e.path);
+}
+
+function onListKeydown(ev: KeyboardEvent) {
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'a') {
+    if (!ws.entries.length) return;
+    ev.preventDefault();
+    selectAllEntries();
+    return;
+  }
+  if (ev.key === 'Escape' && selectedPaths.value.length) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    selectedPaths.value = [];
+    return;
+  }
+  if ((ev.key === 'Delete' || ev.key === 'Backspace') && selectedPaths.value.length) {
+    ev.preventDefault();
+    void batchDelete();
+  }
+}
+
+function batchInsertPaths() {
+  const items = selectedEntries.value;
+  if (!items.length) return;
+  items.forEach(e => {
+    session.addWorkspaceRef({ path: e.path, name: e.name, type: e.type, size: e.size });
+  });
+  ui.toast(`已引用 ${items.length} 个工作区项`, { tone: 'success' });
+}
+
+async function batchOpenFiles() {
+  const files = selectedFiles.value.slice(0, 8);
+  for (const f of files) {
+    await ws.openFile(f.path);
+  }
+}
+
+function batchDownload() {
+  const files = selectedFiles.value;
+  files.forEach((f, idx) => {
+    setTimeout(() => triggerDownload(f.path), idx * 140);
+  });
+}
+
+function batchCopyNames() {
+  const text = selectedEntries.value.map(e => '/workspace/' + e.path).join('\n');
+  navigator.clipboard?.writeText(text).then(() => ui.toast(`已复制 ${selectedEntries.value.length} 个路径`, { tone: 'success' }));
+}
+
+async function batchDelete() {
+  const items = selectedEntries.value;
+  if (!items.length) return;
+  const names = items.slice(0, 4).map(e => e.name).join('、') + (items.length > 4 ? ` 等 ${items.length} 项` : '');
+  const ok = await ui.confirm({
+    title: `批量删除 ${items.length} 项`,
+    message: `确定删除“${names}”？此操作不可撤销（文件夹须为空）。`,
+    confirmText: '全部删除',
+    danger: true,
+  });
+  if (!ok) return;
+  const { deleted, failed } = await ws.deleteEntries(items.map(e => e.path));
+  selectedPaths.value = failed.map(f => f.path);
+  if (failed.length) {
+    ui.toast(`已删除 ${deleted.length} 项，${failed.length} 项失败（${failed[0].error}）`, { tone: 'error' });
+  } else {
+    ui.toast(`已删除 ${deleted.length} 项`, { tone: 'success' });
+  }
 }
 
 function openAddMenu() {
@@ -74,7 +311,7 @@ function openAddMenu() {
       icon: 'file',
       label: '新建文本文件',
       action: async () => {
-        const p = await ui.prompt({ title: '新建文本文件', message: '输入相对于工作区根目录的文件路径', defaultValue: prefix + 'untitled.txt', placeholder: '例如 notes.md 或 src/app.py', confirmText: '创建' });
+        const p = await ui.prompt({ title: '新建文本文件', message: '输入相对于 /workspace 的文件路径', defaultValue: prefix + 'untitled.txt', placeholder: '例如 notes.md 或 src/app.py', confirmText: '创建' });
         if (!p?.trim()) return;
         try { await ws.createFile(p.trim()); ui.toast('已创建文件', { tone: 'success' }); }
         catch (err: any) { ui.toast(err.message, { tone: 'error' }); }
@@ -84,7 +321,7 @@ function openAddMenu() {
       icon: 'folder',
       label: '新建文件夹',
       action: async () => {
-        const p = await ui.prompt({ title: '新建文件夹', message: '输入相对于工作区根目录的文件夹路径', defaultValue: prefix + 'new-folder', placeholder: '例如 docs 或 src/utils', confirmText: '创建' });
+        const p = await ui.prompt({ title: '新建文件夹', message: '输入相对于 /workspace 的文件夹路径', defaultValue: prefix + 'new-folder', placeholder: '例如 docs 或 src/utils', confirmText: '创建' });
         if (!p?.trim()) return;
         try { await ws.createDir(p.trim()); ui.toast('已创建文件夹', { tone: 'success' }); }
         catch (err: any) { ui.toast(err.message, { tone: 'error' }); }
@@ -99,6 +336,26 @@ function openAddMenu() {
 }
 
 function fileContext(ev: MouseEvent, e: any) {
+  if (selectedSet.value.has(e.path) && selectedEntries.value.length > 1) {
+    const count = selectedEntries.value.length;
+    const fCount = selectedFiles.value.length;
+    ui.openContext(ev, [
+      { header: `已选中 ${count} 项` },
+      { icon: 'corner-down-left', label: `引用 ${count} 个路径到对话`, action: batchInsertPaths },
+      fCount > 0 ? { icon: 'file', label: `在标签页打开 (${Math.min(fCount, 8)})`, action: batchOpenFiles } : null,
+      fCount > 0 ? { icon: 'download', label: `批量下载文件 (${fCount})`, action: batchDownload } : null,
+      { icon: 'copy', label: '复制全部路径', action: batchCopyNames },
+      { icon: 'trash', label: `批量删除 (${count})`, danger: true, action: batchDelete },
+      { icon: 'x', label: '取消多选', action: () => { selectedPaths.value = []; } },
+    ]);
+    return;
+  }
+
+  if (selectedPaths.value.length > 0 && !selectedSet.value.has(e.path)) {
+    selectedPaths.value = [e.path];
+    lastAnchorPath.value = e.path;
+  }
+
   const isFile = e.type !== 'dir';
   ui.openContext(ev, [
     { header: e.name },
@@ -106,7 +363,7 @@ function fileContext(ev: MouseEvent, e: any) {
       ? { icon: 'folder-open', label: '打开文件夹', action: () => ws.navigate(e.path) }
       : { icon: 'file', label: '打开标签页', action: () => ws.openFile(e.path) },
     isFile ? { icon: 'edit', label: '编辑文本', action: () => ws.openFile(e.path, true) } : null,
-    isFile ? { icon: 'corner-down-left', label: '引用路径到对话', action: () => insertPath(e.path) } : null,
+    { icon: 'corner-down-left', label: '引用路径到对话', action: () => insertPath(e.path) },
     isFile ? { icon: 'download', label: '下载文件', action: () => triggerDownload(e.path) } : null,
     {
       icon: 'edit',
@@ -133,6 +390,33 @@ function fileContext(ev: MouseEvent, e: any) {
         catch (err: any) { ui.toast(err.message, { tone: 'error' }); }
       },
     },
+  ]);
+}
+
+function onListContext(ev: MouseEvent) {
+  if ((ev.target as HTMLElement | null)?.closest('.file-row, .ws-batch-bar')) return;
+  const prefix = ws.path ? ws.path + '/' : '';
+  ui.openContext(ev, [
+    { header: '/workspace' + (ws.path ? '/' + ws.path : '') },
+    ws.entries.length ? { icon: 'check', label: `全选 (${ws.entries.length})`, action: selectAllEntries } : null,
+    selectedEntries.value.length > 0 ? { icon: 'x', label: '取消选择', action: () => { selectedPaths.value = []; } } : null,
+    {
+      icon: 'file',
+      label: '新建文本文件…',
+      action: async () => {
+        const p = await ui.prompt({ title: '新建文本文件', message: '输入相对于 /workspace 的文件路径', defaultValue: prefix + 'untitled.txt', confirmText: '创建' });
+        if (p?.trim()) await ws.createFile(p.trim());
+      },
+    },
+    {
+      icon: 'folder',
+      label: '新建文件夹…',
+      action: async () => {
+        const p = await ui.prompt({ title: '新建文件夹', message: '输入相对于 /workspace 的文件夹路径', defaultValue: prefix + 'new-folder', confirmText: '创建' });
+        if (p?.trim()) await ws.createDir(p.trim());
+      },
+    },
+    { icon: 'refresh', label: '刷新目录', action: () => ws.load(ws.path, true) },
   ]);
 }
 
@@ -186,15 +470,13 @@ async function onDrop(e: DragEvent) {
   await handleSelectedFile(e.dataTransfer?.files?.[0]);
 }
 
-function insertPath(p: string) {
-  const refText = "'/workspace/" + p.replace(/^\/workspace\/?/, '') + "'";
-  const el = document.querySelector('.composer textarea') as HTMLTextAreaElement | null;
-  if (el) {
-    el.value = (el.value ? el.value + ' ' : '') + refText;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.focus();
-  }
-  ui.toast('已插入文件路径', { tone: 'success' });
+function insertPath(e: any) {
+  const p = typeof e === 'string' ? e : e?.path;
+  const name = typeof e === 'object' && e?.name ? e.name : (String(p || '').split('/').pop() || p);
+  const type = typeof e === 'object' ? e?.type : undefined;
+  const size = typeof e === 'object' ? e?.size : undefined;
+  session.addWorkspaceRef({ path: p, name, type, size });
+  ui.toast(`已引用 ${name} 到输入框`, { tone: 'success' });
 }
 
 async function saveActive() {
@@ -241,7 +523,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <aside class="workspace" :class="{ 'is-dual': isDual }" aria-label="工作区">
+  <aside class="workspace" :class="{ 'is-dual': isDual }" aria-label="workspace">
     <div class="resize-handle resize-workspace" role="separator" aria-orientation="vertical" aria-label="调整工作区宽度" @pointerdown="startResize"></div>
 
     <!-- Single unified header bar: breadcrumbs directly on top + compact actions -->
@@ -288,7 +570,7 @@ onMounted(() => {
         >
           <Icon name="columns" :size="15" />
         </button>
-        <button type="button" class="icon-button small" aria-label="关闭工作区" title="关闭工作区" @click="closeWorkspace">
+        <button type="button" class="icon-button small" aria-label="关闭 workspace" title="关闭 workspace" @click="closeWorkspace">
           <Icon name="x" :size="16" />
         </button>
       </div>
@@ -305,7 +587,7 @@ onMounted(() => {
         @click="ws.activeTab = FILES_TAB"
       >
         <Icon name="folder" :size="13" />
-        <span>目录</span>
+        <span>workspace</span>
       </button>
       <div
         v-for="t in ws.tabs"
@@ -326,11 +608,16 @@ onMounted(() => {
 
     <!-- Body: either Dual Columns (Explorer + Viewer) or Single Tabbed Stage -->
     <div class="ws-stage" :class="{ 'is-dual': isDual }">
-      <!-- Explorer Pane -->
+      <!-- Explorer Pane (supports rubber-band marquee + Ctrl/Shift multi-select) -->
       <div
         v-show="isDual || !activeFileTab"
+        ref="fileListRef"
+        tabindex="-1"
         class="file-list"
-        :class="{ 'is-dragover': dragover }"
+        :class="{ 'is-dragover': dragover, 'is-marquee-active': marquee.active }"
+        @pointerdown="onListPointerDown"
+        @keydown="onListKeydown"
+        @contextmenu="onListContext"
         @dragover.prevent="dragover = true"
         @dragleave="dragover = false"
         @drop.prevent="onDrop"
@@ -346,16 +633,63 @@ onMounted(() => {
           :key="e.path"
           type="button"
           class="file-row"
-          :class="{ 'is-selected': activeFileTab?.path === e.path || (!activeFileTab && ws.selected === e.path) }"
+          :class="{
+            'is-multi': selectedSet.has(e.path),
+            'is-selected': !selectedEntries.length && (activeFileTab?.path === e.path || (!activeFileTab && ws.selected === e.path)),
+          }"
+          :data-entry-path="e.path"
           :data-dir="e.type === 'dir' ? '' : undefined"
           :title="e.name"
-          @click="openEntry(e)"
+          @click="ev => onRowClick(ev, e)"
           @contextmenu="ev => fileContext(ev, e)"
         >
           <span class="file-icon"><Icon :name="e.type === 'dir' ? 'folder' : e.type === 'symlink' ? 'link' : 'file'" :size="15" /></span>
           <span class="file-name">{{ e.name }}</span>
-          <span class="file-size">{{ e.type === 'dir' ? '' : formatBytes(e.size) }}</span>
+          <span class="file-trailing">
+            <span v-if="e.type !== 'dir'" class="file-size">{{ formatBytes(e.size) }}</span>
+            <button
+              type="button"
+              class="file-quote-btn"
+              :title="'引用 ' + e.name + ' 到对话'"
+              :aria-label="'引用 ' + e.name + ' 到对话'"
+              @click.stop="insertPath(e)"
+            >
+              <Icon name="corner-down-left" :size="12" />
+            </button>
+          </span>
         </button>
+
+        <!-- Rubber-band marquee selection rectangle -->
+        <div
+          v-if="marquee.active"
+          class="ws-marquee"
+          :style="{
+            left: marquee.x + 'px',
+            top: marquee.y + 'px',
+            width: marquee.w + 'px',
+            height: marquee.h + 'px',
+          }"
+          aria-hidden="true"
+        ></div>
+
+        <!-- Sticky multi-select batch action bar -->
+        <div v-if="selectedEntries.length > 0" class="ws-batch-bar" @pointerdown.stop>
+          <span class="ws-batch-count">已选 {{ selectedEntries.length }} 项</span>
+          <div class="ws-batch-actions">
+            <button type="button" class="ws-batch-btn" title="引用选中路径到对话" @click="batchInsertPaths">
+              <Icon name="corner-down-left" :size="13" /><span>引用</span>
+            </button>
+            <button v-if="selectedFiles.length > 0" type="button" class="ws-batch-btn" title="在标签页中打开" @click="batchOpenFiles">
+              <Icon name="file" :size="13" /><span>打开</span>
+            </button>
+            <button type="button" class="ws-batch-btn is-danger" title="批量删除 (Delete)" @click="batchDelete">
+              <Icon name="trash" :size="13" /><span>删除</span>
+            </button>
+            <button type="button" class="ws-batch-clear" title="取消选择 (Esc)" aria-label="取消选择" @click="selectedPaths = []">
+              <Icon name="x" :size="13" />
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- File Viewer / Editor Pane -->
@@ -386,7 +720,7 @@ onMounted(() => {
               <span class="viewer-size">{{ activeFileTab.meta }}</span>
             </div>
             <div class="viewer-tools">
-              <template v-if="!activeFileTab.binary && !activeFileTab.truncated && !activeFileTab.loading">
+              <template v-if="!activeFileTab.binary && !activeFileTab.isImage && !activeFileTab.truncated && !activeFileTab.loading">
                 <template v-if="activeFileTab.editing">
                   <button
                     type="button"
@@ -405,9 +739,20 @@ onMounted(() => {
                     取消
                   </button>
                 </template>
-                <button v-else type="button" class="viewer-pill" @click="activeFileTab.editing = true">
-                  <Icon name="edit" :size="12" /><span>编辑</span>
-                </button>
+                <template v-else>
+                  <button
+                    v-if="isMarkdownFile(activeFileTab.name)"
+                    type="button"
+                    class="viewer-pill"
+                    :title="showRenderedMd ? '查看 Markdown 源码' : '查看渲染预览'"
+                    @click="toggleMdMode(activeFileTab.path)"
+                  >
+                    <span>{{ showRenderedMd ? '源码' : '预览' }}</span>
+                  </button>
+                  <button type="button" class="viewer-pill" @click="activeFileTab.editing = true">
+                    <Icon name="edit" :size="12" /><span>编辑</span>
+                  </button>
+                </template>
               </template>
               <button v-if="!activeFileTab.binary" type="button" class="icon-button mini" title="复制内容" aria-label="复制内容" @click="copyContent(activeFileTab)">
                 <Icon name="copy" :size="14" />
@@ -434,7 +779,23 @@ onMounted(() => {
             aria-label="编辑文件内容"
             @keydown="onEditorKeydown"
           ></textarea>
-          <pre v-else-if="!activeFileTab.binary" class="preview-body"><code ref="codeRef">{{ activeFileTab.text }}</code></pre>
+          <div v-else-if="activeFileTab.isImage" class="preview-image-stage">
+            <div
+              class="preview-image-box"
+              title="点击全屏查看"
+              @click="ui.openLightbox({ url: activeFileTab.imageUrl || '', name: activeFileTab.name, size: activeFileTab.size })"
+            >
+              <img :src="activeFileTab.imageUrl" :alt="activeFileTab.name" class="preview-image-el" />
+              <div class="preview-image-hint">
+                <Icon name="zoom-in" :size="13" />
+                <span>点击全屏放大</span>
+              </div>
+            </div>
+          </div>
+          <div v-else-if="showRenderedMd" class="preview-markdown">
+            <MarkdownView :source="activeFileTab.text" :sources="true" />
+          </div>
+          <pre v-else-if="!activeFileTab.binary" class="preview-body"><code ref="codeRef"></code></pre>
         </template>
 
         <div v-else class="viewer-empty">

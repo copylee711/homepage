@@ -30,12 +30,18 @@ export function formatDuration(ms: number) {
 export function grantDate(seconds?: number) { return seconds ? new Date(seconds * 1000).toLocaleDateString('zh-CN') : ''; }
 
 export interface ChatGroup { key: string; label: string; chats: Chat[]; }
-export function groupChats(chats: Chat[]): ChatGroup[] {
+export function groupChats(chats: Chat[], groupByDate = true): ChatGroup[] {
   const pinned = chats.filter(c => c.pinned);
   const rest = chats.filter(c => !c.pinned);
-  const today = day(Date.now()), yesterday = today - 86400000, week = today - 6 * 86400000;
   const groups: ChatGroup[] = [];
   if (pinned.length) groups.push({ key: 'pinned', label: '置顶', chats: pinned });
+
+  if (!groupByDate) {
+    if (rest.length) groups.push({ key: 'all', label: pinned.length ? '全部对话' : '', chats: rest });
+    return groups;
+  }
+
+  const today = day(Date.now()), yesterday = today - 86400000, week = today - 6 * 86400000;
   const t: Chat[] = [], y: Chat[] = [], w: Chat[] = [], o: Chat[] = [];
   for (const c of rest) {
     const s = day(c.updated);

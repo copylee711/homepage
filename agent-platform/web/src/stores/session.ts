@@ -9,6 +9,20 @@ export interface Identity {
   grant_expires_at?: number; user?: { id: string; name: string; avatar?: string };
 }
 
+export interface WorkspaceRef {
+  path: string;
+  name: string;
+  type?: 'file' | 'dir' | 'symlink' | 'image';
+  size?: number;
+  previewUrl?: string;
+}
+
+export interface TextQuote {
+  id: string;
+  text: string;
+  source?: string;
+}
+
 function uuid() {
   return (crypto as any).randomUUID ? crypto.randomUUID()
     : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); });
@@ -26,6 +40,9 @@ export const useSession = defineStore('session', {
     chatsError: '' as string,
     chatId: null as string | null,
     messages: [] as any[],        // transcript for the active chat
+    workspaceRefs: [] as WorkspaceRef[], // referenced workspace files attached to composer
+    textQuotes: [] as TextQuote[],       // quoted message excerpts attached to composer
+    draftText: '' as string,             // prompt restored to composer by rewind or draft actions
     loadingChat: false,
     chatError: '' as string,
     busy: false,
@@ -84,14 +101,60 @@ export const useSession = defineStore('session', {
       if (this.busy) return;
       this.chatId = uuid();
       this.messages = [];
+      this.workspaceRefs = [];
+      this.textQuotes = [];
       this.live = null;
       this.lastUserText = '';
       this.setChatUrl(this.chatId);
+    },
+    addWorkspaceRef(item: { path: string; name?: string; type?: 'file' | 'dir' | 'symlink' | 'image'; size?: number; previewUrl?: string }) {
+      const clean = String(item.path || '').replace(/^\/workspace\/?/, '').replace(/^\/+/, '');
+      if (!clean) return;
+      const name = item.name || clean.split('/').pop() || clean;
+      if (!this.workspaceRefs.some(r => r.path === clean)) {
+        this.workspaceRefs.push({
+          path: clean,
+          name,
+          type: item.type || (clean.endsWith('/') ? 'dir' : 'file'),
+          size: item.size,
+          previewUrl: item.previewUrl,
+        });
+      }
+    },
+    removeWorkspaceRef(path: string) {
+      const clean = String(path || '').replace(/^\/workspace\/?/, '').replace(/^\/+/, '');
+      this.workspaceRefs = this.workspaceRefs.filter(r => r.path !== clean);
+    },
+    clearWorkspaceRefs() {
+      this.workspaceRefs = [];
+    },
+    addTextQuote(text: string, source = 'Iris') {
+      const clean = String(text || '')
+        .replace(/\r\n?/g, '\n')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n\s*\n+/g, '\n\n')
+        .replace(/(?<=\S)\n(?=\S)/g, ' ')
+        .trim();
+      if (!clean) return;
+      if (this.textQuotes.some(q => q.text === clean)) return;
+      this.textQuotes.push({
+        id: uuid(),
+        text: clean,
+        source,
+      });
+    },
+    removeTextQuote(id: string) {
+      this.textQuotes = this.textQuotes.filter(q => q.id !== id);
+    },
+    clearTextQuotes() {
+      this.textQuotes = [];
     },
     async selectChat(id: string) {
       if (this.busy) return;
       this.chatId = id;
       this.setChatUrl(id);
+      this.workspaceRefs = [];
+      this.textQuotes = [];
       this.live = null;
       const cached = this.snapshots.get(id);
       if (cached) { this.messages = cached.messages || []; }
@@ -110,13 +173,42 @@ export const useSession = defineStore('session', {
       } finally { this.loadingChat = false; }
     },
     async send(text: string, opts: { retry?: boolean; continuation?: boolean } = {}) {
-      const message = String(text || '').trim();
-      if (!message || !this.canExecute || this.busy) return;
+      const rawText = String(text || '').trim();
+      const attachedRefs = [...this.workspaceRefs];
+      const attachedQuotes = [...this.textQuotes];
+      if (!rawText && !attachedRefs.length && !attachedQuotes.length) return;
+      if (!this.canExecute || this.busy) return;
       if (!this.chatId) this.startNew();
       const thread = this.chatId!;
       this.snapshots.delete(thread);
-      this.messages.push({ role: 'user', timestamp: Date.now(), content: message, _fresh: true });
-      this.lastUserText = message;
+
+      const sections: string[] = [];
+      if (attachedRefs.length > 0) {
+        sections.push('【工作区引用文件】\n' + attachedRefs.map(r => `- \`/workspace/${r.path}\``).join('\n'));
+      }
+      if (attachedQuotes.length > 0) {
+        sections.push('【引用内容】\n' + attachedQuotes.map(q => q.text.split('\n').map(l => '> ' + l).join('\n')).join('\n\n'));
+      }
+      if (rawText) {
+        sections.push(rawText);
+      } else {
+        sections.push('请根据以上引用内容进行分析并回答。');
+      }
+
+      const message = sections.join('\n\n');
+      this.workspaceRefs = [];
+      this.textQuotes = [];
+
+      this.messages.push({
+        role: 'user',
+        timestamp: Date.now(),
+        content: message,
+        refs: attachedRefs.map(r => ({ path: r.path, name: r.name, type: r.type, size: r.size })),
+        quotes: attachedQuotes.map(q => ({ id: q.id, text: q.text, source: q.source })),
+        _rawPrompt: rawText,
+        _fresh: true,
+      });
+      this.lastUserText = rawText || message;
       this.stopping = false;
       const controller = new AbortController();
       this.controller = controller;
@@ -156,6 +248,69 @@ export const useSession = defineStore('session', {
       this.stopping = true;
       try { await post('/api/abort', { thread: this.chatId }); } catch {}
       this.controller?.abort();
+    },
+    async renameChat(id: string, title: string) {
+      const t = String(title || '').replace(/\s+/g, ' ').trim();
+      if (!t || t.length > 80) return false;
+      await post('/api/chats/rename', { thread: id, title: t });
+      const c = this.chats.find(x => x.id === id);
+      if (c) c.title = t;
+      return true;
+    },
+    async retryFromMessage(msg: any) {
+      if (this.busy) return;
+      const idx = this.messages.findIndex(m => m === msg || (m.timestamp === msg.timestamp && m.role === msg.role));
+      if (idx < 0) return;
+      let userIdx = -1;
+      for (let i = idx - 1; i >= 0; i--) {
+        if (this.messages[i].role === 'user') { userIdx = i; break; }
+      }
+      if (userIdx < 0) return;
+      const userMsg = this.messages[userIdx];
+      const rawPrompt = userMsg._rawPrompt || userMsg.content;
+      this.messages = this.messages.slice(0, userIdx);
+      if (this.chatId) {
+        try { await post('/api/chats/truncate', { thread: this.chatId, keepMessages: userIdx }); } catch {}
+      }
+      await this.send(rawPrompt);
+    },
+    async rewindFromMessage(msg: any) {
+      if (this.busy) return;
+      const idx = this.messages.findIndex(m => m === msg || (m.timestamp === msg.timestamp && m.role === msg.role));
+      if (idx < 0) return;
+      let userIdx = idx;
+      if (msg.role === 'assistant') {
+        for (let i = idx - 1; i >= 0; i--) {
+          if (this.messages[i].role === 'user') { userIdx = i; break; }
+        }
+      }
+      const userMsg = this.messages[userIdx];
+      const rawPrompt = userMsg?._rawPrompt || userMsg?.content || '';
+      this.messages = this.messages.slice(0, userIdx);
+      if (this.chatId) {
+        try { await post('/api/chats/truncate', { thread: this.chatId, keepMessages: userIdx }); } catch {}
+      }
+      this.draftText = rawPrompt;
+    },
+    async forkFromMessage(msg: any) {
+      if (this.busy || !this.chatId) return null;
+      const idx = this.messages.findIndex(m => m === msg || (m.timestamp === msg.timestamp && m.role === msg.role));
+      const keep = idx >= 0 ? idx + 1 : this.messages.length;
+      try {
+        const res = await post('/api/chats/fork', {
+          thread: this.chatId,
+          title: (this.currentChat?.title || '新对话') + ' (分支)',
+          keepMessages: keep,
+        });
+        await this.loadChats();
+        if (res?.thread) {
+          await this.selectChat(res.thread);
+          return { id: res.thread, title: res.title || '新分支' };
+        }
+      } catch (err: any) {
+        useUi().toast('分叉失败: ' + err.message, { tone: 'error' });
+      }
+      return null;
     },
     async activateModel(id: string, model?: string) {
       const result = await post('/api/providers/activate', { id, model });

@@ -198,6 +198,7 @@ export function devMock() {
         };
 
         if (path === '/auth/logout') return send({ ok: true });
+        if (path === '/api/avatar') return send({ error: '暂无头像' }, 404);
         if (path === '/api/me') return send(state.me());
         if (path === '/api/chats') return send({ chats });
         if (path === '/api/session') return send(sessions[q.get('chat')] || { busy: false, messages: [] });
@@ -229,14 +230,42 @@ export function devMock() {
           const parent = cur ? (cur.includes('/') ? cur.slice(0, cur.lastIndexOf('/')) : '') : null;
           return send({ entries: listDir(cur), path: cur, parent });
         }
+        if (path === '/api/files/download') {
+          const p = normPath(q.get('path') || '');
+          if (!(p in fileText)) return send({ error: '文件不存在' }, 404);
+          const raw = fileText[p];
+          const ext = (p.slice(p.lastIndexOf('.')) || '').toLowerCase();
+          const mimeMap = {
+            '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+            '.webp': 'image/webp', '.gif': 'image/gif', '.svg': 'image/svg+xml',
+            '.pdf': 'application/pdf', '.txt': 'text/plain; charset=utf-8',
+            '.md': 'text/markdown; charset=utf-8', '.py': 'text/plain; charset=utf-8',
+            '.js': 'text/javascript; charset=utf-8',
+          };
+          const mime = mimeMap[ext] || 'application/octet-stream';
+          const isImg = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(p);
+          const isB64 = (isImg || p.endsWith('.pdf')) && /^[A-Za-z0-9+/=\r\n]+$/.test(raw.trim());
+          const buffer = isB64 ? Buffer.from(raw.trim(), 'base64') : Buffer.from(raw, 'utf8');
+          res.statusCode = 200;
+          res.setHeader('Content-Type', mime);
+          res.setHeader('Content-Length', buffer.length);
+          if (q.get('inline') === '1') {
+            res.setHeader('Content-Disposition', 'inline');
+          } else {
+            res.setHeader('Content-Disposition', `attachment; filename="${p.split('/').pop() || 'file'}"`);
+          }
+          return res.end(buffer);
+        }
         if (path === '/api/files/preview') {
           const p = normPath(q.get('path') || '');
           if (!(p in fileText)) return send({ error: '文件不存在' }, 404);
           const text = fileText[p];
-          const bytes = Buffer.from(text, 'utf8');
+          const isImg = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(p);
+          const isB64 = (isImg || p.endsWith('.pdf')) && /^[A-Za-z0-9+/=\r\n]+$/.test(text.trim());
+          const b64Data = isB64 ? text.trim() : Buffer.from(text, 'utf8').toString('base64');
           return send({
-            data: bytes.toString('base64'),
-            size: bytes.length,
+            data: b64Data,
+            size: isB64 ? Math.floor(text.trim().length * 0.75) : Buffer.byteLength(text, 'utf8'),
             truncated: false,
             revision: sha256(text),
           });

@@ -41,9 +41,14 @@ function link(doc, href, label, className = '') {
 }
 function text(doc, value) { return doc.createTextNode(String(value)); }
 
+let activeFootnotes = null;
 export function renderMarkdown(value, doc = globalThis.document, options = {}) {
   const fragment = doc.createDocumentFragment();
-  const lines = String(value ?? '').replace(/\r\n?/g, '\n').split('\n');
+  const raw = String(value ?? '').replace(/\r\n?/g, '\n');
+  const prevFootnotes = activeFootnotes;
+  activeFootnotes = extractFootnoteMap(raw);
+  const cleaned = activeFootnotes.size ? raw.replace(FOOTNOTE_DEF, '') : raw;
+  const lines = cleaned.split('\n');
   // Pull `$$ … $$` display math out first so the block parser never splits a formula.
   const segments = extractDisplayMath(lines);
   for (const segment of segments) {
@@ -60,30 +65,48 @@ export function renderMarkdown(value, doc = globalThis.document, options = {}) {
     const sources = collectSources(String(value ?? ''));
     if (sources.length) fragment.append(sourcesList(sources, doc));
   }
+  activeFootnotes = prevFootnotes;
   return fragment;
 }
 
 /* ---------- Citations (ported from dsh-better-display) ---------- */
-const CITATION = /\[\[?\^?(\d{1,3})\]?\]\((https?:\/\/[^\s)]+)(?:\s+"([^"]*)")?\)/g;
+const CITATION = /\[\[?\^?(\d{1,3})\]?\]\((https?:\/\/[^\s)]+)(?:\s+["']([^"']*)["'])?\)/g;
+const FOOTNOTE_DEF = /^ {0,3}\[\^?(\d{1,3})\]:[ \t]*(https?:\/\/\S+)(?:[ \t]+["']?([^"'\n]*)["']?)?[ \t]*$/gm;
 function hostOf(url) { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; } }
+function extractFootnoteMap(rawText) {
+  const map = new Map();
+  for (const m of String(rawText ?? '').matchAll(FOOTNOTE_DEF)) {
+    const safe = safeHref(m[2]);
+    if (safe) map.set(m[1], { label: m[1], url: safe, title: (m[3] || '').trim(), host: hostOf(safe) });
+  }
+  return map;
+}
 export function collectSources(text) {
   const byUrl = new Map();
-  for (const match of String(text).matchAll(CITATION)) {
+  const str = String(text ?? '');
+  for (const match of str.matchAll(CITATION)) {
     const [, label, url, title] = match;
-    if (!safeHref(url)) continue;
-    if (!byUrl.has(url)) byUrl.set(url, { label, url, title: title || '', host: hostOf(url) });
+    const safe = safeHref(url);
+    if (!safe) continue;
+    if (!byUrl.has(safe)) byUrl.set(safe, { label, url: safe, title: title || '', host: hostOf(safe) });
+  }
+  for (const item of extractFootnoteMap(str).values()) {
+    if (!byUrl.has(item.url)) byUrl.set(item.url, item);
   }
   return [...byUrl.values()];
 }
 function sourcesList(sources, doc) {
   const wrap = node(doc, 'div', 'md-sources');
-  wrap.append(node(doc, 'p', 'md-sources-title', '来源'));
+  wrap.append(node(doc, 'span', 'md-sources-title', '来源'));
   for (const source of sources) {
-    const row = node(doc, 'div', 'md-source');
-    row.append(node(doc, 'span', 'md-source-label', source.label));
-    const anchor = link(doc, source.url, source.title || source.host, 'md-link');
-    row.append(anchor, node(doc, 'span', 'md-source-host', source.host));
-    wrap.append(row);
+    const pill = link(doc, source.url, '', 'md-source');
+    pill.textContent = '';
+    pill.append(node(doc, 'span', 'md-source-label', source.label));
+    pill.append(node(doc, 'span', 'md-source-title', source.title || source.host));
+    if (source.title && source.host && source.title !== source.host) {
+      pill.append(node(doc, 'span', 'md-source-host', source.host));
+    }
+    wrap.append(pill);
   }
   return wrap;
 }
@@ -106,7 +129,7 @@ function renderBlocks(lines, parent, doc) {
     }
     const heading = line.match(HEADING);
     if (heading) {
-      const level = Math.min(4, Math.max(2, heading[1].length));
+      const level = Math.min(4, Math.max(1, heading[1].length));
       const element = node(doc, 'h' + level, 'md-heading');
       renderInline(heading[2].replace(/[ \t]+#+[ \t]*$/, ''), element, doc);
       parent.append(element);
@@ -376,9 +399,29 @@ export function renderInline(value, parent, doc = globalThis.document, depth = 0
       const found = linkAt(value, index, false);
       if (found) {
         flush();
-        const anchor = link(doc, found.href, '', 'md-link');
-        renderInline(found.label, anchor, doc, depth + 1);
-        parent.append(anchor); index = found.end; continue;
+        const citeMatch = found.label.trim().match(/^\[?\^?(\d{1,3})\]?$/);
+        if (citeMatch && safeHref(found.href)) {
+          const badge = link(doc, found.href, citeMatch[1], 'md-citation');
+          badge.setAttribute('title', found.title || hostOf(found.href));
+          if (citeMatch[1].length === 1) badge.classList.add('is-single');
+          parent.append(badge);
+        } else {
+          const anchor = link(doc, found.href, '', 'md-link');
+          if (found.title) anchor.setAttribute('title', found.title);
+          renderInline(found.label, anchor, doc, depth + 1);
+          parent.append(anchor);
+        }
+        index = found.end; continue;
+      }
+      const fnMatch = value.slice(index).match(/^\[\^?(\d{1,3})\]/);
+      if (fnMatch && activeFootnotes && activeFootnotes.has(fnMatch[1])) {
+        flush();
+        const fn = activeFootnotes.get(fnMatch[1]);
+        const badge = link(doc, fn.url, fn.label, 'md-citation');
+        badge.setAttribute('title', fn.title || fn.host);
+        if (fn.label.length === 1) badge.classList.add('is-single');
+        parent.append(badge);
+        index += fnMatch[0].length; continue;
       }
     }
     if (character === '<') {

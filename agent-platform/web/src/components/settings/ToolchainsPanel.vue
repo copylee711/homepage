@@ -126,7 +126,7 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer); });
 
 <style>
 .tc-actions { display: flex; align-items: center; gap: 6px; flex: none; flex-wrap: wrap; }
-.tc-ver-input { width: 92px; height: 32px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface-2); color: var(--text); font-family: var(--font-mono); font-size: 12px; outline: 0; }
-.tc-ver-input:focus { border-color: var(--accent); background: var(--surface); }
+.tc-ver-input { width: 92px; height: 32px; padding: 0 9px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface-2); color: var(--text); font-family: var(--font-mono); font-size: 12px; outline: 0; }
+.tc-ver-input:focus { border-color: var(--line-focus); background: var(--surface); }
 .tc-output { margin: 0; max-height: 150px; overflow: auto; padding: 11px 13px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--code-bg); color: var(--text-2); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; }
 </style>

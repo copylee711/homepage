@@ -212,7 +212,8 @@ onMounted(load);
 <style>
 .settings-pad { padding: 18px 22px 22px; overflow-y: auto; height: 100%; display: flex; flex-direction: column; gap: 12px; }
 .panel-top { display: flex; align-items: center; gap: 8px; }
-.search-box { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface-2); color: var(--muted); }
+.search-box { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 11px; border: 1px solid var(--line-2); transition: border-color var(--fast), background-color var(--fast); border-radius: 10px; background: var(--surface-2); color: var(--muted); }
+.search-box:focus-within { border-color: var(--line-focus); background: var(--surface); }
 .search-box input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 13px; }
 .list-empty-plain { padding: 24px 0; text-align: center; color: var(--muted); font-size: 12.5px; }
 
