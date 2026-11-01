@@ -6,22 +6,13 @@
   <meta name="color-scheme" content="light dark">
   <meta name="description" content="Iris：在独立沙箱中完成文件与代码任务的 Agent 工作台。">
   <title>Iris</title>
-  <script>
-    /* Apply the stored theme before first paint to avoid a flash. */
-    (function () {
-      try {
-        var t = localStorage.getItem('iris-theme');
-        if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        document.documentElement.dataset.theme = t;
-      } catch (e) { document.documentElement.dataset.theme = 'light'; }
-    })();
-  </script>
+  <script src="/theme-init.js"></script>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
 </head>
 <body>
   <div id="app"></div>
-  <noscript><p style="position:fixed;inset:auto 16px 16px;padding:12px;border-radius:10px;background:#fff;color:#333;font:14px sans-serif">Iris 需要 JavaScript 才能运行，请启用后刷新。</p></noscript>
+  <noscript>Iris 需要 JavaScript 才能运行，请启用后刷新。</noscript>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
