@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { confirmDialog } from '../composables/useConfirm'
 import { accountApi } from '../account'
+import { formatSize as size } from '../drive'
 import type { HostedImage, ImageLimits, ImageToken } from '../account'
 
 const emit = defineEmits<{ enabled: [value: boolean] }>()
@@ -13,7 +14,6 @@ const uploadUrl = ref('')
 
 const percent = computed(() => limits.value?.quota ? Math.min(100, (limits.value.used / limits.value.quota) * 100) : 0)
 const pages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
-const size = (bytes: number) => bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MiB` : `${Math.max(1, Math.round(bytes / 1024))} KiB`
 
 async function run(work: () => Promise<void>) {
   if (busy.value) return
