@@ -226,7 +226,10 @@ async function remove(c: any) {
 .settings-tab.is-active svg { color: var(--ink); }
 
 .settings-stage { min-width: 0; min-height: 0; height: 100%; overflow: hidden; display: flex; flex-direction: column; }
-.settings-pad { padding: 18px 22px; overflow-y: auto; flex: 1; min-height: 0; }
+.settings-pad { padding: 18px 22px; overflow-y: auto; flex: 1; min-height: 0; scrollbar-width: none; }
+.settings-pad::-webkit-scrollbar { display: none; }
+.settings-nav { scrollbar-width: none; }
+.settings-nav::-webkit-scrollbar { display: none; }
 
 .setting-account-header {
   display: flex;
