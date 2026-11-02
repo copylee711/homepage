@@ -27,8 +27,8 @@ export function streamingMarkdown(host, doc = document, options = {}) {
     if (!tail || !source.startsWith(stable)) { host.replaceChildren(); stable = ''; tail = doc.createElement('div'); tail.className = 'md-stream-tail'; host.append(tail); }
     const boundary = stableBoundary(source), prefix = source.slice(0, boundary);
     if (boundary > stable.length && prefix.startsWith(stable)) {
-      host.insertBefore(keepWidgets(renderMarkdown(prefix.slice(stable.length), doc, options)), tail); stable = prefix;
+      host.insertBefore(keepWidgets(renderMarkdown(prefix.slice(stable.length), doc, { ...options, streaming: true })), tail); stable = prefix;
     }
-    tail.replaceChildren(keepWidgets(renderMarkdown(source.slice(stable.length), doc, options)));
+    tail.replaceChildren(keepWidgets(renderMarkdown(source.slice(stable.length), doc, { ...options, streaming: true })));
   };
 }

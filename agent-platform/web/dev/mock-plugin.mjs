@@ -171,6 +171,8 @@ const toolchainCatalog = [
 function streamEvents(message, thinking = 'medium') {
   const events = [{ type: 'message_start', message: { role: 'assistant', timestamp: Date.now() } }];
   const reply = '收到。' + (/公式|数学|math/i.test(message) ? '行内 $a^2+b^2=c^2$，块级：\n\n$$\\sum_{k=1}^{n} k = \\frac{n(n+1)}{2}$$\n\n' : '') +
+    (/latex|曲线积分/i.test(message) ? 'LaTeX 定界符：行内 \\(a^2+b^2=c^2\\)，块级：\n\n\\[\n\\int_C f(x,y)\\,ds\n\\]\n\n' : '') +
+    (/widget|组件|交互/i.test(message) ? '下面是一个交互组件：\n\n```iris-widget 正弦波\n<!DOCTYPE html>\n<html lang="zh-CN"><head><meta charset="utf-8"><title>正弦波</title>\n<style>body{font-family:system-ui;margin:0;padding:16px;background:var(--widget-bg,#fff);color:var(--widget-fg,#111)}</style>\n</head><body><h3>正弦波</h3><canvas id="c" width="600" height="200"></canvas>\n<script>const c=document.getElementById("c"),x=c.getContext("2d");x.strokeStyle="#2563eb";x.lineWidth=2;x.beginPath();for(let i=0;i<600;i++){const y=100+70*Math.sin(i/40);i?x.lineTo(i,y):x.moveTo(i,y);}x.stroke();</script>\n</body></html>\n```\n\n' : '') +
     '这里是流式回复示例，支持 **Markdown** 与 `行内代码`：\n\n```js\nconst sum = (a, b) => a + b;\nconsole.log(sum(2, 3));\n```\n\n已完成。';
   if (thinking !== 'off') {
     const steps = [

@@ -224,7 +224,7 @@ watch(avatarUrl, () => { avatarError.value = false; });
       <button class="icon-button" aria-label="收起导航" title="收起导航" @click="ui.mobileDrawer ? (ui.mobileDrawer = null) : ui.setSidebarOpen(false)"><Icon name="panel-left" /></button>
     </div>
 
-    <button class="new-chat" :disabled="session.busy || !session.canExecute" @click="session.startNew(); if (ui.mobileDrawer) ui.mobileDrawer = null">
+    <button class="new-chat" :disabled="!session.canExecute" @click="session.startNew(); if (ui.mobileDrawer) ui.mobileDrawer = null">
       <Icon name="plus" :size="18" /><span>新任务</span>
     </button>
 
@@ -353,7 +353,7 @@ watch(avatarUrl, () => { avatarError.value = false; });
           <li v-for="c in g.chats" :key="c.id" class="chat-item" :class="{ 'is-active': c.id === session.chatId }">
             <button class="chat-select" :aria-current="c.id === session.chatId ? 'page' : undefined" :title="c.title" @click="pickChat(c)" @contextmenu="e => chatContext(e, c)">
               <span class="chat-title">{{ c.title || '新任务' }}</span>
-              <span class="chat-meta"><span class="chat-time">{{ formatShort(c.updated) }}</span><Icon v-if="c.pinned" name="pin" :size="12" /><Icon v-if="c.archived" name="archive" :size="12" /></span>
+              <span class="chat-meta"><span v-if="session.liveThread === c.id" class="chat-live-dot" title="正在生成回复" aria-label="正在生成回复"></span><span class="chat-time">{{ formatShort(c.updated) }}</span><Icon v-if="c.pinned" name="pin" :size="12" /><Icon v-if="c.archived" name="archive" :size="12" /></span>
             </button>
             <button class="icon-button chat-more" aria-label="对话操作" @click="e => openChatMenu(e, c)"><Icon name="more-horizontal" /></button>
           </li>

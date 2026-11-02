@@ -30,16 +30,25 @@ function closingDollar(line, open) {
   return -1;
 }
 
-/* Split a single line into literal text and inline-math segments. Only `$…$` where the
-   opener is followed by non-space and the closer preceded by non-space (and not followed
-   by a digit) counts as math. */
+/* Split a single line into literal text and inline-math segments. Accepts `$…$`
+   and LaTeX-style `\(…\)` (models often emit the latter). Only `$…$` where the
+   opener is followed by non-space and the closer preceded by non-space (and not
+   followed by a digit) counts as math. */
 export function splitInlineMath(line) {
-  if (!line.includes('$')) return [{ text: line }];
+  if (!line.includes('$') && !line.includes('\\(')) return [{ text: line }];
   const parts = [];
   let buffer = '';
   let i = 0;
   while (i < line.length) {
     const ch = line[i];
+    if (ch === '\\' && line[i + 1] === '(') {
+      const close = findInlineParen(line, i + 2);
+      if (close > i + 2) {
+        if (buffer) { parts.push({ text: buffer }); buffer = ''; }
+        parts.push({ math: line.slice(i + 2, close) });
+        i = close + 2; continue;
+      }
+    }
     if (ch === '\\' && line[i + 1] === '$') { buffer += '$'; i += 2; continue; }
     if (ch === '\\') { buffer += line.slice(i, i + 2); i += 2; continue; }
     if (ch === '`') { // skip a code span verbatim
@@ -60,6 +69,18 @@ export function splitInlineMath(line) {
   }
   if (buffer) parts.push({ text: buffer });
   return parts;
+}
+
+// Index of the `\` in a closing `\)` at or after `from`, or -1.
+function findInlineParen(line, from) {
+  for (let i = from; i < line.length - 1; i += 1) {
+    if (line[i] === '`') return -1;
+    if (line[i] === '\\') {
+      if (line[i + 1] === ')') return i;
+      i += 1;
+    }
+  }
+  return -1;
 }
 
 /* Scan block lines, pulling out `$$ … $$` display math (on their own lines or inline).
@@ -86,6 +107,21 @@ export function extractDisplayMath(lines) {
         while (m < lines.length) {
           const t = lines[m].trim();
           if (t.endsWith('$$')) { if (t.length > 2) body.push(t.slice(0, -2)); closed = true; break; }
+          body.push(lines[m]); m += 1;
+        }
+        if (closed) { flush(); blocks.push({ type: 'math', tex: body.join('\n').trim() }); n = m; continue; }
+      }
+    }
+    // LaTeX display delimiters \[ … \] behave exactly like $$ … $$.
+    if (trimmed.startsWith('\\[')) {
+      const rest = trimmed.slice(2);
+      if (rest.endsWith('\\]') && rest.length > 2) { flush(); blocks.push({ type: 'math', tex: rest.slice(0, -2).trim() }); continue; }
+      if (rest === '' || !rest.includes('\\]')) {
+        const body = rest === '' ? [] : [rest];
+        let m = n + 1; let closed = false;
+        while (m < lines.length) {
+          const t = lines[m].trim();
+          if (t.endsWith('\\]')) { if (t.length > 2) body.push(t.slice(0, -2)); closed = true; break; }
           body.push(lines[m]); m += 1;
         }
         if (closed) { flush(); blocks.push({ type: 'math', tex: body.join('\n').trim() }); n = m; continue; }

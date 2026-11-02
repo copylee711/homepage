@@ -10,7 +10,7 @@ import { post } from '../services/api';
 const session = useSession();
 const ui = useUi();
 const title = computed(() => session.currentChat?.title || (session.canExecute ? '新任务' : 'Iris'));
-const subtitle = computed(() => session.busy ? '正在生成回复…' : session.currentChat?.archived ? '已归档' : !session.canExecute ? '暂无执行权限' : '');
+const subtitle = computed(() => session.busyHere ? '正在生成回复…' : session.currentChat?.archived ? '已归档' : !session.canExecute ? '暂无执行权限' : '');
 const chatMenu = ref<{ anchor: HTMLElement; items: MenuItem[] } | null>(null);
 
 const isEditing = ref(false);

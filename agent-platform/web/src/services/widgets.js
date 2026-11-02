@@ -17,9 +17,13 @@ export function widget(doc, html, label) {
   const wrap=doc.createElement('section');wrap.className='md-widget';wrap.dataset.widgetSource=html;
   const heading=doc.createElement('div');heading.className='md-widget-head';
   const title=doc.createElement('strong');title.textContent=widgetTitle(html, label);heading.append(title);
-  for(const [action,text]of [['restart','重新运行'],['pause','暂停组件']]){const button=doc.createElement('button');button.type='button';button.className='btn btn-quiet btn-sm';button.dataset.widgetAction=action;button.textContent=text;heading.append(button);}
+  // One action only: reload the widget. A pause toggle was noise the widget
+  // rarely needed, so it stays out of the card.
+  const button=doc.createElement('button');button.type='button';button.className='md-widget-refresh';button.dataset.widgetAction='restart';button.title='重新运行';button.setAttribute('aria-label','重新运行');
+  button.innerHTML='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>';
+  heading.append(button);
   const frame=doc.createElement('iframe');frame.title=title.textContent;frame.setAttribute('sandbox','allow-scripts');frame.setAttribute('referrerpolicy','no-referrer');
-  frame.dataset.widgetFrame='';frame.style.height='480px';
+  frame.dataset.widgetFrame='';frame.style.height='360px';
   // The widget document posts its own height so the card can grow to fit the
   // whole visual instead of trapping it behind an inner scrollbar.
   const onHeight=(event)=>{

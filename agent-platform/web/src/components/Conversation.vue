@@ -11,6 +11,7 @@ import { textContent } from '../services/format';
 import { useSession } from '../stores/session';
 
 const session = useSession();
+const live = computed(() => session.activeLive);
 const scroller = ref<HTMLElement | null>(null);
 const follow = ref(true);
 const showJump = ref(false);
@@ -39,24 +40,36 @@ function nearBottom() {
   const el = scroller.value; if (!el) return true;
   return el.scrollHeight - el.scrollTop - el.clientHeight < 24;
 }
+// True when the transcript actually overflows the viewport; without overflow the
+// jump button has nothing to jump to, so it must never appear.
+function scrollable() { const el = scroller.value; return !!el && el.scrollHeight - el.clientHeight > 24; }
 // Any upward intent detaches the auto-follow immediately, so streamed text can
-// never yank the reader back to the bottom mid-scroll.
-function leaveBottom() { if (follow.value) { follow.value = false; showJump.value = session.messages.length > 0; } }
+// never yank the reader back to the bottom mid-scroll. Over-scrolling at the top
+// of a short transcript is not intent: nothing moves, so no scroll event follows
+// to clear the jump button again.
+function leaveBottom() {
+  const el = scroller.value;
+  if (!follow.value || !el || !scrollable() || el.scrollTop <= 0) return;
+  follow.value = false; showJump.value = session.messages.length > 0;
+}
 function onWheel(event: WheelEvent) { if (event.deltaY < 0) leaveBottom(); }
 function onKeydown(event: KeyboardEvent) { if (['PageUp', 'ArrowUp', 'Home'].includes(event.key)) leaveBottom(); }
-function onScroll() { follow.value = nearBottom(); showJump.value = !follow.value && session.messages.length > 0; updateActiveTurn(); }
+function onScroll() { follow.value = nearBottom(); showJump.value = !follow.value && session.messages.length > 0 && scrollable(); updateActiveTurn(); }
 function toBottom(smooth = true) {
   const el = scroller.value; if (!el) return;
+  follow.value = true; showJump.value = false;
   el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
 }
 let followFrame = 0;
-function autoFollow() { if(followFrame)return; followFrame=requestAnimationFrame(()=>{followFrame=0;nextTick(() => { if (follow.value) toBottom(false); updateActiveTurn(); });}); }
+function autoFollow() { if(followFrame)return; followFrame=requestAnimationFrame(()=>{followFrame=0;nextTick(() => { if (!scrollable()) { follow.value = true; showJump.value = false; } if (follow.value) toBottom(false); updateActiveTurn(); });}); }
 onBeforeUnmount(()=>cancelAnimationFrame(followFrame));
 
+function onResize() { if (!scrollable()) showJump.value = false; else onScroll(); }
 watch(() => session.messages.length, autoFollow);
-watch(() => session.live && JSON.stringify(session.live.blocks.map((b: any) => b.text?.length || b.state)), autoFollow);
-watch(() => session.chatId, () => { follow.value = true; nextTick(() => toBottom(false)); });
-onMounted(() => nextTick(() => toBottom(false)));
+watch(() => live.value && JSON.stringify(live.value.blocks.map((b: any) => b.text?.length || b.state)), autoFollow);
+watch(() => session.chatId, () => { follow.value = true; showJump.value = false; nextTick(() => toBottom(false)); });
+onMounted(() => { nextTick(() => toBottom(false)); window.addEventListener('resize', onResize); });
+onBeforeUnmount(() => window.removeEventListener('resize', onResize));
 </script>
 
 <template>
@@ -67,13 +80,13 @@ onMounted(() => nextTick(() => toBottom(false)));
         <div v-if="session.loadingChat" class="conversation-state"><span class="spinner"></span><span>正在读取对话…</span></div>
         <Message v-for="(it, i) in display" :key="i" :message="it" :data-user-index="it.role==='user'?i:undefined" :class="{'is-jump-target':flashTurn===i}" />
         <!-- live streaming assistant -->
-        <article v-if="session.live" class="message message-assistant">
+        <article v-if="live" class="message message-assistant">
           <div class="message-avatar"><Icon name="iris" :size="18" /></div>
           <div class="message-inner">
             <div class="message-meta"><strong class="message-author">Iris</strong></div>
-            <div class="message-content"><BlockList :blocks="session.live.blocks" :streaming="true" /></div>
-            <UserQuestion v-for="question in session.live.questions" :key="question.id" :request="question" />
-            <template v-for="approval in session.live.approvals" :key="approval.id">
+            <div class="message-content"><BlockList :blocks="live.blocks" :streaming="true" /></div>
+            <UserQuestion v-for="question in live.questions" :key="question.id" :request="question" />
+            <template v-for="approval in live.approvals" :key="approval.id">
               <section v-if="approval.state === 'pending'" class="tool-approval" :aria-label="approval.title" aria-live="polite">
                 <div class="tool-approval-title">
                   <Icon name="shield" :size="14" />
@@ -92,11 +105,11 @@ onMounted(() => nextTick(() => toBottom(false)));
                 <span>{{ approval.state === 'allowed' ? '已允许执行本次操作' : '已拒绝执行本次操作' }} · {{ approval.title }}</span>
               </div>
             </template>
-            <div v-if="session.live.status || session.live.error || session.live.stopped" class="message-status" :class="{ 'is-error': session.live.error }">
-              <span v-if="session.live.spinner && !session.live.error && !session.live.stopped" class="working-dot"></span>
-              <span v-if="session.live.error" class="status-error">{{ session.live.error }}</span>
-              <span v-else-if="session.live.stopped">已停止生成</span>
-              <span v-else>{{ session.live.status }}</span>
+            <div v-if="live.status || live.error || live.stopped" class="message-status" :class="{ 'is-error': live.error }">
+              <span v-if="live.spinner && !live.error && !live.stopped" class="working-dot"></span>
+              <span v-if="live.error" class="status-error">{{ live.error }}</span>
+              <span v-else-if="live.stopped">已停止生成</span>
+              <span v-else>{{ live.status }}</span>
             </div>
           </div>
         </article>

@@ -74,11 +74,12 @@ function image(doc, raw, label) {
 }
 
 let activeFootnotes = null;
+let activeStreaming = false;
 export function renderMarkdown(value, doc = globalThis.document, options = {}) {
   const fragment = doc.createDocumentFragment();
   const raw = String(value ?? '').replace(/\r\n?/g, '\n');
   const prevCitations=activeCitations;activeCitations=new Map((options.citations||(options.sources?collectSources(raw):[])).map(s=>[s.url,s]));
-  const prevFootnotes = activeFootnotes,prevProject=activeProject;activeProject=options.project||'default';
+  const prevFootnotes = activeFootnotes,prevProject=activeProject,prevStreaming=activeStreaming;activeProject=options.project||'default';activeStreaming=options.streaming===true;
   activeFootnotes = extractFootnoteMap(raw);
   const cleaned = activeFootnotes.size ? raw.replace(FOOTNOTE_DEF, '') : raw;
   const lines = cleaned.split('\n');
@@ -98,7 +99,7 @@ export function renderMarkdown(value, doc = globalThis.document, options = {}) {
     const sources = collectSources(String(value ?? ''));
     if (sources.length) fragment.append(sourcesList(sources, doc));
   }
-  activeFootnotes = prevFootnotes;activeProject=prevProject;activeCitations=prevCitations;
+  activeFootnotes = prevFootnotes;activeProject=prevProject;activeStreaming=prevStreaming;activeCitations=prevCitations;
   return fragment;
 }
 
@@ -152,6 +153,16 @@ function sourcesList(sources, doc) {
   return wrap;
 }
 
+// Unfinished iris-widget fences are still streaming in: show a quiet placeholder
+// instead of dumping the half-written HTML source into the transcript.
+function widgetPending(doc) {
+  const wrap = node(doc, 'section', 'md-widget md-widget-pending');
+  const head = node(doc, 'div', 'md-widget-head');
+  head.append(node(doc, 'strong', null, '正在创建组件…'));
+  wrap.append(head);
+  return wrap;
+}
+
 function renderBlocks(lines, parent, doc) {
   let index = 0;
   while (index < lines.length) {
@@ -166,7 +177,14 @@ function renderBlocks(lines, parent, doc) {
       }
       const closed=index < lines.length;
       if (closed) index += 1;
-      if (/^iris-widget(\s|$)/.test(language) && closed && body.join('\n').length<=64000) { parent.append(widget(doc,body.join('\n'), info.slice('iris-widget'.length).trim())); continue; }
+      if (/^iris-widget(\s|$)/.test(language)) {
+        if (!closed) {
+          if (activeStreaming) { parent.append(widgetPending(doc)); continue; }
+        } else if (body.join('\n').length <= 64000) {
+          parent.append(widget(doc, body.join('\n'), info.slice('iris-widget'.length).trim()));
+          continue;
+        }
+      }
       parent.append(codeBlock(doc, body.join('\n'), language));
       continue;
     }
@@ -397,6 +415,16 @@ export function renderInline(value, parent, doc = globalThis.document, depth = 0
   let index = 0;
   while (index < value.length) {
     const character = value[index];
+    // LaTeX delimiters must be checked before Markdown backslash escapes, which
+    // would otherwise swallow \( as a literal paren.
+    if (value.startsWith('\\(', index)) {
+      const end = value.indexOf('\\)', index + 2);
+      if (end > index) { flush(); const span = node(doc, 'span', 'md-math-inline'); renderMathInto(span, value.slice(index + 2, end), false); parent.append(span); index = end + 2; continue; }
+    }
+    if (value.startsWith('\\[', index)) {
+      const end = value.indexOf('\\]', index + 2);
+      if (end > index) { flush(); const span = node(doc, 'span', 'md-math-inline'); renderMathInto(span, value.slice(index + 2, end), true); parent.append(span); index = end + 2; continue; }
+    }
     if (character === '\\' && index + 1 < value.length && /[\\`*_{}[\]()#+\-.!|~>]/.test(value[index + 1])) {
       buffer += value[index + 1]; index += 2; continue;
     }
@@ -421,7 +449,7 @@ export function renderInline(value, parent, doc = globalThis.document, depth = 0
         continue;
       }
     }
-    // Inline math $…$ / \(…\): opener followed by non-space, closer preceded by non-space, not a price.
+    // Inline math $…$: opener followed by non-space, closer preceded by non-space, not a price.
     if (character === '$' && value[index + 1] !== '$' && value[index + 1] !== undefined && !/\s/.test(value[index + 1])) {
       let end = -1;
       for (let i = index + 1; i < value.length; i += 1) {
@@ -434,10 +462,6 @@ export function renderInline(value, parent, doc = globalThis.document, depth = 0
         renderMathInto(span, value.slice(index + 1, end), false);
         parent.append(span); index = end + 1; continue;
       }
-    }
-    if (value.startsWith('\\(', index)) {
-      const end = value.indexOf('\\)', index + 2);
-      if (end > index) { flush(); const span = node(doc, 'span', 'md-math-inline'); renderMathInto(span, value.slice(index + 2, end), false); parent.append(span); index = end + 2; continue; }
     }
     if (character === '!' && value[index + 1] === '[') {
       const found = linkAt(value, index, true);
