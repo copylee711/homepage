@@ -30,7 +30,11 @@ function place() {
   const el = root.value; if (!el) return;
   const r = props.anchor.getBoundingClientRect();
   const w = el.offsetWidth || 200, h = el.offsetHeight || 240;
-  let left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8));
+  // Open to the right of the anchor when that fits; the anchored chip is often
+  // near the left edge, where right-aligning would push the menu off-screen.
+  let left = r.left;
+  if (left + w > window.innerWidth - 8) left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8));
+  left = Math.max(8, left);
   let top = props.up ? r.top - h - 6 : r.bottom + 6;
   if (!props.up && top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
   if (props.up && top < 8) top = Math.min(r.bottom + 6, window.innerHeight - h - 8);

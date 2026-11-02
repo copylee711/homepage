@@ -27,7 +27,7 @@ const navItems = computed(() => {
     { id: 'general', icon: 'settings', label: '通用', show: true },
     { id: 'capabilities', icon: 'package', label: '能力、MCP 与 Skill', show: session.canExecute },
     { id: 'memory', icon: 'edit', label: '人设与记忆', show: session.canExecute },
-    { id: 'background', icon: 'terminal', label: '后台任务', show: session.canExecute },
+    { id: 'background', icon: 'activity', label: '后台任务', show: session.canExecute },
     { id: 'search', icon: 'search', label: '联网搜索', show: session.canExecute },
     { id: 'providers', icon: 'sparkle', label: '模型与供应商', show: session.isAdmin },
     { id: 'grants', icon: 'users', label: '执行授权与配额', show: session.isAdmin },
@@ -323,6 +323,20 @@ async function remove(c: any) {
 .shortcut-list { display: flex; flex-direction: column; }
 .shortcut-desc { font-size: 13px; color: var(--text); }
 .shortcut-kbd { padding: 4px 9px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--surface-2); color: var(--text-2); font-family: var(--font-mono); font-size: 11.5px; }
+
+/* Shared rhythm for every settings panel, so recently added panels line up
+   with the older ones instead of inheriting browser defaults. */
+.settings-pad h3 { margin: 0 0 6px; font-size: 16px; font-weight: 640; line-height: 1.4; letter-spacing: -0.01em; }
+.settings-pad h4 { margin: 26px 0 10px; font-size: 13.5px; font-weight: 640; line-height: 1.5; }
+.settings-pad .question-hint { margin: 0 0 10px; font-size: 12px; line-height: 1.65; color: var(--muted); }
+.settings-pad .question-hint:last-child { margin-bottom: 0; }
+.settings-pad .background-actions { margin-top: 10px; }
+.settings-pad section { min-width: 0; }
+.settings-pad input:not([type='checkbox']):not([type='radio']),
+.settings-pad textarea,
+.settings-pad .search-test-input input,
+.settings-pad .search-key input { font-size: 13px; color: var(--text); }
+.settings-pad textarea { line-height: 1.65; }
 
 @media (max-width: 720px) {
   .settings-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }

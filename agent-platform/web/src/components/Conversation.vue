@@ -6,6 +6,7 @@ import BlockList from './BlockList.vue';
 import UserQuestion from './UserQuestion.vue';
 import { buildTranscript } from '../services/transcript.mjs';
 import WelcomeHero from './WelcomeHero.vue';
+import TurnNavigator from './TurnNavigator.vue';
 import { textContent } from '../services/format';
 import { useSession } from '../stores/session';
 
@@ -36,15 +37,20 @@ onBeforeUnmount(()=>{if(flashTimer)clearTimeout(flashTimer);});
 
 function nearBottom() {
   const el = scroller.value; if (!el) return true;
-  return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 24;
 }
+// Any upward intent detaches the auto-follow immediately, so streamed text can
+// never yank the reader back to the bottom mid-scroll.
+function leaveBottom() { if (follow.value) { follow.value = false; showJump.value = session.messages.length > 0; } }
+function onWheel(event: WheelEvent) { if (event.deltaY < 0) leaveBottom(); }
+function onKeydown(event: KeyboardEvent) { if (['PageUp', 'ArrowUp', 'Home'].includes(event.key)) leaveBottom(); }
 function onScroll() { follow.value = nearBottom(); showJump.value = !follow.value && session.messages.length > 0; updateActiveTurn(); }
 function toBottom(smooth = true) {
   const el = scroller.value; if (!el) return;
   el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
 }
 let followFrame = 0;
-function autoFollow() { if(followFrame)return; followFrame=requestAnimationFrame(()=>{followFrame=0;nextTick(() => { if (follow.value) toBottom(false); });}); }
+function autoFollow() { if(followFrame)return; followFrame=requestAnimationFrame(()=>{followFrame=0;nextTick(() => { if (follow.value) toBottom(false); updateActiveTurn(); });}); }
 onBeforeUnmount(()=>cancelAnimationFrame(followFrame));
 
 watch(() => session.messages.length, autoFollow);
@@ -55,7 +61,7 @@ onMounted(() => nextTick(() => toBottom(false)));
 
 <template>
   <div class="stage">
-    <div class="conversation" :class="{ 'is-empty': session.isEmpty && !session.loadingChat, 'is-unauthorized': session.booted && !session.canExecute }" ref="scroller" tabindex="0" aria-label="对话内容" @scroll.passive="onScroll">
+    <div class="conversation" :class="{ 'is-empty': session.isEmpty && !session.loadingChat, 'is-unauthorized': session.booted && !session.canExecute }" ref="scroller" tabindex="0" aria-label="对话内容" @scroll.passive="onScroll" @wheel.passive="onWheel" @keydown="onKeydown" @touchmove.passive="leaveBottom">
       <WelcomeHero v-if="session.isEmpty && !session.loadingChat" />
       <div v-else class="messages">
         <div v-if="session.loadingChat" class="conversation-state"><span class="spinner"></span><span>正在读取对话…</span></div>
@@ -96,6 +102,7 @@ onMounted(() => nextTick(() => toBottom(false)));
         </article>
       </div>
     </div>
+    <TurnNavigator :items="userTurns" :active="activeTurn" @jump="jumpToTurn" />
     <button v-if="showJump" type="button" class="jump-latest" aria-label="回到最新" title="回到最新" @click="toBottom()"><Icon name="arrow-down" :size="16" /></button>
   </div>
 </template>

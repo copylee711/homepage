@@ -159,14 +159,14 @@ function renderBlocks(lines, parent, doc) {
     if (!line.trim()) { index += 1; continue; }
     const fence = line.match(FENCE);
     if (fence) {
-      const marker = fence[1], language = (fence[2] || '').toLowerCase(), body = [];
+      const marker = fence[1], info = (fence[2] || '').trim(), language = info.toLowerCase(), body = [];
       index += 1;
       while (index < lines.length && !new RegExp('^ {0,3}' + marker[0] + '{' + marker.length + ',}[ \\t]*$').test(lines[index])) {
         body.push(lines[index]); index += 1;
       }
       const closed=index < lines.length;
       if (closed) index += 1;
-      if (language==='iris-widget' && closed && body.join('\n').length<=64000) { parent.append(widget(doc,body.join('\n'))); continue; }
+      if (/^iris-widget(\s|$)/.test(language) && closed && body.join('\n').length<=64000) { parent.append(widget(doc,body.join('\n'), info.slice('iris-widget'.length).trim())); continue; }
       parent.append(codeBlock(doc, body.join('\n'), language));
       continue;
     }

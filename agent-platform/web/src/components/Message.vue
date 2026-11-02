@@ -14,6 +14,7 @@ const session = useSession();
 const isUser = computed(() => props.message.role === 'user');
 const userRawText = computed(() => textContent(props.message.content));
 const blocks = computed(() => normalizeBlocks(props.message.content, props.toolResults));
+const turnState = computed(() => props.message._vm || null);
 const time = computed(() => formatClock(props.message.timestamp || Date.now()));
 
 const durationText = computed(() => {
@@ -286,6 +287,9 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
       </div>
       <div v-if="!isUser" class="assistant-body">
         <div ref="contentRef" class="message-content"><BlockList :blocks="blocks" /></div>
+        <p v-if="turnState?.error" class="assistant-note is-error" role="alert">{{ turnState.error }}</p>
+        <p v-else-if="!blocks.length && turnState?.stopped" class="assistant-note">已停止生成</p>
+        <p v-else-if="!blocks.length" class="assistant-note">这次没有收到模型回复。如果发送了图片或附件，可能是当前模型不支持这类输入，换一个模型或补充文字说明后再试。</p>
         <footer class="assistant-footer">
           <div class="assistant-actions">
             <button
@@ -330,10 +334,8 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
             </button>
           </div>
           <div class="assistant-meta-time">
-            <span v-if="durationText" class="assistant-duration" :title="'本轮耗时 ' + durationText">
-              <Icon name="clock" :size="11" />
-              <span>耗时 {{ durationText }}</span>
-            </span>
+            <span v-if="durationText" class="assistant-duration" :title="'本轮耗时 ' + durationText">耗时 {{ durationText }}</span>
+            <span class="assistant-meta-dot" aria-hidden="true">·</span>
             <time class="assistant-time" :title="new Date(props.message.timestamp || Date.now()).toLocaleString()">
               {{ time }}
             </time>
@@ -432,26 +434,69 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
 .user-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .user-chip-dir { color: var(--muted); font-size: 10px; opacity: 0.75; }
 
+/* Assistant footer: quiet action row plus a single muted meta line */
+.assistant-note { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+.assistant-note.is-error { color: var(--danger); }
+.assistant-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  min-height: 26px;
+}
+.assistant-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: -7px;
+  opacity: 0;
+  transition: opacity var(--fast);
+}
+.message:hover .assistant-actions,
+.message:focus-within .assistant-actions {
+  opacity: 1;
+}
+.msg-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  transition: background-color var(--fast), color var(--fast);
+}
+.msg-action-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 6.5%, transparent);
+  color: var(--text);
+}
+.msg-action-btn:disabled {
+  opacity: 0.35;
+}
+.msg-action-label {
+  color: var(--ok);
+  font-size: 11px;
+}
+
 .assistant-meta-time {
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  user-select: none;
-}
-.assistant-duration {
-  display: inline-flex;
-  align-items: center;
-  gap: 3.5px;
-  color: var(--muted);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  opacity: 0.85;
-}
-.assistant-time {
-  flex: none;
+  gap: 6px;
   color: var(--faint);
   font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+.assistant-duration { white-space: nowrap; }
+.assistant-meta-dot { opacity: 0.6; }
+.assistant-time {
+  flex: none;
+  color: inherit;
+  font: inherit;
   font-variant-numeric: tabular-nums;
   user-select: none;
 }

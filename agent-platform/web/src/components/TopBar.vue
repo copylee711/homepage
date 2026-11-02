@@ -95,7 +95,7 @@ function toggleWorkspace() {
       <p v-if="subtitle">{{ subtitle }}</p>
     </div>
     <div class="topbar-actions">
-      <button v-if="session.canExecute" class="icon-button" aria-label="后台任务" title="后台任务" @click="ui.openSettings('background')"><Icon name="terminal" /></button>
+      <button v-if="session.canExecute" class="icon-button" aria-label="后台任务" title="后台任务" @click="ui.openSettings('background')"><Icon name="activity" /></button>
       <button v-if="session.canExecute" class="icon-button" aria-label="联网搜索" title="联网搜索" @click="ui.openSettings('search')"><Icon name="globe" /></button>
       <button v-if="session.canExecute" class="icon-button" :disabled="!session.currentChat" aria-label="对话操作" title="对话操作" @click="openChatMenu"><Icon name="more-horizontal" /></button>
       <button class="icon-button theme-btn" :aria-label="ui.theme === 'dark' ? '切换到浅色' : '切换到深色'" :title="ui.theme === 'dark' ? '浅色' : '深色'" @click="ui.toggleTheme($event)">

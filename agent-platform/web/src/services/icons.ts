@@ -41,6 +41,7 @@ export const ICONS: Record<string, string[]> = {
   'alert-triangle': ['M12 3.5L22 20H2L12 3.5z', 'M12 9v5', 'M12 17h.01'],
   info: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 11v5', 'M12 7.5h.01'],
   clock: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 7.5V12l3 2'],
+  activity: ['M3 12h4l2.6 6.4L14 5.6l2.4 6.4H21'],
   calendar: ['M4 5h16v15H4z', 'M16 3v4', 'M8 3v4', 'M4 9h16'],
   square: ['M7 7h10v10H7z'],
   refresh: ['M20 7v5h-5', 'M4 17v-5h5', 'M6.1 9a7 7 0 0 1 11.2-2L20 12', 'M17.9 15a7 7 0 0 1-11.2 2L4 12'],
