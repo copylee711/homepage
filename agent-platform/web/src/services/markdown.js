@@ -2,6 +2,7 @@
 
 import { splitInlineMath, extractDisplayMath, renderMathInto } from './math.js';
 import { highlightInto } from './highlight.js';
+import { widget } from './widgets.js';
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*([A-Za-z0-9_+#.-]*)[^`~]*$/;
 const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*)$/;
@@ -57,11 +58,27 @@ function link(doc, href, label, className = '') {
 }
 function text(doc, value) { return doc.createTextNode(String(value)); }
 
+let activeProject='default';
+export function imageUrl(raw,project=activeProject) {
+  if (isWsFilePath(raw)) return '/api/image?path='+encodeURIComponent(raw.startsWith('/workspace/')||raw.startsWith('workspace/')?raw.replace(/^\/?workspace\//,''):project+'/'+raw);
+  const safe=safeHref(raw);if(!safe)return null;
+  const u=new URL(safe);if(!['https:','http:'].includes(u.protocol)||u.hostname==='localhost'||u.hostname.endsWith('.local')||u.hostname.endsWith('.internal')||/^[\d.]+$/.test(u.hostname)||u.hostname.includes(':'))return null;
+  return '/api/image?url='+encodeURIComponent(safe);
+}
+function image(doc, raw, label) {
+  const src=imageUrl(raw);if(!src)return node(doc,'span','md-blocked-link',label||'图片地址不可用');
+  const anchor=node(doc,'a','md-image',null);anchor.href=src;anchor.target='_blank';anchor.rel='noopener noreferrer';anchor.dataset.imagePreview=src;anchor.setAttribute('aria-label','放大图片：'+(label||'图片'));
+  const img=node(doc,'img',null,null);img.alt=label||'图片';img.loading='lazy';img.decoding='async';img.referrerPolicy='no-referrer';img.src=src;
+  img.addEventListener('error',()=>{anchor.classList.add('is-failed');anchor.replaceChildren(node(doc,'span',null,'图片加载失败 · '+(label||'点击重试查看')));},{once:true});
+  anchor.append(img);return anchor;
+}
+
 let activeFootnotes = null;
 export function renderMarkdown(value, doc = globalThis.document, options = {}) {
   const fragment = doc.createDocumentFragment();
   const raw = String(value ?? '').replace(/\r\n?/g, '\n');
-  const prevFootnotes = activeFootnotes;
+  const prevCitations=activeCitations;activeCitations=new Map((options.citations||(options.sources?collectSources(raw):[])).map(s=>[s.url,s]));
+  const prevFootnotes = activeFootnotes,prevProject=activeProject;activeProject=options.project||'default';
   activeFootnotes = extractFootnoteMap(raw);
   const cleaned = activeFootnotes.size ? raw.replace(FOOTNOTE_DEF, '') : raw;
   const lines = cleaned.split('\n');
@@ -81,7 +98,7 @@ export function renderMarkdown(value, doc = globalThis.document, options = {}) {
     const sources = collectSources(String(value ?? ''));
     if (sources.length) fragment.append(sourcesList(sources, doc));
   }
-  activeFootnotes = prevFootnotes;
+  activeFootnotes = prevFootnotes;activeProject=prevProject;activeCitations=prevCitations;
   return fragment;
 }
 
@@ -97,20 +114,28 @@ function extractFootnoteMap(rawText) {
   }
   return map;
 }
-export function collectSources(text) {
-  const byUrl = new Map();
-  const str = String(text ?? '');
-  for (const match of str.matchAll(CITATION)) {
-    const [, label, url, title] = match;
-    const safe = safeHref(url);
-    if (!safe) continue;
-    if (!byUrl.has(safe)) byUrl.set(safe, { label, url: safe, title: title || '', host: hostOf(safe) });
+export function collectSources(text, metadata = []) {
+  const byUrl=new Map(),used=new Set();let next=1;
+  const str=String(text??'').replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[ \t]*$/gm,'').replace(/`[^`\n]*`/g,'');
+  const footnotes=extractFootnoteMap(str),meta=new Map(metadata.map(item=>[safeHref(item.url),item]));
+  function add(url,label,title){const safe=safeHref(url);if(!safe||!/^https?:/.test(safe))return;
+    if(byUrl.has(safe))return;let number=/^\d{1,3}$/.test(label)?label:'';while(used.has(String(next)))next++;if(!number||used.has(number))number=String(next++);used.add(number);
+    const extra=meta.get(safe)||{};byUrl.set(safe,{...extra,label:number,url:safe,title:extra.title||title||(!/^\d+$/.test(label)?label:'')||hostOf(safe),host:hostOf(safe)});
   }
-  for (const item of extractFootnoteMap(str).values()) {
-    if (!byUrl.has(item.url)) byUrl.set(item.url, item);
+  for(let i=0;i<str.length;i++){
+    if(str[i]==='!'&&str[i+1]==='['){const image=linkAt(str,i,true);if(image)i=image.end-1;continue;}
+    if(str[i]!=='[')continue;const found=linkAt(str,i,false);
+    if(found){if(!/^(?:下载|download|打开工作区)/i.test(found.label))add(found.href,found.label.replace(/[\[\]^]/g,''),found.title);i=found.end-1;continue;}
+    const match=str.slice(i).match(/^\[\^?(\d{1,3})\]/);if(match&&footnotes.has(match[1])){const item=footnotes.get(match[1]);add(item.url,item.label,item.title);}
   }
   return [...byUrl.values()];
 }
+export function citationBadge(doc,source){
+  const badge=link(doc,source.url,source.label,'md-citation');badge.setAttribute('aria-label','引用 '+source.label+'：'+(source.title||source.host));badge.title=source.title||source.host;
+  if(source.label.length===1)badge.classList.add('is-single');
+  const popup=node(doc,'span','md-citation-preview');popup.append(node(doc,'span','md-citation-host',source.host),node(doc,'strong',null,source.title||source.host));if(source.snippet)popup.append(node(doc,'span','md-citation-snippet',String(source.snippet).slice(0,240)));badge.append(popup);return badge;
+}
+let activeCitations=null;
 function sourcesList(sources, doc) {
   const wrap = node(doc, 'div', 'md-sources');
   wrap.append(node(doc, 'span', 'md-sources-title', '来源'));
@@ -139,7 +164,9 @@ function renderBlocks(lines, parent, doc) {
       while (index < lines.length && !new RegExp('^ {0,3}' + marker[0] + '{' + marker.length + ',}[ \\t]*$').test(lines[index])) {
         body.push(lines[index]); index += 1;
       }
-      if (index < lines.length) index += 1;
+      const closed=index < lines.length;
+      if (closed) index += 1;
+      if (language==='iris-widget' && closed && body.join('\n').length<=64000) { parent.append(widget(doc,body.join('\n'))); continue; }
       parent.append(codeBlock(doc, body.join('\n'), language));
       continue;
     }
@@ -416,7 +443,7 @@ export function renderInline(value, parent, doc = globalThis.document, depth = 0
       const found = linkAt(value, index, true);
       if (found) {
         flush();
-        parent.append(link(doc, found.href, '图片：' + (found.label || '预览'), 'md-image-link'));
+        parent.append(image(doc, found.href, found.label));
         index = found.end; continue;
       }
     }
@@ -425,11 +452,9 @@ export function renderInline(value, parent, doc = globalThis.document, depth = 0
       if (found) {
         flush();
         const citeMatch = found.label.trim().match(/^\[?\^?(\d{1,3})\]?$/);
-        if (citeMatch && safeHref(found.href)) {
-          const badge = link(doc, found.href, citeMatch[1], 'md-citation');
-          badge.setAttribute('title', found.title || hostOf(found.href));
-          if (citeMatch[1].length === 1) badge.classList.add('is-single');
-          parent.append(badge);
+        const source=activeCitations?.get(safeHref(found.href));
+        if(source || (citeMatch && safeHref(found.href))){
+          parent.append(citationBadge(doc,source||{label:citeMatch[1],url:found.href,title:found.title||hostOf(found.href),host:hostOf(found.href)}));
         } else {
           const anchor = link(doc, found.href, '', 'md-link');
           if (found.title) anchor.setAttribute('title', found.title);
@@ -442,10 +467,7 @@ export function renderInline(value, parent, doc = globalThis.document, depth = 0
       if (fnMatch && activeFootnotes && activeFootnotes.has(fnMatch[1])) {
         flush();
         const fn = activeFootnotes.get(fnMatch[1]);
-        const badge = link(doc, fn.url, fn.label, 'md-citation');
-        badge.setAttribute('title', fn.title || fn.host);
-        if (fn.label.length === 1) badge.classList.add('is-single');
-        parent.append(badge);
+        parent.append(citationBadge(doc,activeCitations?.get(fn.url)||fn));
         index += fnMatch[0].length; continue;
       }
     }

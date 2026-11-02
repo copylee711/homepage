@@ -2,6 +2,7 @@ import { FeatureStore, publicFeatures, mcpToolName } from './features.mjs';
 import { McpConnections } from './mcp.mjs';
 import { MemoryStore, memoryContext } from './memory.mjs';
 import { requiresApproval } from './execution-policy.mjs';
+import { streamEvent } from './stream-wire.mjs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
@@ -40,12 +41,10 @@ class Pi {
   constructor(user, thread) {
     this.runtimeToken = randomUUID(); this.user = user; this.thread = thread; this.key = user + ':' + thread; this.pending = new Map(); this.busy = false; this.buffer = '';
     const reply = event => { if (this.proc?.stdin.writable) this.proc.stdin.write(JSON.stringify(event) + '\n'); };
-    const emit = event => { if (this.output && !this.output.destroyed) this.output.write(this.mask(JSON.stringify(event)) + '\n'); };
+    const emit = event => { if (this.output && !this.output.destroyed) this.output.write(this.mask(JSON.stringify(streamEvent(event))) + '\n'); };
     this.questions = new UserQuestions(reply, emit);
     this.mcp = new McpConnections(value => sandboxTool(this.lease, value, 45000));
-    this.approvals = new ToolApprovals(event => {
-      if (this.proc?.stdin.writable) this.proc.stdin.write(JSON.stringify(event) + '\n');
-    }, event => { if (this.output && !this.output.destroyed) this.output.write(this.mask(JSON.stringify(event)) + '\n'); });
+    this.approvals = new ToolApprovals(reply, emit);
   }
   async start() {
     // Never mount or load instructions/extensions from an untrusted tool workspace.
@@ -93,7 +92,11 @@ class Pi {
           if (wait) { this.pending.delete(event.id); clearTimeout(wait.timer); event.success ? wait.resolve(event.data) : wait.reject(Object.assign(new Error(event.error || 'Pi 请求失败'), { status: 502 })); }
         }
         if (this.output) {
-          this.output.write(this.mask(JSON.stringify(event)) + '\n');
+          // Delta events contain a growing full-message snapshot in the SDK.
+          // The browser reducer only needs the delta: avoid quadratic wire traffic.
+          const wire = event.type === 'message_update' ? {type:event.type,assistantMessageEvent:{...event.assistantMessageEvent}} : event;
+          if(wire.type === 'message_update') { delete wire.assistantMessageEvent.partial; delete wire.assistantMessageEvent.message; }
+          this.output.write(this.mask(JSON.stringify(wire)) + '\n');
           if (this.output.writableLength > 2 * 1024 * 1024) this.output.destroy();
         }
         if (event.type === 'agent_settled') this.finish();
@@ -270,7 +273,7 @@ export const server = createServer(async (req, res) => {
       if (req.url === '/runtime/search') {
         const input = await body(req), config = await searchSettings.get(pi.user);
         if (!config.enabled) fail(403, '联网搜索已在设置中关闭');
-        return json(res, 200, await sandboxTool(pi.lease, { op: 'web-search', ...config, query: input.query, count: input.count ?? config.count }, 45000));
+        return json(res, 200, await sandboxTool(pi.lease, { op: 'web-search', ...config, engine:input.category==='image'?config.imageEngine:config.engine, category: input.category === 'image' ? 'image' : 'web', query: input.query, count: input.count ?? config.count }, 45000));
       }
       fail(404, '接口不存在');
     }
@@ -278,6 +281,12 @@ export const server = createServer(async (req, res) => {
     if (req.method !== 'POST') fail(405, '请求方法不支持');
     const input = await body(req, req.url === '/files/upload' ? 21 * 1024 * 1024 : req.url === '/features/save' ? 256 * 1024 : req.url === '/search/settings/save' ? 512 * 1024 : 65536);
     if (!/^[a-f0-9]{64}$/.test(input.user || '')) fail(422, '用户标识无效');
+    if (req.url === '/image') {
+      if(input.path){const value=await downloadWorkspace(input.user,input.path);const data=Buffer.from(value.data,'base64');const mime=data.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))?'image/png':data[0]===255&&data[1]===216?'image/jpeg':data.subarray(0,3).toString()==='GIF'?'image/gif':data.subarray(0,4).toString()==='RIFF'&&data.subarray(8,12).toString()==='WEBP'?'image/webp':'';if(!mime||data.length>5*1024*1024)fail(415,'图片格式不支持或超过 5 MiB');return json(res,200,{data:value.data,mime});}
+      const lease=(await sandbox('/lease',input.user)).token;
+      try { return json(res,200,await sandboxTool(lease,{op:'image-fetch',url:input.url},20000)); }
+      catch { return json(res,200,await sandboxTool(lease,{op:'image-fetch',url:input.url,useProxy:false},20000)); }
+    }
     if (req.url === '/features') return json(res, 200, publicFeatures(await features.get(input.user)));
     if (req.url === '/features/save') {
       assertUserIdle(input.user); const result = await features.save(input.user, input.config); forgetIdleSessions(input.user); return json(res, 200, result);
@@ -335,7 +344,7 @@ export const server = createServer(async (req, res) => {
       const config = await searchSettings.get(input.user);
       if (!config.enabled) fail(403, '联网搜索已关闭');
       const lease = (await sandbox('/lease', input.user)).token;
-      return json(res, 200, await sandboxTool(lease, { op: 'web-search', ...config, query: input.query }, 45000));
+      return json(res, 200, await sandboxTool(lease, { op: 'web-search', ...config, engine:input.category==='image'?config.imageEngine:config.engine, category:input.category === 'image'?'image':'web', query: input.query, ...(input.source?{sources:config.sources.filter(s=>s.id===input.source).map(s=>({...s,enabled:true}))}:{}) }, 45000));
     }
     if (req.url === '/providers') return json(res, 200, await publicProviders());
     if (req.url === '/greeting') {

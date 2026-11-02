@@ -93,10 +93,11 @@ def run_tool(user, value, lease):
             if value['op'] == 'background-status': return backgrounds.logs(user, value['id']) if value.get('id') else backgrounds.list(user)
             if value['op'] == 'background-stop': return backgrounds.stop(user, value.get('id'))
             raise ValueError('后台操作无效')
-    if value.get("op") in {"web-fetch", "web-search", "mcp-request"}:
+    if value.get("op") in {"web-fetch", "web-search", "mcp-request", "image-fetch"}:
         if not web_slots.acquire(blocking=False):
             raise ValueError("联网请求繁忙，请稍后重试")
         try:
+            if value.get('op') == 'image-fetch': return web_access.fetch_public(value.get('url'),image=True,use_proxy=value.get('useProxy',True))
             if value.get('op') == 'mcp-request': return web_search.mcp_request(value, web_access.fetch_public)
             if value.get('op') == 'web-search': return web_search.search_public(value, web_access.fetch_public)
             return web_access.fetch_public(value.get("url"))

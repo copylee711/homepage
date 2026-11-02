@@ -44,7 +44,9 @@ function toBottom(smooth = true) {
   const el = scroller.value; if (!el) return;
   el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
 }
-function autoFollow() { nextTick(() => { if (follow.value) toBottom(false); updateActiveTurn(); }); }
+let followFrame = 0;
+function autoFollow() { if(followFrame)return; followFrame=requestAnimationFrame(()=>{followFrame=0;nextTick(() => { if (follow.value) toBottom(false); });}); }
+onBeforeUnmount(()=>cancelAnimationFrame(followFrame));
 
 watch(() => session.messages.length, autoFollow);
 watch(() => session.live && JSON.stringify(session.live.blocks.map((b: any) => b.text?.length || b.state)), autoFollow);

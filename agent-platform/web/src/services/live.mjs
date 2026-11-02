@@ -27,7 +27,7 @@ export function handleEvent(event, live) {
     vm.status = event.reason || '审批已处理';
     return;
   }
-  if (event.type === 'message_start' && event.message?.role === 'user') { vm.blocks.push({ type: 'text', text: '**补充指令**\n\n' + toolText(event.message.content) }); return; }
+  if (event.type === 'message_start' && event.message?.role === 'user') return;
   if (event.type === 'message_start' && event.message?.role === 'assistant') { vm.messageSequence = (vm.messageSequence || 0) + 1; return; }
   const ensureBlock = (index, type) => {
     let b = vm.blocks.find((x) => x.index === index && x.sequence === (vm.messageSequence || 0));

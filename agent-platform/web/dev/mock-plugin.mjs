@@ -1,3 +1,4 @@
+import { widgetDocument,WIDGET_CSP } from '../../widget-document.mjs';
 import { BUILTIN_SKILLS, publicFeatures } from '../../features.mjs';
 import { normalizeSearch, publicSearch } from '../../search.mjs';
 // Vite dev-only middleware that emulates the gateway API so the Iris console can be
@@ -227,6 +228,8 @@ export function devMock() {
         if(path==='/api/features/mcp/test'){const server=featureConfig.mcpServers.find(s=>s.id===body.id);if(server)server.tools=[{name:'echo',inputSchema:{type:'object'}}];featureConfig.revision++;return send(publicFeatures(featureConfig));}
         if(path==='/api/context/stats')return send({tokens:{total:1024},totalMessages:8,toolCalls:2,contextUsage:{tokens:1024,contextWindow:128000,percent:.8}});
         if(path==='/api/context/compact')return send({ok:true,skipped:true,reason:'当前上下文较短，暂不需要压缩'});
+        if(path==='/api/widgets'){globalThis.__irisQaWidgets ||= new Map();const id=String(globalThis.__irisQaWidgets.size);globalThis.__irisQaWidgets.set(id,body.html);return send({url:'/api/widget-document?id='+id});}
+        if(path==='/api/widget-document'){res.setHeader('Content-Type','text/html; charset=utf-8');res.setHeader('Content-Security-Policy',WIDGET_CSP);res.end(widgetDocument(globalThis.__irisQaWidgets?.get(q.get('id'))||''));return;}
         if (path === '/api/search/settings') return send(publicSearch(searchConfig));
         if (path === '/api/search/settings/save') { searchConfig=normalizeSearch(body.config,searchConfig);return send(publicSearch(searchConfig)); }
         if (path === '/api/search/test') return send({engine:'示例来源',results:[{title:'Python 官方文档',url:'https://docs.python.org/3/',snippet:'开发模式搜索结果'}]});

@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { body, equal, fail, json, modelLabel, required } from './shared.mjs';
+import { widgetDocument, WIDGET_CSP } from './widget-document.mjs';
+const widgets = new Map();
 
 const publicURL = new URL(required('PUBLIC_URL')).origin;
 const homepage = new URL(required('HOMEPAGE_URL')).origin;
@@ -273,6 +275,15 @@ export const server = createServer(async (req, res) => {
       if (url.pathname === '/api/greeting' && req.method === 'GET') {
         const response = await runner('/greeting', auth.user.id, {}); return json(res, 200, await response.json());
       }
+      if (url.pathname === '/api/widget-document' && req.method === 'GET') {
+        const item=widgets.get(url.searchParams.get('id'));if(!item||item.user!==auth.user.id||item.expires<Date.now())fail(404,'组件已过期，请重新运行');
+        res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':WIDGET_CSP,'X-Frame-Options':'SAMEORIGIN'});return res.end(widgetDocument(item.html));
+      }
+      if (url.pathname === '/api/image' && req.method === 'GET') {
+        const response=await runner('/image',auth.user.id,{url:url.searchParams.get('url'),path:url.searchParams.get('path')},AbortSignal.timeout(45000));
+        const value=await response.json();if(!['image/png','image/jpeg','image/gif','image/webp','image/svg+xml'].includes(value.mime))fail(415,'图片格式不支持');
+        res.writeHead(200,{'Content-Type':value.mime,'Cache-Control':'private, max-age=300','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; sandbox"});return res.end(Buffer.from(value.data,'base64'));
+      }
       if (url.pathname === '/api/search/settings' && req.method === 'GET') {
         const response = await runner('/search/settings', auth.user.id, {}); return json(res, 200, await response.json());
       }
@@ -293,6 +304,15 @@ export const server = createServer(async (req, res) => {
       }
       if (req.method !== 'POST') fail(405, '请求方法不支持');
       writeAccess(req, auth);
+      if(url.pathname==='/api/widgets'){
+        const input=await body(req,128*1024);if(typeof input.html!=='string'||Buffer.byteLength(input.html)>64000)fail(422,'组件内容最多 64 KiB');
+        const id=createHmac('sha256',secret).update(auth.user.id+'\0'+input.html).digest('hex');
+        for(const [key,item]of widgets)if(item.expires<Date.now())widgets.delete(key);
+        widgets.delete(id);widgets.set(id,{user:auth.user.id,html:input.html,expires:Date.now()+3600000});
+        const own=[...widgets].filter(([,item])=>item.user===auth.user.id);while(own.length>16)widgets.delete(own.shift()[0]);
+        while(widgets.size>128)widgets.delete(widgets.keys().next().value);
+        return json(res,200,{url:'/api/widget-document?id='+id});
+      }
       if (url.pathname === '/api/files/upload') {
         const input = await body(req, 21 * 1024 * 1024);
         if (typeof input.path !== 'string' || !input.path || input.path.length > 1024 || /[\u0000\r\n]/.test(input.path)) fail(422, '工作区路径无效');
@@ -323,7 +343,7 @@ export const server = createServer(async (req, res) => {
         const response = await runner('/background/stop', auth.user.id, { id: input.id }); return json(res, 200, await response.json());
       }
       if (['/api/questions/answer', '/api/steer', '/api/search/settings/save', '/api/search/test'].includes(url.pathname)) {
-        const response = await runner(url.pathname.replace('/api', ''), auth.user.id, { thread: input.thread, id: input.id, answer: input.answer, message: input.message, config: input.config, query: input.query }, AbortSignal.timeout(55000));
+          const response = await runner(url.pathname.replace('/api', ''), auth.user.id, { thread: input.thread, id: input.id, answer: input.answer, message: input.message, config: input.config, query: input.query, category:input.category,source:input.source }, AbortSignal.timeout(55000));
         return json(res, 200, await response.json());
       }
       if (url.pathname === '/api/approvals/resolve') {

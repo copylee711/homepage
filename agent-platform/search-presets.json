@@ -1,0 +1,914 @@
+[
+  {
+    "id": "baidu",
+    "name": "百度",
+    "kind": "baidu",
+    "category": "web",
+    "enabled": true,
+    "useProxy": false
+  },
+  {
+    "id": "bing",
+    "name": "Bing",
+    "kind": "bing",
+    "category": "web",
+    "enabled": true,
+    "useProxy": false
+  },
+  {
+    "id": "duckduckgo",
+    "name": "DuckDuckGo HTML",
+    "kind": "duckduckgo",
+    "category": "web",
+    "enabled": true,
+    "useProxy": false
+  },
+  {
+    "id": "ddg-lite",
+    "name": "DuckDuckGo Lite",
+    "kind": "ddg-lite",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true
+  },
+  {
+    "id": "exa-free",
+    "name": "Exa · 公共 MCP",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://mcp.exa.ai/mcp",
+    "method": "POST",
+    "auth": "none",
+    "bodyTemplate": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "tools/call",
+      "params": {
+        "name": "web_search_exa",
+        "arguments": {
+          "query": "{{query}}",
+          "numResults": "{{count}}"
+        }
+      }
+    },
+    "format": "auto",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "anysearch",
+    "name": "AnySearch",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://api.anysearch.com/v1/search",
+    "method": "POST",
+    "auth": "optional-bearer",
+    "bodyTemplate": {
+      "query": "{{query}}",
+      "max_results": "{{count}}"
+    },
+    "format": "auto",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "tavily",
+    "name": "Tavily",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://api.tavily.com/search",
+    "method": "POST",
+    "auth": "optional-bearer",
+    "bodyTemplate": {
+      "query": "{{query}}",
+      "max_results": "{{count}}",
+      "search_depth": "basic"
+    },
+    "format": "mapped",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "content"
+    },
+    "headers": {
+      "x-tavily-access-mode": "keyless"
+    }
+  },
+  {
+    "id": "keenable-free",
+    "name": "Keenable · 公共 MCP",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://api.keenable.ai/mcp",
+    "method": "POST",
+    "auth": "none",
+    "bodyTemplate": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "tools/call",
+      "params": {
+        "name": "search_web_pages",
+        "arguments": {
+          "query": "{{query}}"
+        }
+      }
+    },
+    "format": "auto",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "firecrawl",
+    "name": "Firecrawl",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://api.firecrawl.dev/v2/search",
+    "method": "POST",
+    "auth": "optional-bearer",
+    "bodyTemplate": {
+      "query": "{{query}}",
+      "limit": "{{count}}"
+    },
+    "format": "mapped",
+    "mapping": {
+      "results": "data.web",
+      "title": "title",
+      "url": "url",
+      "snippet": "description"
+    }
+  },
+  {
+    "id": "parallel-free",
+    "name": "Parallel · 公共 MCP",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://search.parallel.ai/mcp",
+    "method": "POST",
+    "auth": "none",
+    "bodyTemplate": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "tools/call",
+      "params": {
+        "name": "web_search",
+        "arguments": {
+          "objective": "{{query}}",
+          "search_queries": [
+            "{{query}}"
+          ],
+          "session_id": "iris-search"
+        }
+      }
+    },
+    "format": "auto",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "searxng",
+    "name": "SearXNG · 可换实例",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://opnxng.com/search",
+    "method": "GET",
+    "auth": "none",
+    "bodyTemplate": {
+      "q": "{{query}}",
+      "format": "json",
+      "language": "{{language}}"
+    },
+    "format": "mapped",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "content"
+    }
+  },
+  {
+    "id": "degoog",
+    "name": "Degoog · 自托管实例",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://degoog.example.com/api/search",
+    "method": "GET",
+    "auth": "none",
+    "bodyTemplate": {
+      "q": "{{query}}"
+    },
+    "format": "auto",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "exa",
+    "name": "Exa API",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://api.exa.ai/search",
+    "method": "POST",
+    "auth": "bearer",
+    "bodyTemplate": {
+      "query": "{{query}}",
+      "numResults": "{{count}}",
+      "type": "auto",
+      "contents": {
+        "highlights": {
+          "highlightsPerUrl": 1
+        }
+      }
+    },
+    "format": "mapped",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "highlights.0"
+    }
+  },
+  {
+    "id": "keenable",
+    "name": "Keenable API",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://api.keenable.ai/v1/search",
+    "method": "POST",
+    "auth": "x-api-key",
+    "bodyTemplate": {
+      "query": "{{query}}",
+      "mode": "realtime"
+    },
+    "format": "mapped",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "parallel",
+    "name": "Parallel API",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://api.parallel.ai/v1/search",
+    "method": "POST",
+    "auth": "x-api-key",
+    "bodyTemplate": {
+      "objective": "{{query}}",
+      "search_queries": [
+        "{{query}}"
+      ],
+      "mode": "fast",
+      "advanced_settings": {
+        "max_results": "{{count}}"
+      }
+    },
+    "format": "mapped",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "excerpts.0"
+    }
+  },
+  {
+    "id": "deepseek",
+    "name": "DeepSeek Search",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": false,
+    "endpoint": "https://api.deepseek.com/v1/tools/search",
+    "method": "POST",
+    "auth": "bearer",
+    "bodyTemplate": {
+      "query": "{{query}}",
+      "count": "{{count}}",
+      "need_content": false
+    },
+    "format": "mapped",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "summary"
+    }
+  },
+  {
+    "id": "deepseek-official",
+    "name": "DeepSeek · 模型搜索",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://api.deepseek.com/anthropic/v1/messages",
+    "method": "POST",
+    "auth": "bearer",
+    "bodyTemplate": {
+      "model": "deepseek-v4-flash",
+      "max_tokens": 4096,
+      "messages": [
+        {
+          "role": "user",
+          "content": "{{query}}"
+        }
+      ],
+      "tools": [
+        {
+          "type": "web_search_20250305",
+          "name": "web_search"
+        }
+      ]
+    },
+    "format": "auto",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    },
+    "headers": {
+      "anthropic-version": "2023-06-01"
+    }
+  },
+  {
+    "id": "perplexity",
+    "name": "Perplexity Sonar",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://api.perplexity.ai/chat/completions",
+    "method": "POST",
+    "auth": "bearer",
+    "bodyTemplate": {
+      "model": "sonar",
+      "max_tokens": 1024,
+      "messages": [
+        {
+          "role": "user",
+          "content": "{{query}}"
+        }
+      ]
+    },
+    "format": "auto",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "serpbase",
+    "name": "SerpBase · Google",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://api.serpbase.dev/google/search",
+    "method": "POST",
+    "auth": "x-api-key",
+    "bodyTemplate": {
+      "q": "{{query}}",
+      "hl": "zh-CN",
+      "gl": "cn",
+      "page": 1
+    },
+    "format": "auto",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "serply",
+    "name": "Serply · Google",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://api.serply.io/v1/search",
+    "method": "GET",
+    "auth": "x-api-key",
+    "bodyTemplate": {
+      "q": "{{query}}",
+      "num": "{{count}}"
+    },
+    "format": "auto",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "youcom",
+    "name": "You.com",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://ydc-index.io/v1/search",
+    "method": "GET",
+    "auth": "x-api-key",
+    "bodyTemplate": {
+      "query": "{{query}}",
+      "count": "{{count}}"
+    },
+    "format": "mapped",
+    "mapping": {
+      "results": "results.web",
+      "title": "title",
+      "url": "url",
+      "snippet": "description"
+    }
+  },
+  {
+    "id": "tinyfish",
+    "name": "TinyFish",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://api.search.tinyfish.ai",
+    "method": "POST",
+    "auth": "x-api-key",
+    "bodyTemplate": {
+      "query": "{{query}}",
+      "max_results": "{{count}}"
+    },
+    "format": "auto",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "jina",
+    "name": "Jina Search",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://s.jina.ai/",
+    "method": "GET",
+    "auth": "optional-bearer",
+    "bodyTemplate": {
+      "q": "{{query}}"
+    },
+    "format": "mapped",
+    "mapping": {
+      "results": "data",
+      "title": "title",
+      "url": "url",
+      "snippet": "description"
+    },
+    "headers": {
+      "X-Respond-With": "no-content"
+    }
+  },
+  {
+    "id": "baidu-api",
+    "name": "百度千帆",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": false,
+    "endpoint": "https://qianfan.baidubce.com/v2/ai_search/web_search",
+    "method": "POST",
+    "auth": "bearer",
+    "bodyTemplate": {
+      "messages": [
+        {
+          "role": "user",
+          "content": "{{query}}"
+        }
+      ],
+      "search_source": "baidu_search_v2",
+      "resource_type_filter": [
+        {
+          "type": "web",
+          "top_k": "{{count}}"
+        }
+      ]
+    },
+    "format": "mapped",
+    "mapping": {
+      "results": "references",
+      "title": "title",
+      "url": "url",
+      "snippet": "content"
+    },
+    "headers": {
+      "X-Appbuilder-From": "openclaw"
+    }
+  },
+  {
+    "id": "kimi",
+    "name": "Kimi",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": false,
+    "endpoint": "https://api.moonshot.cn/v1/tools/search",
+    "method": "POST",
+    "auth": "bearer",
+    "bodyTemplate": {
+      "text_query": "{{query}}",
+      "limit": "{{count}}",
+      "timeout_seconds": 20
+    },
+    "format": "mapped",
+    "mapping": {
+      "results": "search_results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "aliyun",
+    "name": "阿里云百炼",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": false,
+    "endpoint": "https://dashscope.aliyuncs.com/api/v1/mcps/EnhancedSearch/mcp",
+    "method": "POST",
+    "auth": "bearer",
+    "bodyTemplate": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "tools/call",
+      "params": {
+        "name": "search_pro",
+        "arguments": {
+          "query": "{{query}}"
+        }
+      }
+    },
+    "format": "auto",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "doubao",
+    "name": "豆包搜索",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": false,
+    "endpoint": "https://open.feedcoopapi.com/search_api/web_search",
+    "method": "POST",
+    "auth": "bearer",
+    "bodyTemplate": {
+      "Query": "{{query}}",
+      "SearchType": "web",
+      "Count": "{{count}}",
+      "NeedSummary": true,
+      "Filter": {
+        "NeedUrl": true
+      }
+    },
+    "format": "mapped",
+    "mapping": {
+      "results": "Result.WebResults",
+      "title": "Title",
+      "url": "Url",
+      "snippet": "Summary"
+    }
+  },
+  {
+    "id": "zhihu-global",
+    "name": "知乎全网",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": false,
+    "endpoint": "https://developer.zhihu.com/api/mcp/v1",
+    "method": "POST",
+    "auth": "bearer",
+    "bodyTemplate": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "tools/call",
+      "params": {
+        "name": "global_search",
+        "arguments": {
+          "query": "{{query}}",
+          "count": "{{count}}",
+          "search_db": "all"
+        }
+      }
+    },
+    "format": "auto",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "zhihu-site",
+    "name": "知乎站内",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": false,
+    "endpoint": "https://developer.zhihu.com/api/mcp/v1",
+    "method": "POST",
+    "auth": "bearer",
+    "bodyTemplate": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "tools/call",
+      "params": {
+        "name": "zhihu_search",
+        "arguments": {
+          "query": "{{query}}",
+          "count": "{{count}}"
+        }
+      }
+    },
+    "format": "auto",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "openai",
+    "name": "OpenAI · 模型搜索",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://api.openai.com/v1/responses",
+    "method": "POST",
+    "auth": "bearer",
+    "bodyTemplate": {
+      "model": "gpt-6-luna",
+      "input": "{{query}}",
+      "tools": [
+        {
+          "type": "web_search"
+        }
+      ]
+    },
+    "format": "auto",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "gemini",
+    "name": "Gemini · 模型搜索",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://generativelanguage.googleapis.com/v1beta/interactions",
+    "method": "POST",
+    "auth": "x-goog-api-key",
+    "bodyTemplate": {
+      "model": "gemini-3.8-flash",
+      "input": "{{query}}",
+      "tools": [
+        {
+          "type": "google_search"
+        }
+      ]
+    },
+    "format": "auto",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "claude",
+    "name": "Claude · 模型搜索",
+    "kind": "json",
+    "category": "web",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://api.anthropic.com/v1/messages",
+    "method": "POST",
+    "auth": "x-api-key",
+    "bodyTemplate": {
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 1024,
+      "messages": [
+        {
+          "role": "user",
+          "content": "{{query}}"
+        }
+      ],
+      "tools": [
+        {
+          "type": "web_search_20250305",
+          "name": "web_search",
+          "max_uses": 5
+        }
+      ]
+    },
+    "format": "auto",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    },
+    "headers": {
+      "anthropic-version": "2023-06-01"
+    }
+  },
+  {
+    "id": "wikimedia",
+    "name": "Wikimedia Commons",
+    "kind": "json",
+    "category": "image",
+    "enabled": true,
+    "useProxy": true,
+    "endpoint": "https://commons.wikimedia.org/w/api.php",
+    "method": "GET",
+    "auth": "none",
+    "bodyTemplate": {
+      "action": "query",
+      "format": "json",
+      "generator": "search",
+      "gsrsearch": "{{query}} filetype:bitmap",
+      "gsrnamespace": 6,
+      "gsrlimit": "{{count}}",
+      "prop": "imageinfo",
+      "iiprop": "url|size|mime|extmetadata",
+      "iiurlwidth": 600
+    },
+    "format": "wikimedia",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "openverse",
+    "name": "Openverse",
+    "kind": "json",
+    "category": "image",
+    "enabled": true,
+    "useProxy": true,
+    "endpoint": "https://api.openverse.org/v1/images/",
+    "method": "GET",
+    "auth": "none",
+    "bodyTemplate": {
+      "q": "{{query}}",
+      "page_size": "{{count}}"
+    },
+    "format": "openverse",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "pexels",
+    "name": "Pexels",
+    "kind": "json",
+    "category": "image",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://api.pexels.com/v1/search",
+    "method": "GET",
+    "auth": "raw-authorization",
+    "bodyTemplate": {
+      "query": "{{query}}",
+      "per_page": "{{count}}"
+    },
+    "format": "pexels",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "unsplash",
+    "name": "Unsplash",
+    "kind": "json",
+    "category": "image",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://api.unsplash.com/search/photos",
+    "method": "GET",
+    "auth": "client-id",
+    "bodyTemplate": {
+      "query": "{{query}}",
+      "per_page": "{{count}}"
+    },
+    "format": "unsplash",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "pixabay",
+    "name": "Pixabay",
+    "kind": "json",
+    "category": "image",
+    "enabled": false,
+    "useProxy": true,
+    "endpoint": "https://pixabay.com/api/",
+    "method": "GET",
+    "auth": "query-key",
+    "bodyTemplate": {
+      "q": "{{query}}",
+      "per_page": 3,
+      "key": "{{apiKey}}"
+    },
+    "format": "pixabay",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
+    "id": "bing-images",
+    "name": "Bing 图片",
+    "kind": "bing-images",
+    "category": "image",
+    "enabled": true,
+    "useProxy": true
+  }
+]

@@ -1,4 +1,5 @@
 import { ApiError, getCsrf } from './api';
+import { eventBatch } from './event-batch.mjs';
 
 // Parses the runner's NDJSON prompt stream. Handles UTF-8 split across chunks and
 // records split across arbitrary network boundaries.
@@ -26,12 +27,13 @@ export async function streamPrompt({ thread, message, thinking, projectId, permi
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
   let settled = false;
+  const batch = eventBatch(onEvent);
   const dispatch = (line: string) => {
     if (!line.trim()) return;
     let event: any;
     try { event = JSON.parse(line); } catch { return; }
     if (event?.type === 'agent_settled') settled = true;
-    onEvent(event);
+    batch.push(event);
   };
   try {
     while (true) {
@@ -49,6 +51,7 @@ export async function streamPrompt({ thread, message, thinking, projectId, permi
     buffer += decoder.decode();
     if (buffer.trim()) dispatch(buffer);
   } finally {
+    batch.flush();
     reader.releaseLock?.();
   }
   return { settled };

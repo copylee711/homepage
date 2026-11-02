@@ -63,6 +63,7 @@ const totalDurationMs = computed(() => list.value.reduce((acc, b) => acc + (Numb
 
 const VERBS: Record<string, string> = {
   read: '读取',
+  image_search:'搜索图片',
   write: '写入',
   edit: '编辑',
   multi_edit: '编辑',
@@ -152,16 +153,12 @@ const claudeSummary = computed(() => {
       if (searches === 1) specificActions.push('搜索了代码');
     }
 
-    const resText = String(b?.result || '');
-    const addMatch = resText.match(/(?:\+)(\d+)\s*(?:lines?|行|insertions?)/i) || resText.match(/\+(\d+)\b/);
-    const delMatch = resText.match(/(?:-)(\d+)\s*(?:lines?|行|deletions?)/i) || resText.match(/-(\d+)\b/);
-    if (addMatch && addMatch[1]) {
-      const n = parseInt(addMatch[1], 10);
-      if (n > 0 && n < 10000) diffAdd += n;
-    }
-    if (delMatch && delMatch[1]) {
-      const n = parseInt(delMatch[1], 10);
-      if (n > 0 && n < 10000) diffDel += n;
+    // Only explicit structured edit statistics count. URLs, dates and output
+    // numbers must never be interpreted as changed lines.
+    if (['write', 'edit', 'multi_edit'].includes(key)) {
+      const stats = b?.details?.diffStats;
+      if (Number.isSafeInteger(stats?.added) && stats.added >= 0) diffAdd += stats.added;
+      if (Number.isSafeInteger(stats?.removed) && stats.removed >= 0) diffDel += stats.removed;
     }
   }
 

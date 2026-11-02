@@ -15,10 +15,11 @@ const runner = createServer(async (req, res) => {
 await new Promise(resolve => runner.listen(0, '127.0.0.1', resolve));
 process.env.RUNNER_URL = `http://127.0.0.1:${runner.address().port}`;
 const homepage = createServer(async (req, res) => {
+  let incoming='';for await(const chunk of req)incoming+=chunk;const input=JSON.parse(incoming||'{}');
   assert.equal(req.headers['x-agent-client-secret'], 'a'.repeat(64));
   res.setHeader('Content-Type', 'application/json');
   if (req.url.endsWith('/exchange')) res.end(JSON.stringify({ token: 't'.repeat(64), expires_at: Date.now() / 1000 + 3600 }));
-  else res.end(JSON.stringify({ user: { id: 'user-1', name: 'Tester' }, can_execute: admin || granted, admin }));
+  else res.end(JSON.stringify({ user: { id: input.token==='u'.repeat(64)?'user-2':'user-1', name: 'Tester' }, can_execute: admin || granted, admin }));
 });
 await new Promise(resolve => homepage.listen(0, '127.0.0.1', resolve));
 process.env.HOMEPAGE_URL = `http://127.0.0.1:${homepage.address().port}`;
@@ -118,4 +119,12 @@ test('preview capabilities are structurally validated and sandbox active content
  assert.match(response.headers.get('content-security-policy'),/sandbox allow-scripts allow-forms/);
  assert.doesNotMatch(response.headers.get('content-security-policy'),/allow-same-origin/);
  assert.equal(response.headers.get('access-control-allow-origin'),'*');
+});
+
+test('interactive widgets are CSRF-protected, owner-bound and execute only in an opaque no-network frame',async()=>{
+ admin=true;const cookie='copylee_ai='+'t'.repeat(64);const me=await(await fetch(base+'/api/me',{headers:{cookie}})).json();const headers={cookie,Origin:'http://127.0.0.1','X-CSRF-Token':me.csrf};
+ assert.equal((await fetch(base+'/api/widgets',{method:'POST',headers:{cookie},body:JSON.stringify({html:'<script>test()</script>'})})).status,403);
+ const created=await fetch(base+'/api/widgets',{method:'POST',headers,body:JSON.stringify({html:'<h2>Widget</h2><script>test()</script>'})});assert.equal(created.status,200);const {url}=await created.json();
+ const doc=await fetch(base+url,{headers:{cookie}});assert.equal(doc.status,200);assert.match(doc.headers.get('content-security-policy'),/sandbox allow-scripts/);assert.match(doc.headers.get('content-security-policy'),/connect-src 'none'/);assert.doesNotMatch(doc.headers.get('content-security-policy'),/allow-same-origin/);assert.equal(doc.headers.get('x-frame-options'),'SAMEORIGIN');assert.match(await doc.text(),/<h2>Widget/);
+ assert.equal((await fetch(base+url,{headers:{cookie:'copylee_ai='+'u'.repeat(64)}})).status,404);
 });
