@@ -2,6 +2,8 @@
 import { ref, computed, watch, nextTick } from 'vue';
 import Icon from './Icon.vue';
 import { formatDuration } from '../services/format';
+import { useWorkspace } from '../stores/workspace';
+import { useSession } from '../stores/session';
 
 const props = defineProps<{ block?: any; tools?: any[] }>();
 
@@ -201,6 +203,16 @@ function toolIcon(b: any): string {
   if (k === 'web_fetch' || k === 'fetch') return 'globe';
   return 'edit';
 }
+
+function isFilePathArg(k: string, v: string) {
+  if (k === 'path' || k === 'file' || k === 'destination') return true;
+  return typeof v === 'string' && (v.startsWith('/workspace/') || v.startsWith('workspace/'));
+}
+
+function openArgFile(v: string) {
+  const proj = useSession().currentProjectId;
+  void useWorkspace().locateAndOpenFile(v, proj);
+}
 </script>
 
 <template>
@@ -227,7 +239,13 @@ function toolIcon(b: any): string {
       <dl v-if="argRows(list[0]).length" class="tc-args">
         <template v-for="(r, ri) in argRows(list[0])" :key="ri">
           <dt v-if="r.k">{{ r.k }}</dt>
-          <dd :class="{ 'is-wide': !r.k }">{{ r.v }}</dd>
+          <dd
+            :class="{ 'is-wide': !r.k, 'is-ws-target': isFilePathArg(r.k, r.v) }"
+            :title="isFilePathArg(r.k, r.v) ? '点击在工作区定位此文件' : undefined"
+            @click="isFilePathArg(r.k, r.v) ? openArgFile(r.v) : undefined"
+          >
+            {{ r.v }}
+          </dd>
         </template>
       </dl>
       <div v-if="list[0].result" class="tc-out" :class="{ 'is-error': list[0].state === 'error' }">{{ list[0].result }}</div>
@@ -292,7 +310,13 @@ function toolIcon(b: any): string {
           <dl v-if="argRows(b).length" class="tc-args">
             <template v-for="(r, ri) in argRows(b)" :key="ri">
               <dt v-if="r.k">{{ r.k }}</dt>
-              <dd :class="{ 'is-wide': !r.k }">{{ r.v }}</dd>
+              <dd
+                :class="{ 'is-wide': !r.k, 'is-ws-target': isFilePathArg(r.k, r.v) }"
+                :title="isFilePathArg(r.k, r.v) ? '点击在工作区定位此文件' : undefined"
+                @click="isFilePathArg(r.k, r.v) ? openArgFile(r.v) : undefined"
+              >
+                {{ r.v }}
+              </dd>
             </template>
           </dl>
           <div v-if="b.result" class="tc-out" :class="{ 'is-error': b.state === 'error' }">{{ b.result }}</div>

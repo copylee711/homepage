@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import BaseDialog from './BaseDialog.vue';
 import Icon from '../Icon.vue';
 import ProvidersPanel from '../settings/ProvidersPanel.vue';
@@ -13,6 +13,10 @@ import { formatShort } from '../../services/format';
 
 const ui = useUi();
 const session = useSession();
+
+const avatarError = ref(false);
+const avatarUrl = computed(() => session.auth?.user?.avatar || '');
+watch(avatarUrl, () => { avatarError.value = false; });
 
 const navItems = computed(() => {
   const items: { id: SettingsTab; icon: string; label: string; show: boolean }[] = [
@@ -56,11 +60,11 @@ async function unarchive(c: any) {
   }
 }
 async function remove(c: any) {
-  if (!(await ui.confirm({ title: '永久删除对话', message: `永久删除“${c.title || '新对话'}”？此操作无法撤销。`, confirmText: '删除', danger: true }))) return;
+  if (!(await ui.confirm({ title: '永久删除任务', message: `永久删除“${c.title || '新任务'}”？此操作无法撤销。`, confirmText: '删除', danger: true }))) return;
   try {
     await post('/api/chats/delete', { thread: c.id });
     session.chats = session.chats.filter(x => x.id !== c.id);
-    ui.toast('对话已删除', { tone: 'success' });
+    ui.toast('任务已删除', { tone: 'success' });
   } catch (e: any) {
     ui.toast(e.message, { tone: 'error' });
   }
@@ -86,6 +90,22 @@ async function remove(c: any) {
 
       <div class="settings-stage">
         <div v-if="ui.settingsTab === 'general'" class="settings-pad">
+          <div class="setting-account-header">
+            <div class="setting-account-avatar" :class="{ 'has-image': avatarUrl && !avatarError }">
+              <img v-if="avatarUrl && !avatarError" :src="avatarUrl" alt="" class="setting-avatar-img" @error="avatarError = true" />
+              <template v-else>{{ (session.auth?.user?.name || '·').slice(0, 1) }}</template>
+            </div>
+            <div class="setting-account-details">
+              <span class="setting-account-title">账户</span>
+              <strong class="setting-account-name">{{ session.auth?.user?.name || '当前用户' }}</strong>
+            </div>
+            <div class="setting-account-badges">
+              <span v-if="session.isAdmin" class="setting-account-badge">管理员</span>
+              <span v-else class="setting-account-badge">普通用户</span>
+              <span v-if="!session.canExecute" class="setting-account-badge is-muted">只读</span>
+            </div>
+          </div>
+
           <div class="setting-row">
             <div class="setting-info">
               <strong>外观主题</strong>
@@ -110,12 +130,13 @@ async function remove(c: any) {
 
           <div class="setting-row">
             <div class="setting-info">
-              <strong>按时间分组</strong>
-              <span>将对话按今天、昨天、最近等时间段分组显示</span>
+              <strong>侧边栏分组规则</strong>
+              <span>选择侧边栏会话的归类展示方式</span>
             </div>
             <div class="seg">
-              <button type="button" :class="{ 'is-on': ui.chatGroupByDate }" @click="ui.setChatGroupByDate(true)">分组</button>
-              <button type="button" :class="{ 'is-on': !ui.chatGroupByDate }" @click="ui.setChatGroupByDate(false)">平铺</button>
+              <button type="button" :class="{ 'is-on': ui.chatGroupMode === 'none' }" @click="ui.setChatGroupMode('none')">平铺</button>
+              <button type="button" :class="{ 'is-on': ui.chatGroupMode === 'date' }" @click="ui.setChatGroupMode('date')">时间</button>
+              <button type="button" :class="{ 'is-on': ui.chatGroupMode === 'project' }" @click="ui.setChatGroupMode('project')">项目</button>
             </div>
           </div>
 
@@ -145,13 +166,6 @@ async function remove(c: any) {
               <button type="button" :class="{ 'is-on': ui.workspaceDual }" @click="ui.setWorkspaceDual(true)">双右栏</button>
             </div>
           </div>
-
-          <div class="setting-row">
-            <div class="setting-info">
-              <strong>账户</strong>
-              <span>{{ session.auth?.user?.name || '当前登录用户' }}</span>
-            </div>
-          </div>
         </div>
 
         <ProvidersPanel v-else-if="ui.settingsTab === 'providers' && session.isAdmin" />
@@ -164,7 +178,7 @@ async function remove(c: any) {
           <div v-else class="archive-list">
             <div v-for="c in archived" :key="c.id" class="archive-row">
               <div class="archive-info">
-                <strong>{{ c.title || '新对话' }}</strong>
+                <strong>{{ c.title || '新任务' }}</strong>
                 <span>{{ formatShort(c.updated) }}</span>
               </div>
               <div class="archive-actions">
@@ -199,6 +213,80 @@ async function remove(c: any) {
 
 .settings-stage { min-width: 0; min-height: 0; height: 100%; overflow: hidden; display: flex; flex-direction: column; }
 .settings-pad { padding: 18px 22px; overflow-y: auto; flex: 1; min-height: 0; }
+
+.setting-account-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 0 18px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+.setting-account-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 17px;
+  font-weight: 650;
+  flex: none;
+  box-shadow: var(--shadow-sm);
+}
+.setting-account-avatar.has-image {
+  background: var(--surface-2);
+}
+.setting-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.setting-account-details {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.setting-account-title {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.setting-account-name {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.setting-account-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.setting-account-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
+}
+.setting-account-badge.is-muted {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
 
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
 .setting-row:last-child { border-bottom: 0; }

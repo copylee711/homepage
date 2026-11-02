@@ -306,7 +306,7 @@ onMounted(async () => {
           <span v-if="configs?.active === p.id" class="prov-active-tag">使用中</span>
           <span v-else class="prov-switch-btn" role="button" tabindex="0" title="设为当前供应商" @click.stop="activate(p)">启用</span>
         </button>
-        <button v-if="isNew" type="button" class="prov-item is-editing">
+        <button v-if="isNew" type="button" class="prov-item is-editing" disabled>
           <span class="prov-dot"></span>
           <span class="prov-item-body">
             <span class="prov-item-name">{{ form.name || '新供应商' }}</span>
@@ -336,7 +336,7 @@ onMounted(async () => {
       </template>
     </aside>
 
-    <form class="prov-form" @submit.prevent="act(true)">
+    <form novalidate class="prov-form" @submit.prevent="act(true)">
       <div class="field-grid">
         <label class="field">
           <span class="field-label">配置标识</span>
@@ -489,7 +489,8 @@ onMounted(async () => {
 .prov-switch-btn:hover { background: var(--ink); color: var(--surface); }
 .prov-presets .prov-item { opacity: 0.85; }
 
-.prov-form { padding: 18px 22px 20px; overflow-y: auto; display: flex; flex-direction: column; }
+.prov-form { padding: 20px 24px 24px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+.prov-form .field-grid, .prov-form > .field { margin-top: 0; }
 .key-row { display: flex; align-items: stretch; gap: 8px; }
 .key-row input { flex: 1; min-width: 0; }
 .btn-sm { min-height: 32px; padding: 0 11px; font-size: 12px; border-radius: 9px; }

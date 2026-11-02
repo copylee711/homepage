@@ -55,6 +55,19 @@ onMounted(() => nextTick(() => toBottom(false)));
           <div class="message-inner">
             <div class="message-meta"><strong class="message-author">Iris</strong></div>
             <div class="message-content"><BlockList :blocks="session.live.blocks" :streaming="true" /></div>
+            <section v-for="approval in session.live.approvals" :key="approval.id" class="tool-approval" :aria-label="approval.title" aria-live="polite">
+              <strong>{{ approval.title }}</strong>
+              <pre>{{ approval.message }}</pre>
+              <template v-if="approval.state === 'pending'">
+                <p>允许后仅执行本次操作；两分钟内未处理则拒绝执行。</p>
+                <div class="approval-actions">
+                  <button type="button" class="btn btn-quiet" :disabled="approval.saving" @click="session.resolveApproval(approval.id, false)">拒绝本次</button>
+                  <button type="button" class="btn btn-solid" :disabled="approval.saving" @click="session.resolveApproval(approval.id, true)">允许本次</button>
+                </div>
+              </template>
+              <p v-else>{{ approval.state === 'allowed' ? '已允许本次执行' : '未允许执行' }}</p>
+              <p v-if="approval.error" class="status-error" role="alert">{{ approval.error }}</p>
+            </section>
             <div v-if="session.live.status || session.live.error || session.live.stopped" class="message-status" :class="{ 'is-error': session.live.error }">
               <span v-if="session.live.spinner && !session.live.error && !session.live.stopped" class="working-dot"></span>
               <span v-if="session.live.error" class="status-error">{{ session.live.error }}</span>
@@ -71,12 +84,17 @@ onMounted(() => nextTick(() => toBottom(false)));
 
 <style>
 .stage { position: relative; min-height: 0; flex: 1; display: flex; overflow: hidden; }
-.conversation { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 clamp(16px, 4vw, 40px); scroll-behavior: smooth; overscroll-behavior: contain; }
+.conversation { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable both-edges; padding: 0 clamp(16px, 4vw, 40px); scroll-behavior: smooth; overscroll-behavior: contain; }
 .conversation.is-empty { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
 .messages { width: 100%; max-width: 760px; margin: 0 auto; padding: 30px 0 44px; display: flex; flex-direction: column; gap: 30px; }
 .conversation-state { padding: 40px 0; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: 12.5px; }
 .message-status { min-height: 18px; display: flex; align-items: center; gap: 8px; margin-top: 9px; color: var(--muted); font-size: 11.5px; }
 .message-status.is-error { color: var(--danger); }
+.tool-approval { margin-top: 14px; padding: 14px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-2); }
+.tool-approval strong { font-size: 13px; }
+.tool-approval pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 12px; }
+.tool-approval p { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+.approval-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
 .status-error { color: var(--danger); }
 .working-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); animation: breathe 1.7s ease-in-out infinite; }
 @keyframes breathe { 0%, 100% { opacity: 1; box-shadow: 0 0 0 3px var(--accent-soft); } 50% { opacity: 0.5; box-shadow: 0 0 0 6px transparent; } }

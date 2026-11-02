@@ -11,6 +11,7 @@ COPY agent-platform/providers.mjs agent-platform/provider-test.mjs agent-platfor
 COPY agent-platform/sandbox-client.mjs agent-platform/session-limits.mjs agent-platform/session-cwd.mjs ./
 COPY agent-platform/conversations.mjs agent-platform/workspace.mjs ./
 COPY agent-platform/session-snapshot.mjs ./
+COPY agent-platform/tool-approvals.mjs ./
 COPY agent-platform/packages.mjs ./
 COPY agent-platform/toolchains.mjs agent-platform/toolchains.json ./
 COPY agent-platform/sandbox-extension.ts /opt/pi/sandbox-extension.ts

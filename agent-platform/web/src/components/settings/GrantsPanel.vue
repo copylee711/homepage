@@ -172,7 +172,7 @@ onMounted(load);
           </div>
         </div>
 
-        <form v-if="quotaUser?.id === u.id" class="quota-box" @submit.prevent="saveQuota">
+        <form novalidate v-if="quotaUser?.id === u.id" class="quota-box" @submit.prevent="saveQuota">
           <div class="quota-head">
             <strong>资源配额 · {{ u.name }}</strong>
             <span>{{ quotaStatus }}</span>

@@ -83,7 +83,10 @@ test('new file/chat endpoints enforce CSRF and derive tenant identity; local mod
   const headers = { cookie, Origin: 'http://127.0.0.1', 'X-CSRF-Token': me.csrf };
   assert.equal((await fetch(base + '/api/files', { headers })).status, 200);
   assert.equal(lastRunner.value.user, createHash('sha256').update('user-1').digest('hex'));
-  for (const path of ['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/files/upload', '/api/files/manage', '/api/toolchains/change', '/api/toolchains/cancel']) {
+  assert.equal((await fetch(base + '/api/git/status?project=app', { headers })).status, 200);
+  assert.equal(lastRunner.path, '/git/status');
+  assert.equal(lastRunner.value.project, 'app');
+  for (const path of ['/api/approvals/resolve', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/chats/project', '/api/chats/permission', '/api/terminal/exec', '/api/git/checkout', '/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/files/upload', '/api/files/manage', '/api/toolchains/change', '/api/toolchains/cancel']) {
     const value = JSON.stringify({ user: 'forged', thread: '11111111-1111-4111-8111-111111111111', title: 'test', content: 'test', path: 'test.txt' });
     assert.equal((await fetch(base + path, { method: 'POST', headers: { cookie }, body: value })).status, 403);
     assert.equal((await fetch(base + path, { method: 'POST', headers, body: value })).status, 200);

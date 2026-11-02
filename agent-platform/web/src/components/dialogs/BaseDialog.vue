@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount } from 'vue';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { useDialogFocus } from '../../services/dialog-focus';
 import Icon from '../Icon.vue';
 import { useUi } from '../../stores/ui';
 
 defineProps<{ title: string; subtitle?: string; wide?: boolean; xl?: boolean }>();
 const ui = useUi();
+const dialogEl = ref<HTMLElement | null>(null);
+useDialogFocus(dialogEl);
 function onKey(e: KeyboardEvent) {
   if (e.defaultPrevented || ui.modal || ui.context) return;
   if (document.querySelector('.iris-select-pop, .drop-menu, .model-menu')) return;
@@ -17,7 +20,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey));
 <template>
   <teleport to="body">
     <div class="dialog-backdrop" @click.self="ui.closeDialog()">
-      <div class="dialog" :class="{ 'dialog-wide': wide, 'dialog-xl': xl }" role="dialog" aria-modal="true">
+      <div ref="dialogEl" tabindex="-1" class="dialog" :aria-label="title" :class="{ 'dialog-wide': wide, 'dialog-xl': xl }" role="dialog" aria-modal="true">
         <div class="dialog-heading">
           <div><h2>{{ title }}</h2><p v-if="subtitle">{{ subtitle }}</p></div>
           <button class="icon-button" aria-label="关闭" title="关闭" @click="ui.closeDialog()"><Icon name="x" /></button>
@@ -29,7 +32,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey));
 </template>
 
 <style>
-.dialog-backdrop { position: fixed; inset: 0; z-index: 140; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(12, 13, 18, 0.48); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); animation: fade-in 160ms var(--ease); }
+.dialog-backdrop { position: fixed; inset: 0; z-index: 180; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(12, 13, 18, 0.48); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); animation: fade-in 160ms var(--ease); }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 .dialog { width: min(580px, 100%); max-height: min(88dvh, 840px); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line-2); border-radius: 20px; background: var(--surface); color: var(--text); box-shadow: var(--shadow-lg); animation: dialog-in 180ms var(--ease); }
 .dialog-wide { width: min(800px, 100%); }
@@ -46,8 +49,8 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey));
 .dialog-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 18px; padding-top: 15px; border-top: 1px solid var(--line); }
 
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.field + .field, .field-grid + .field, .field + .field-grid { margin-top: 14px; }
-.field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.field + .field, .field-grid + .field, .field + .field-grid, .field-grid + .field-grid { margin-top: 16px; }
+.field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
 .field-grid > .field { margin-top: 0; }
 .field-label { color: var(--text-2); font-size: 12px; font-weight: 560; line-height: 1.4; }
 .field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), .field textarea { width: 100%; min-height: 39px; padding: 8px 12px; border: 1px solid var(--line-2); border-radius: 10px; outline: 0; background: var(--surface-2); color: var(--text); font-size: 13px; transition: border-color var(--fast), box-shadow var(--fast), background-color var(--fast); }

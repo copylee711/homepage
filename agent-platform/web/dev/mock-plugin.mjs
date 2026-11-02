@@ -1,6 +1,6 @@
 // Vite dev-only middleware that emulates the gateway API so the Iris console can be
 // previewed without the backend. Never included in the production build.
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 const now = Date.now();
 const sha256 = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
@@ -19,11 +19,23 @@ const state = {
   },
 };
 
+const projects = [
+  { id: 'default', name: '默认项目', createdAt: now - 36e7 },
+  { id: 'iris-rebuild', name: 'Iris 控制台', createdAt: now - 864e5 },
+];
+
+const gitBranches = {
+  'iris-rebuild': {
+    current: 'agent/iris-console-rebuild',
+    list: ['main', 'agent/iris-console-rebuild', 'feat/workspace-tabs'],
+  },
+};
+
 const chats = [
-  { id: '11111111-1111-4111-8111-111111111111', title: '重构 Iris 控制台界面', updated: now - 6e5, pinned: true, archived: false },
-  { id: '22222222-2222-4222-8222-222222222222', title: '用 Python 生成项目说明', updated: now - 36e5, pinned: false, archived: false },
-  { id: '33333333-3333-4333-8333-333333333333', title: '推导梯度下降收敛性', updated: now - 9e7, pinned: false, archived: false },
-  { id: '44444444-4444-4444-8444-444444444444', title: '清理旧日志脚本', updated: now - 20e7, pinned: false, archived: true },
+  { id: '11111111-1111-4111-8111-111111111111', title: '重构 Iris 控制台界面', updated: now - 6e5, pinned: true, archived: false, projectId: 'iris-rebuild', permission: { scope: 'project_only', extraProjects: {} } },
+  { id: '22222222-2222-4222-8222-222222222222', title: '用 Python 生成项目说明', updated: now - 36e5, pinned: false, archived: false, projectId: 'default', permission: { scope: 'project_only', extraProjects: {} } },
+  { id: '33333333-3333-4333-8333-333333333333', title: '推导梯度下降收敛性', updated: now - 9e7, pinned: false, archived: false, projectId: 'default', permission: { scope: 'scoped', extraProjects: { 'iris-rebuild': 'read' } } },
+  { id: '44444444-4444-4444-8444-444444444444', title: '清理旧日志脚本', updated: now - 20e7, pinned: false, archived: true, projectId: 'default', permission: { scope: 'project_only', extraProjects: {} } },
 ];
 
 const sampleAssistant = {
@@ -57,15 +69,20 @@ const sessions = {
   },
 };
 
-// Stateful virtual workspace (includes root lost+found to verify frontend filtering)
-const dirs = new Set(['', 'src']);
+// Stateful virtual workspace with project folders
+const dirs = new Set(['', 'default', 'default/src', 'default/.git', 'iris-rebuild', 'iris-rebuild/src']);
 const fileText = {
-  'demo.py': 'import math\n\ndef area(r):\n    return math.pi * r ** 2\n\nprint(area(2))\n',
-  'README.md': '# 示例项目\n\n用于预览的示例工作区。\n',
-  'notes.txt': '随手记：重构控制台界面。\n',
-  'src/main.py': 'from utils import greet\n\nif __name__ == "__main__":\n    print(greet("Iris"))\n',
-  'src/utils.py': 'def greet(name: str) -> str:\n    return f"Hello, {name}!"\n',
+  'default/.env.example': 'APP_ENV=development\n',
+  'default/.git/HEAD': 'ref: refs/heads/main\n',
+  'default/demo.py': 'import math\n\ndef area(r):\n    return math.pi * r ** 2\n\nprint(area(2))\n',
+  'default/README.md': '# 默认项目\n\n位于 /workspace/default 的默认工作区。\n',
+  'default/notes.txt': '随手记：默认项目笔记。\n',
+  'default/src/main.py': 'from utils import greet\n\nif __name__ == "__main__":\n    print(greet("Iris"))\n',
+  'default/src/utils.py': 'def greet(name: str) -> str:\n    return f"Hello, {name}!"\n',
+  'iris-rebuild/README.md': '# Iris 控制台项目\n\n位于 /workspace/iris-rebuild 的项目工作区。\n',
+  'iris-rebuild/src/app.ts': 'export const version = "0.2.0";\n',
 };
+const pendingApprovals = new Map();
 
 function normPath(p) {
   return String(p || '').replace(/\\/g, '/').replace(/^\/workspace\/?/, '').replace(/^\/+|\/+$/g, '');
@@ -200,6 +217,125 @@ export function devMock() {
         if (path === '/auth/logout') return send({ ok: true });
         if (path === '/api/avatar') return send({ error: '暂无头像' }, 404);
         if (path === '/api/me') return send(state.me());
+        if (path === '/api/projects') {
+          return send({ projects: projects.map(p => ({ ...p, chatCount: chats.filter(c => c.projectId === p.id).length })) });
+        }
+        if (path === '/api/projects/create') {
+          const id = String(body.id || '').trim();
+          const name = String(body.name || id).trim();
+          if (!id) return send({ error: '请填写项目标识' }, 422);
+          if (projects.some(p => p.id === id)) return send({ error: '项目空间已存在' }, 409);
+          const p = { id, name, description: body.description || '', createdAt: Date.now() };
+          projects.push(p);
+          dirs.add(id);
+          return send({ ...p, chatCount: 0 });
+        }
+        if (path === '/api/projects/rename') {
+          const p = projects.find(x => x.id === body.id);
+          if (!p) return send({ error: '项目空间不存在' }, 404);
+          p.name = String(body.name || p.name).trim();
+          return send({ ...p, chatCount: chats.filter(c => c.projectId === p.id).length });
+        }
+        if (path === '/api/projects/delete') {
+          if (body.id === 'default') return send({ error: '默认项目空间不可删除' }, 422);
+          const idx = projects.findIndex(x => x.id === body.id);
+          if (idx < 0) return send({ error: '项目空间不存在' }, 404);
+          projects.splice(idx, 1);
+          chats.forEach(c => {
+            if (c.projectId === body.id) {
+              c.projectId = 'default';
+              c.permission = { scope: 'project_only', extraProjects: {} };
+            }
+          });
+          return send({ ok: true });
+        }
+        if (path === '/api/chats/project') {
+          const c = chats.find(x => x.id === body.thread);
+          if (!c) return send({ error: '对话不存在' }, 404);
+          if (!projects.some(p => p.id === body.projectId)) return send({ error: '目标项目空间不存在' }, 404);
+          c.projectId = body.projectId;
+          return send({ ok: true, thread: c.id, projectId: c.projectId });
+        }
+        if (path === '/api/chats/permission') {
+          const c = chats.find(x => x.id === body.thread);
+          if (!c) return send({ error: '对话不存在' }, 404);
+          c.permission = body.permission || { scope: 'project_only', extraProjects: {} };
+          return send({ ok: true, thread: c.id, permission: c.permission });
+        }
+        if (path === '/api/git/status') {
+          const proj = q.get('project') || body.project || 'default';
+          if (gitBranches[proj]) {
+            return send({
+              isGit: true,
+              branch: gitBranches[proj].current,
+              branches: gitBranches[proj].list || [gitBranches[proj].current],
+            });
+          }
+          return send({ isGit: false, branch: '', branches: [] });
+        }
+        if (path === '/api/git/checkout') {
+          const proj = body.project || 'default';
+          const branch = String(body.branch || '').trim();
+          if (!gitBranches[proj]) {
+            gitBranches[proj] = { current: branch, list: ['main', branch] };
+          }
+          gitBranches[proj].current = branch;
+          return send({ ok: true, branch });
+        }
+        if (path === '/api/terminal/exec') {
+          const rawCmd = String(body.command || '').trim();
+          let cwd = String(body.cwd || '/workspace').replace(/\/+$/, '') || '/workspace';
+          let output = '';
+          let exitCode = 0;
+          if (rawCmd.startsWith('cd ')) {
+            const target = rawCmd.slice(3).trim();
+            if (target === '/' || target === '/workspace' || target === '~') {
+              cwd = '/workspace';
+            } else if (target === '..') {
+              if (cwd !== '/workspace') {
+                const segs = cwd.split('/').filter(Boolean);
+                segs.pop();
+                cwd = '/' + segs.join('/');
+                if (!cwd.startsWith('/workspace')) cwd = '/workspace';
+              }
+            } else if (target.startsWith('/workspace')) {
+              cwd = target;
+            } else {
+              cwd = (cwd + '/' + target).replace(/\/+/g, '/');
+            }
+          } else if (rawCmd === 'pwd') {
+            output = cwd + '\n';
+          } else if (rawCmd.startsWith('ls')) {
+            const curRel = normPath(cwd);
+            const entries = listDir(curRel);
+            output = entries.map(e => (e.type === 'dir' ? `\x1b[1;34m${e.name}/\x1b[0m` : e.name)).join('  ') + '\n';
+          } else if (rawCmd === 'whoami') {
+            output = 'iris\n';
+          } else if (rawCmd === 'uname -a') {
+            output = 'Linux iris-sandbox 6.6.0-iris #1 SMP PREEMPT x86_64 GNU/Linux\n';
+          } else if (rawCmd.startsWith('echo ')) {
+            output = rawCmd.slice(5) + '\n';
+          } else if (rawCmd.startsWith('cat ')) {
+            const filename = rawCmd.slice(4).trim();
+            const curRel = normPath(cwd);
+            const full = curRel ? curRel + '/' + filename : filename;
+            if (full in fileText) {
+              output = fileText[full];
+            } else {
+              output = `cat: ${filename}: No such file or directory\n`;
+              exitCode = 1;
+            }
+          } else if (rawCmd.startsWith('mkdir ')) {
+            const folder = rawCmd.slice(6).trim();
+            const curRel = normPath(cwd);
+            const full = curRel ? curRel + '/' + folder : folder;
+            dirs.add(full);
+            output = '';
+          } else {
+            output = `[iris-sandbox]: ${rawCmd}\n`;
+          }
+          return send({ output, exitCode, cwd });
+        }
         if (path === '/api/chats') return send({ chats });
         if (path === '/api/session') return send(sessions[q.get('chat')] || { busy: false, messages: [] });
         if (path === '/api/prompt') {
@@ -212,7 +348,23 @@ export function devMock() {
             res.write(JSON.stringify(events[i++]) + '\n');
             setTimeout(tick, 30);
           };
+          if (body.permission?.execution !== 'auto') {
+            const id = randomUUID();
+            pendingApprovals.set(id, { res, tick });
+            res.write(JSON.stringify({ type: 'extension_ui_request', method: 'confirm', id, title: '工具执行审批 · bash', message: JSON.stringify({ command: 'pwd' }, null, 2), expiresAt: Date.now() + 120000 }) + '\n');
+            res.once('close', () => pendingApprovals.delete(id));
+            return;
+          }
           return tick();
+        }
+        if (path === '/api/approvals/resolve') {
+          const pending = pendingApprovals.get(body.id);
+          if (!pending) return send({ error: '审批已过期' }, 409);
+          pendingApprovals.delete(body.id);
+          pending.res.write(JSON.stringify({ type: 'approval_resolved', id: body.id, allowed: body.allow, reason: body.allow ? '已允许本次执行' : '已拒绝本次执行' }) + '\n');
+          if (body.allow) pending.tick();
+          else { pending.res.write(JSON.stringify({ type: 'agent_settled', aborted: false }) + '\n'); pending.res.end(); }
+          return send({ ok: true });
         }
         if (path === '/api/abort') return send({ ok: true });
         if (path === '/api/chats/rename') { const c = chats.find(x => x.id === body.thread); if (c) c.title = body.title; return send({ ok: true }); }

@@ -30,14 +30,41 @@ export function formatDuration(ms: number) {
 export function grantDate(seconds?: number) { return seconds ? new Date(seconds * 1000).toLocaleDateString('zh-CN') : ''; }
 
 export interface ChatGroup { key: string; label: string; chats: Chat[]; }
-export function groupChats(chats: Chat[], groupByDate = true): ChatGroup[] {
+export function groupChats(
+  chats: Chat[],
+  mode: boolean | 'date' | 'project' | 'none' = 'date',
+  projects: Array<{ id: string; name: string }> = []
+): ChatGroup[] {
+  const groups: ChatGroup[] = [];
+
+  // When grouping by project: keep chats (including pinned) inside their respective projects,
+  // with pinned chats sorted to the top of each project group.
+  if (mode === 'project') {
+    const byProj = new Map<string, Chat[]>();
+    for (const c of chats) {
+      const pid = c.projectId || 'default';
+      if (!byProj.has(pid)) byProj.set(pid, []);
+      byProj.get(pid)!.push(c);
+    }
+    for (const p of projects) {
+      const list = byProj.get(p.id) || [];
+      list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updated || 0) - (a.updated || 0));
+      groups.push({ key: 'proj:' + p.id, label: p.name || p.id, chats: list });
+      byProj.delete(p.id);
+    }
+    for (const [pid, list] of byProj.entries()) {
+      list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updated || 0) - (a.updated || 0));
+      groups.push({ key: 'proj:' + pid, label: pid === 'default' ? '默认项目' : pid, chats: list });
+    }
+    return groups;
+  }
+
   const pinned = chats.filter(c => c.pinned);
   const rest = chats.filter(c => !c.pinned);
-  const groups: ChatGroup[] = [];
   if (pinned.length) groups.push({ key: 'pinned', label: '置顶', chats: pinned });
 
-  if (!groupByDate) {
-    if (rest.length) groups.push({ key: 'all', label: pinned.length ? '全部对话' : '', chats: rest });
+  if (mode === false || mode === 'none') {
+    if (rest.length) groups.push({ key: 'all', label: pinned.length ? '全部任务' : '', chats: rest });
     return groups;
   }
 

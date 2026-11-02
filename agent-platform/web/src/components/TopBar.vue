@@ -9,7 +9,7 @@ import { post } from '../services/api';
 
 const session = useSession();
 const ui = useUi();
-const title = computed(() => session.currentChat?.title || '新对话');
+const title = computed(() => session.currentChat?.title || '新任务');
 const subtitle = computed(() => session.busy ? '正在生成回复…' : session.currentChat?.archived ? '已归档' : !session.canExecute ? '暂无执行权限' : '');
 const chatMenu = ref<{ anchor: HTMLElement; items: MenuItem[] } | null>(null);
 
@@ -19,7 +19,7 @@ const titleInput = ref<HTMLInputElement | null>(null);
 
 function startRename() {
   if (!session.currentChat || session.busy) return;
-  editValue.value = session.currentChat.title || '新对话';
+  editValue.value = session.currentChat.title || '新任务';
   isEditing.value = true;
   nextTick(() => {
     titleInput.value?.focus();
@@ -66,30 +66,32 @@ function toggleWorkspace() {
     <button v-if="!ui.sidebarOpen" class="icon-button" aria-label="显示导航" title="显示导航" @click="ui.setSidebarOpen(true)"><Icon name="panel-left" /></button>
     <button class="icon-button only-mobile" aria-label="显示导航" @click="ui.mobileDrawer = 'sidebar'"><Icon name="menu" /></button>
     <div class="chat-heading">
-      <form v-if="isEditing" class="chat-title-form" @submit.prevent="commitRename">
-        <input
-          ref="titleInput"
-          v-model="editValue"
-          type="text"
-          class="chat-title-input"
-          maxlength="80"
-          placeholder="输入会话标题"
-          @blur="commitRename"
-          @keydown.esc.prevent="cancelRename"
-        />
-      </form>
-      <button
-        v-else
-        type="button"
-        class="chat-title-btn"
-        :class="{ 'is-clickable': !!session.currentChat }"
-        :title="session.currentChat ? '单击直接重命名会话' : ''"
-        :disabled="!session.currentChat"
-        @click="startRename"
-      >
-        <span class="chat-title-text">{{ title }}</span>
-        <Icon v-if="session.currentChat" name="edit" :size="12" class="chat-title-icon" />
-      </button>
+      <div class="chat-heading-row">
+        <form novalidate v-if="isEditing" class="chat-title-form" @submit.prevent="commitRename">
+          <input
+            ref="titleInput"
+            v-model="editValue"
+            type="text"
+            class="chat-title-input"
+            maxlength="80"
+            placeholder="输入任务标题"
+            @blur="commitRename"
+            @keydown.esc.prevent="cancelRename"
+          />
+        </form>
+        <button
+          v-else
+          type="button"
+          class="chat-title-btn"
+          :class="{ 'is-clickable': !!session.currentChat }"
+          :title="session.currentChat ? '单击直接重命名任务' : ''"
+          :disabled="!session.currentChat"
+          @click="startRename"
+        >
+          <span class="chat-title-text">{{ title }}</span>
+          <Icon v-if="session.currentChat" name="edit" :size="12" class="chat-title-icon" />
+        </button>
+      </div>
       <p v-if="subtitle">{{ subtitle }}</p>
     </div>
     <div class="topbar-actions">
@@ -107,6 +109,7 @@ function toggleWorkspace() {
 <style>
 .topbar { min-width: 0; height: var(--header-h); display: flex; align-items: center; gap: 8px; padding: 0 16px; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(18px) saturate(1.1); -webkit-backdrop-filter: blur(18px) saturate(1.1); z-index: 5; }
 .chat-heading { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 2px; }
+.chat-heading-row { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
 
 .chat-title-form { display: flex; align-items: center; margin-left: -5px; }
 .chat-title-input { height: 26px; padding: 0 7px; font-size: 14.5px; font-weight: 650; color: var(--text); border: 1px solid var(--accent); border-radius: 7px; background: var(--surface); outline: none; box-shadow: 0 0 0 2.5px var(--accent-soft); max-width: min(100%, 420px); font-family: inherit; }

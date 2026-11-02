@@ -111,7 +111,7 @@ async function forkMsg() {
   if (session.busy) return;
   const res = await session.forkFromMessage(props.message);
   if (res) {
-    ui.toast(`已分叉出新对话：${res.title}`, { tone: 'success' });
+    ui.toast(`已分叉出新任务：${res.title}`, { tone: 'success' });
   }
 }
 
@@ -216,7 +216,8 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
       class="quote-selection-tip"
       :style="{ left: quoteTooltip.x + 'px', top: quoteTooltip.y + 'px' }"
       aria-label="引用选中内容"
-      @mousedown.prevent="applySelectionQuote"
+      @mousedown.prevent
+      @click="applySelectionQuote"
     >
       <Icon name="corner-down-left" :size="12" />
       <span>引用</span>
@@ -224,8 +225,8 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
 
     <div v-if="!isUser" class="message-avatar"><Icon name="iris" :size="18" /></div>
     <div class="message-inner">
-      <div class="message-meta">
-        <strong class="message-author">{{ isUser ? '你' : 'Iris' }}</strong>
+      <div v-if="!isUser" class="message-meta">
+        <strong class="message-author">Iris</strong>
       </div>
       <div v-if="isUser" class="user-bubble">
         <!-- GPT-style quoted text preview cards inside user bubble -->

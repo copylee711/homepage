@@ -11,6 +11,7 @@ import CommandPalette from './components/CommandPalette.vue';
 import ModalHost from './components/ModalHost.vue';
 import WebReadDialog from './components/dialogs/WebReadDialog.vue';
 import SettingsDialog from './components/dialogs/SettingsDialog.vue';
+import SubordinateDialog from './components/dialogs/SubordinateDialog.vue';
 import { useSession } from './stores/session';
 import { useUi } from './stores/ui';
 
@@ -25,7 +26,11 @@ const shellStyle = computed(() => ({
 }));
 const workspaceVisible = computed(() => session.canExecute && ui.workspaceOpen && wide.value);
 
-function onResize() { wide.value = window.innerWidth > 1180; }
+function onResize() {
+  wide.value = window.innerWidth > 1180;
+  if (wide.value && ui.mobileDrawer === 'workspace') { ui.mobileDrawer = null; ui.setWorkspaceOpen(true); }
+  if (window.innerWidth > 860 && ui.mobileDrawer === 'sidebar') ui.mobileDrawer = null;
+}
 
 onMounted(() => {
   session.boot();
@@ -47,7 +52,7 @@ onMounted(() => {
       <Conversation />
       <Composer />
     </main>
-    <Workspace v-if="session.canExecute" class="app-workspace" />
+    <Workspace v-if="session.canExecute" class="app-workspace" :aria-hidden="!workspaceVisible" :inert="!workspaceVisible" />
 
     <!-- mobile drawers -->
     <div v-if="ui.mobileDrawer" class="scrim" @click="ui.mobileDrawer = null"></div>
@@ -58,6 +63,7 @@ onMounted(() => {
     <ContextMenu />
     <CommandPalette v-if="ui.commandOpen" />
     <SettingsDialog v-if="ui.dialog === 'settings'" />
+    <SubordinateDialog v-if="ui.dialog === 'add-subordinate'" />
     <WebReadDialog v-if="ui.dialog === 'webread'" />
     <ModalHost />
   </div>

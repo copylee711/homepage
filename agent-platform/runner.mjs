@@ -7,7 +7,8 @@ import { publicProviders, saveProvider, deleteProvider, activeProvider, activate
 import { sandbox, sandboxTool } from './sandbox-client.mjs';
 import { sessionCapacity } from './session-limits.mjs';
 import { prepareSessionCwd } from './session-cwd.mjs';
-import { ChatStore } from './conversations.mjs';
+import { ChatStore, normalizeProjectId } from './conversations.mjs';
+import { ToolApprovals } from './tool-approvals.mjs';
 import { SessionSnapshots, projectSession } from './session-snapshot.mjs';
 import { packageCatalog, changePackage, packageArguments, packageTextFiles } from './packages.mjs';
 import { toolchainBusy, toolchainStatus, startToolchain, renewToolchain, cancelToolchain } from './toolchains.mjs';
@@ -27,7 +28,12 @@ async function secretValues() {
     .filter(key => key.length >= 8);
 }
 class Pi {
-  constructor(user, thread) { this.user = user; this.thread = thread; this.key = user + ':' + thread; this.pending = new Map(); this.busy = false; this.buffer = ''; }
+  constructor(user, thread) {
+    this.user = user; this.thread = thread; this.key = user + ':' + thread; this.pending = new Map(); this.busy = false; this.buffer = '';
+    this.approvals = new ToolApprovals(event => {
+      if (this.proc?.stdin.writable) this.proc.stdin.write(JSON.stringify(event) + '\n');
+    }, event => { if (this.output && !this.output.destroyed) this.output.write(this.mask(JSON.stringify(event)) + '\n'); });
+  }
   async start() {
     // Never mount or load instructions/extensions from an untrusted tool workspace.
     const cwd = `/tmp/pi/${this.user}`;
@@ -35,11 +41,18 @@ class Pi {
     await mkdir(`/data/sessions/${this.user}`, { recursive: true, mode: 0o700 });
     await prepareSessionCwd(`/data/sessions/${this.user}/${this.thread}.jsonl`, cwd);
     const config = await activeProvider();
+    const meta = await chats.loadMeta(this.user);
+    const chatItem = meta.chats[this.thread] || {};
+    const projectId = chatItem.projectId || 'default';
+    const permission = chatItem.permission || { scope: 'project_only', extraProjects: {} };
     this.secrets = await secretValues();
-    this.lease = (await sandbox('/lease', this.user)).token;
+    this.lease = (await sandbox('/lease', this.user, undefined, { project: projectId, ...permission })).token;
+    await sandboxTool(this.lease, { op: 'mkdir', path: `/workspace/${projectId}` });
     const env = proxyEnvironment(config.proxy); delete env.RUNNER_SECRET; delete env.SANDBOX_SECRET;
     env.SANDBOX_URL = process.env.SANDBOX_URL || 'http://192.168.84.1:18082';
     env.SANDBOX_LEASE = this.lease;
+    env.PI_PROJECT = projectId;
+    env.PI_PERMISSION = JSON.stringify(permission);
     env.PI_PACKAGE_TEXT_FILES = JSON.stringify(await packageTextFiles());
     env.PI_OFFLINE = '1';
     // Private broker traffic must never use the model's Mihomo proxy.
@@ -57,6 +70,7 @@ class Pi {
         const line = this.buffer.slice(0, index); this.buffer = this.buffer.slice(index + 1);
         let event;
         try { event = JSON.parse(line); } catch { continue; }
+        if (this.busy) this.approvals.capture(event);
         if (event.type === 'response') {
           const wait = this.pending.get(event.id);
           if (wait) { this.pending.delete(event.id); clearTimeout(wait.timer); event.success ? wait.resolve(event.data) : wait.reject(Object.assign(new Error(event.error || 'Pi 请求失败'), { status: 502 })); }
@@ -79,6 +93,7 @@ class Pi {
   }
   mask(text) { for (const key of this.secrets || []) text = text.split(key).join('[REDACTED]'); return text; }
   finish() {
+    this.approvals.clear();
     invalidateWorkspace(this.user);
     clearTimeout(this.deadline); clearInterval(this.storageCheck); this.busy = false;
     const output = this.output; this.output = undefined;
@@ -189,12 +204,29 @@ async function cancel(user) {
   }
   await sandbox('/cancel', user);
 }
+function assertUserIdle(user) {
+  if (toolchainBusy(user) || [...sessions.values()].some(entry => entry.pi.user === user && (entry.initializing || entry.pi.busy))) {
+    fail(409, '请先停止或等待当前任务完成');
+  }
+}
+function forgetIdleSessions(user) {
+  for (const [key, entry] of sessions) if (entry.pi.user === user) {
+    sessions.delete(key); entry.pi.proc?.kill();
+  }
+}
+function shellQuote(value) { return "'" + String(value).replaceAll("'", "'\\''") + "'"; }
+async function projectDirectory(user, value) {
+  const id = normalizeProjectId(value || 'default');
+  const meta = await chats.loadMeta(user);
+  if (!meta.projects[id]) fail(404, '项目空间不存在');
+  return '/workspace/' + id;
+}
 export const server = createServer(async (req, res) => {
   try {
     if (req.url === '/healthz' && req.method === 'GET') return json(res, 200, { ok: true, model });
     if (!equal(req.headers['x-runner-secret'], secret)) fail(401, '服务认证失败');
     if (req.method !== 'POST') fail(405, '请求方法不支持');
-    const input = req.url === '/files/upload' ? await body(req, 512 * 1024) : await body(req);
+    const input = req.url === '/files/upload' ? await body(req, 21 * 1024 * 1024) : await body(req);
     if (!/^[a-f0-9]{64}$/.test(input.user || '')) fail(422, '用户标识无效');
     if (req.url === '/cancel') { await cancel(input.user); return json(res, 200, { ok: true }); }
     if (req.url === '/renew') {
@@ -285,6 +317,80 @@ export const server = createServer(async (req, res) => {
         return json(res, 200, result);
       } finally { configuring = false; }
     }
+    if (req.url === '/projects') return json(res, 200, { projects: await chats.listProjects(input.user) });
+    if (req.url === '/approvals/resolve') {
+      const entry = sessions.get(input.user + ':' + input.thread);
+      if (!entry || !entry.pi.busy) fail(409, '此任务已结束，审批无效');
+      return json(res, 200, entry.pi.approvals.resolve(input.id, input.allow));
+    }
+    if (req.url === '/projects/create') {
+      const proj = await chats.createProject(input.user, input);
+      return json(res, 200, proj);
+    }
+    if (req.url === '/projects/rename') return json(res, 200, await chats.renameProject(input.user, input.id, input.name));
+    if (req.url === '/projects/delete' || req.url === '/chats/project' || req.url === '/chats/permission') {
+      assertUserIdle(input.user);
+      const result = req.url === '/projects/delete' ? await chats.deleteProject(input.user, input.id)
+        : req.url === '/chats/project' ? await chats.setChatProject(input.user, input.thread, input.projectId)
+        : await chats.setChatPermission(input.user, input.thread, input.permission);
+      forgetIdleSessions(input.user);
+      return json(res, 200, result);
+    }
+    if (req.url === '/git/status') {
+      const dir = await projectDirectory(input.user, input.project);
+      try {
+        const lease = (await sandbox('/lease', input.user)).token;
+        const check = await sandboxTool(lease, { op: 'bash', command: `cd ${shellQuote(dir)} 2>/dev/null && git rev-parse --is-inside-work-tree 2>/dev/null`, timeout: 5000 });
+        if (!check.output || !check.output.includes('true')) {
+          return json(res, 200, { isGit: false, branch: '', branches: [] });
+        }
+        const cmd = `cd ${shellQuote(dir)} && { git branch --show-current 2>/dev/null; echo "---"; git branch --list --format="%(refname:short)" 2>/dev/null; }`;
+        const resGit = await sandboxTool(lease, { op: 'bash', command: cmd, timeout: 5000 });
+        const parts = (resGit.output || '').split('---');
+        const curBranch = (parts[0] || '').trim();
+        const branchList = (parts[1] || '').split('\n').map(b => b.trim()).filter(Boolean);
+        if (curBranch && !branchList.includes(curBranch)) branchList.unshift(curBranch);
+        return json(res, 200, { isGit: true, branch: curBranch, branches: branchList.length ? branchList : [curBranch || 'main'] });
+      } catch {
+        return json(res, 200, { isGit: false, branch: '', branches: [] });
+      }
+    }
+    if (req.url === '/git/checkout') {
+      assertUserIdle(input.user);
+      const targetBranch = String(input.branch || '').trim();
+      if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(targetBranch) || targetBranch.includes('..')) fail(422, '分支名称无效');
+      const dir = await projectDirectory(input.user, input.project);
+      try {
+        const lease = (await sandbox('/lease', input.user)).token;
+        const resGit = await sandboxTool(lease, { op: 'bash', command: `cd ${shellQuote(dir)} && git switch -- ${shellQuote(targetBranch)}`, timeout: 10000 });
+        if (resGit.exitCode !== 0) {
+          fail(400, resGit.output || '切换分支失败');
+        }
+        return json(res, 200, { ok: true, branch: targetBranch });
+      } catch (err) {
+        fail(400, err.message || '切换分支失败');
+      }
+    }
+    if (req.url === '/terminal/exec') {
+      assertUserIdle(input.user);
+      if (typeof input.command !== 'string' || !input.command.trim() || input.command.length > 20000) fail(422, '命令无效');
+      const lease = (await sandbox('/lease', input.user)).token;
+      const cwd = typeof input.cwd === 'string' && input.cwd.trim() ? input.cwd.trim() : '/workspace';
+      if (!(cwd === '/workspace' || cwd.startsWith('/workspace/')) || /[\u0000\r\n]/.test(cwd) || cwd.split('/').includes('..')) fail(422, '终端工作目录无效');
+      const sentinel = '__PWD_' + Date.now() + '__';
+      const wrapped = `cd ${shellQuote(cwd)} 2>/dev/null || exit 1; ${input.command}\n__EC=$?; printf '\\n${sentinel}'; pwd; exit $__EC`;
+      const result = await sandboxTool(lease, { op: 'bash', command: wrapped, timeout: 15000 });
+      invalidateWorkspace(input.user);
+      let output = result.output || '';
+      let nextCwd = cwd;
+      const idx = output.lastIndexOf('\n' + sentinel);
+      if (idx !== -1) {
+        const after = output.slice(idx + sentinel.length + 1).trim();
+        if (after) nextCwd = after;
+        output = output.slice(0, idx);
+      }
+      return json(res, 200, { output, exitCode: result.exitCode ?? 0, cwd: nextCwd });
+    }
     if (req.url === '/chats') return json(res, 200, { chats: await chats.list(input.user) });
     if (req.url === '/chats/rename') return json(res, 200, await chats.rename(input.user, input.thread, input.title));
     if (req.url === '/chats/pin') return json(res, 200, await chats.setPinned(input.user, input.thread, input.pinned));
@@ -292,11 +398,14 @@ export const server = createServer(async (req, res) => {
     if (req.url === '/chats/delete') return json(res, 200, await deleteChat(input.user, input.thread));
     if (req.url === '/chats/export') return json(res, 200, await chats.export(input.user, input.thread, input.format, await secretValues()));
     if (req.url === '/chats/fork') {
+      assertUserIdle(input.user);
       const target = input.targetThread || randomUUID();
-      return json(res, 200, await chats.fork(input.user, input.thread, target, input.title));
+      await sessionCapacity(`/data/sessions/${input.user}`, target, { readExisting: true });
+      return json(res, 200, await chats.fork(input.user, input.thread, target, input.title, input.keepMessages, input.keepUserTurns));
     }
     if (req.url === '/chats/truncate') {
-      const result = await chats.truncate(input.user, input.thread, Number(input.keepMessages) || 0);
+      assertUserIdle(input.user);
+      const result = await chats.truncate(input.user, input.thread, Number(input.keepMessages) || 0, input.keepUserTurns);
       snapshots.forget(input.user, input.thread);
       const live = sessions.get(input.user + ':' + input.thread);
       if (live) {
@@ -324,6 +433,7 @@ export const server = createServer(async (req, res) => {
     if (req.url === '/abort') { await cancel(input.user); return json(res, 200, { ok: true }); }
     if (req.url === '/prompt') {
       if (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 20000) fail(422, '任务内容无效');
+      await chats.initialize(input.user, input.thread, input.projectId, input.permission);
       const pi = await instance(input.user, input.thread);
       return await pi.prompt(res, input.message, input.thinking);
     }

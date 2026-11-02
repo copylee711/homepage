@@ -33,7 +33,7 @@ function insert() {
 
 <template>
   <BaseDialog title="网页阅读" subtitle="经受校验的出口代理抓取网页纯文本，脚本不执行。可将内容插入输入框作为上下文。">
-    <form class="webread-bar" @submit.prevent="fetchPage">
+    <form novalidate class="webread-bar" @submit.prevent="fetchPage">
       <label class="field webread-url"><span class="sr-only">网址</span>
         <input v-model="url" type="url" inputmode="url" placeholder="https://example.com/article" autocomplete="off" spellcheck="false">
       </label>

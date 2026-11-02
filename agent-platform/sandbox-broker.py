@@ -12,6 +12,10 @@ import threading
 import time
 import importlib.util
 
+policy_spec = importlib.util.spec_from_file_location("project_policy", Path(__file__).with_name("project-policy.py"))
+project_policy = importlib.util.module_from_spec(policy_spec)
+policy_spec.loader.exec_module(project_policy)
+
 web_spec = importlib.util.spec_from_file_location("web_access", Path(__file__).with_name("web-access.py"))
 web_access = importlib.util.module_from_spec(web_spec)
 web_spec.loader.exec_module(web_access)
@@ -118,7 +122,7 @@ def run_tool(user, value, lease):
                 "--memory", str(quota['memory_mib']) + 'm', "--memory-swap", str(quota['memory_mib']) + 'm', "--cpus", str(quota['cpus']), "--pids-limit", str(quota['pids']),
                 "--ulimit", "nofile=256:256", "--ulimit", f"fsize={quota['disk_mib'] * 1048576}:{quota['disk_mib'] * 1048576}",
                 "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777", "--shm-size", "8m",
-                "--mount", f"type=bind,src={mount},dst=/workspace",
+                *project_policy.mount_arguments(mount, leases[lease].get("policy")),
                 "--env", "HOME=/tmp", "--env", "PI_CODING_AGENT_DIR=/tmp/pi",
                 "--env", "HTTP_PROXY=http://192.168.85.2:3128", "--env", "HTTPS_PROXY=http://192.168.85.2:3128",
                 "--log-driver", "none", IMAGE], capture_output=True, timeout=15)
@@ -156,7 +160,7 @@ class Handler(BaseHTTPRequestHandler):
             if ipaddress.ip_address(self.client_address[0]) not in ipaddress.ip_network("192.168.84.0/24"):
                 return self.reply(403, {"error": "来源无效"})
             size = int(self.headers.get("Content-Length", 0))
-            if not 0 < size <= 16 * 1024 * 1024:
+            if not 0 < size <= 21 * 1024 * 1024:
                 return self.reply(413, {"error": "请求过大"})
             value = json.loads(self.rfile.read(size))
             token = self.headers.get("Authorization", "").removeprefix("Bearer ")
@@ -190,7 +194,8 @@ class Handler(BaseHTTPRequestHandler):
             with guard:
                 if self.path == "/lease":
                     token = secrets.token_urlsafe(48)
-                    leases[token] = {"user": user, "expires": time.monotonic() + 20}
+                    leases[token] = {"user": user, "expires": time.monotonic() + 20,
+                                     "policy": project_policy.policy(value.get("policy"))}
                     return self.reply(200, {"token": token})
                 if self.path == "/renew":
                     lease = leases.get(value.get("token"))

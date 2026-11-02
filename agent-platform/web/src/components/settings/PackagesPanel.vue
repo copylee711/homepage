@@ -64,7 +64,7 @@ onMounted(load);
 
 <template>
   <div class="settings-pad">
-    <form class="panel-top" @submit.prevent="load">
+    <form novalidate class="panel-top" @submit.prevent="load">
       <div class="search-box">
         <Icon name="search" :size="15" />
         <input v-model="query" type="search" placeholder="搜索技能与提示词包（npm pi-package）…" maxlength="100" autocomplete="off">

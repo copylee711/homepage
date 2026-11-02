@@ -1,9 +1,35 @@
 import { defineStore } from 'pinia';
+import { reactive } from 'vue';
 import { get, post, setCsrf, ApiError } from '../services/api';
 import { streamPrompt } from '../services/stream';
 import { useUi } from './ui';
 
-export interface Chat { id: string; title: string; updated: number; pinned?: boolean; archived?: boolean; }
+export type PermissionScope = 'project_only' | 'scoped' | 'full';
+
+export interface ChatPermission {
+  scope: PermissionScope;
+  extraProjects?: Record<string, 'read' | 'write'>;
+  execution?: 'ask' | 'auto';
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: number;
+  chatCount?: number;
+}
+
+export interface Chat {
+  id: string;
+  title: string;
+  updated: number;
+  pinned?: boolean;
+  archived?: boolean;
+  projectId?: string;
+  permission?: ChatPermission;
+}
+
 export interface Identity {
   csrf: string; admin: boolean; can_execute: boolean; model?: string;
   grant_expires_at?: number; user?: { id: string; name: string; avatar?: string };
@@ -35,6 +61,11 @@ export const useSession = defineStore('session', {
     auth: null as Identity | null,
     booted: false,
     bootError: '' as string,
+    projects: [] as Project[],
+    projectsLoading: false,
+    lastProjectId: (typeof localStorage !== 'undefined' ? localStorage.getItem('iris-last-project') : null) || 'default',
+    newChatProjectId: null as string | null,
+    newChatPermission: { scope: 'project_only', extraProjects: {} as Record<string, 'read' | 'write'> } as ChatPermission,
     chats: [] as Chat[],
     chatsLoading: true,
     chatsError: '' as string,
@@ -59,8 +90,30 @@ export const useSession = defineStore('session', {
     modelLabel: (s) => s.auth?.model || 'Iris 模型',
     currentChat: (s) => s.chats.find(c => c.id === s.chatId) || null,
     isEmpty: (s) => s.messages.length === 0 && !s.live,
+    currentProjectId: (s): string => s.chats.find(c => c.id === s.chatId)?.projectId || s.newChatProjectId || s.lastProjectId || 'default',
+    currentProject: (s): Project => {
+      const pid = s.chats.find(c => c.id === s.chatId)?.projectId || s.newChatProjectId || s.lastProjectId || 'default';
+      return s.projects.find(p => p.id === pid) || { id: pid, name: pid === 'default' ? '默认项目' : pid, createdAt: 0 };
+    },
+    currentChatPermission: (s): ChatPermission => {
+      const chat = s.chats.find(c => c.id === s.chatId);
+      if (chat?.permission) return chat.permission;
+      return s.newChatPermission || { scope: 'project_only', extraProjects: {} };
+    },
   },
   actions: {
+    async resolveApproval(id: string, allow: boolean) {
+      const approval = this.live?.approvals?.find((item: any) => item.id === id);
+      if (!approval || approval.state !== 'pending' || approval.saving) return;
+      approval.saving = true; approval.error = '';
+      try {
+        await post('/api/approvals/resolve', { thread: this.chatId, id, allow });
+        approval.state = allow ? 'allowed' : 'denied';
+      } catch (error: any) {
+        approval.error = error.message || '提交审批失败，请重试';
+        if (error.status === 409) approval.state = 'expired';
+      } finally { approval.saving = false; }
+    },
     applyIdentity(value: Identity) {
       const changedUser = this.auth && (this.auth.user?.id !== value.user?.id || !value.can_execute);
       this.auth = value;
@@ -80,12 +133,61 @@ export const useSession = defineStore('session', {
         this.applyIdentity(me);
         this.booted = true;
         if (!me.can_execute) { this.chatsLoading = false; return; }
-        await this.loadChats();
+        await Promise.all([this.loadProjects(), this.loadChats()]);
         const id = new URLSearchParams(location.search).get('chat');
         if (id && /^[a-f0-9-]{36}$/.test(id)) await this.selectChat(id);
         else this.startNew();
       } catch (error: any) {
         this.bootError = error.message || '无法读取账户，请刷新重试。';
+      }
+    },
+    async loadProjects() {
+      this.projectsLoading = true;
+      try {
+        const data = await get('/api/projects');
+        this.projects = data.projects || [];
+        if (!this.projects.some(p => p.id === 'default')) {
+          this.projects.unshift({ id: 'default', name: '默认项目', createdAt: 0 });
+        }
+        if (!this.projects.some(p => p.id === this.lastProjectId)) this.lastProjectId = 'default';
+        if (this.newChatProjectId && !this.projects.some(p => p.id === this.newChatProjectId)) this.newChatProjectId = 'default';
+      } catch {
+        this.projects = [{ id: 'default', name: '默认项目', createdAt: 0 }];
+      } finally {
+        this.projectsLoading = false;
+      }
+    },
+    async createProject(id: string, name?: string, description?: string) {
+      const p = await post('/api/projects/create', { id, name: name || id, description });
+      await this.loadProjects();
+      return p;
+    },
+    async renameProject(id: string, name: string) {
+      const p = await post('/api/projects/rename', { id, name });
+      await this.loadProjects();
+      return p;
+    },
+    async deleteProject(id: string) {
+      await post('/api/projects/delete', { id });
+      if (this.lastProjectId === id) this.lastProjectId = 'default';
+      if (this.newChatProjectId === id) this.newChatProjectId = 'default';
+      await Promise.all([this.loadProjects(), this.loadChats()]);
+    },
+    async setChatProject(thread: string, projectId: string) {
+      await post('/api/chats/project', { thread, projectId });
+      const c = this.chats.find(x => x.id === thread);
+      if (c) c.projectId = projectId;
+      this.lastProjectId = projectId;
+      try { localStorage.setItem('iris-last-project', projectId); } catch {}
+      await this.loadProjects();
+    },
+    async setChatPermission(thread: string, permission: ChatPermission) {
+      const c = this.chats.find(x => x.id === thread);
+      if (c) {
+        const result = await post('/api/chats/permission', { thread, permission });
+        c.permission = result.permission || permission;
+      } else {
+        this.newChatPermission = permission;
       }
     },
     async loadChats() {
@@ -97,7 +199,7 @@ export const useSession = defineStore('session', {
     setChatUrl(id: string | null) {
       history.replaceState(null, '', id ? '/?chat=' + encodeURIComponent(id) : '/');
     },
-    startNew() {
+    startNew(targetProjectId?: string) {
       if (this.busy) return;
       this.chatId = uuid();
       this.messages = [];
@@ -105,6 +207,10 @@ export const useSession = defineStore('session', {
       this.textQuotes = [];
       this.live = null;
       this.lastUserText = '';
+      const chosen = targetProjectId || this.currentChat?.projectId || this.lastProjectId || 'default';
+      this.newChatProjectId = chosen;
+      this.lastProjectId = chosen;
+      try { localStorage.setItem('iris-last-project', chosen); } catch {}
       this.setChatUrl(this.chatId);
     },
     addWorkspaceRef(item: { path: string; name?: string; type?: 'file' | 'dir' | 'symlink' | 'image'; size?: number; previewUrl?: string }) {
@@ -152,6 +258,12 @@ export const useSession = defineStore('session', {
     async selectChat(id: string) {
       if (this.busy) return;
       this.chatId = id;
+      const found = this.chats.find(c => c.id === id);
+      if (found?.projectId) {
+        this.lastProjectId = found.projectId;
+        try { localStorage.setItem('iris-last-project', found.projectId); } catch {}
+      }
+      this.newChatProjectId = null;
       this.setChatUrl(id);
       this.workspaceRefs = [];
       this.textQuotes = [];
@@ -213,12 +325,13 @@ export const useSession = defineStore('session', {
       const controller = new AbortController();
       this.controller = controller;
       this.busy = true;
-      const live = reactiveLive();
+      const live = reactive(reactiveLive());
       this.live = live;
       let received = false;
       try {
         const result = await streamPrompt({
-          thread, message, thinking: useUi().thinkingLevel, signal: controller.signal,
+          thread, message, thinking: useUi().thinkingLevel, projectId: this.currentProjectId,
+          permission: this.currentChatPermission, signal: controller.signal,
           onEvent: (event) => { received = true; handleEvent(event, live); },
         });
         if (!result.settled && !this.stopping) throw new ApiError('连接在任务完成前关闭，请刷新对话查看实际结果。', 0);
@@ -268,10 +381,11 @@ export const useSession = defineStore('session', {
       if (userIdx < 0) return;
       const userMsg = this.messages[userIdx];
       const rawPrompt = userMsg._rawPrompt || userMsg.content;
-      this.messages = this.messages.slice(0, userIdx);
       if (this.chatId) {
-        try { await post('/api/chats/truncate', { thread: this.chatId, keepMessages: userIdx }); } catch {}
+        try { await post('/api/chats/truncate', { thread: this.chatId, keepUserTurns: this.messages.slice(0, userIdx).filter(m => m.role === 'user').length }); }
+        catch (error: any) { useUi().toast(error.message || '重试失败，历史已保留', { tone: 'error' }); return; }
       }
+      this.messages = this.messages.slice(0, userIdx);
       await this.send(rawPrompt);
     },
     async rewindFromMessage(msg: any) {
@@ -286,10 +400,11 @@ export const useSession = defineStore('session', {
       }
       const userMsg = this.messages[userIdx];
       const rawPrompt = userMsg?._rawPrompt || userMsg?.content || '';
-      this.messages = this.messages.slice(0, userIdx);
       if (this.chatId) {
-        try { await post('/api/chats/truncate', { thread: this.chatId, keepMessages: userIdx }); } catch {}
+        try { await post('/api/chats/truncate', { thread: this.chatId, keepUserTurns: this.messages.slice(0, userIdx).filter(m => m.role === 'user').length }); }
+        catch (error: any) { useUi().toast(error.message || '回退失败，历史已保留', { tone: 'error' }); return; }
       }
+      this.messages = this.messages.slice(0, userIdx);
       this.draftText = rawPrompt;
     },
     async forkFromMessage(msg: any) {
@@ -299,13 +414,13 @@ export const useSession = defineStore('session', {
       try {
         const res = await post('/api/chats/fork', {
           thread: this.chatId,
-          title: (this.currentChat?.title || '新对话') + ' (分支)',
-          keepMessages: keep,
+          title: (this.currentChat?.title || '新任务') + ' (分支)',
+          keepUserTurns: this.messages.slice(0, keep).filter(m => m.role === 'user').length,
         });
         await this.loadChats();
-        if (res?.thread) {
-          await this.selectChat(res.thread);
-          return { id: res.thread, title: res.title || '新分支' };
+        if (res?.id) {
+          await this.selectChat(res.id);
+          return { id: res.id, title: res.title || '新分支' };
         }
       } catch (err: any) {
         useUi().toast('分叉失败: ' + err.message, { tone: 'error' });
@@ -316,6 +431,20 @@ export const useSession = defineStore('session', {
       const result = await post('/api/providers/activate', { id, model });
       await this.refreshIdentity();
       return result;
+    },
+    async getGitStatus(projectId?: string) {
+      const pid = projectId || this.currentProjectId || 'default';
+      try {
+        const res = await get(`/api/git/status?project=${encodeURIComponent(pid)}`);
+        return res as { isGit: boolean; branch: string; branches: string[] };
+      } catch {
+        return { isGit: false, branch: '', branches: [] };
+      }
+    },
+    async checkoutGitBranch(branch: string, projectId?: string) {
+      const pid = projectId || this.currentProjectId || 'default';
+      const res = await post('/api/git/checkout', { project: pid, branch });
+      return res as { ok: boolean; branch: string };
     },
   },
 });
@@ -330,13 +459,24 @@ function lastUser(items: any[]): string {
 
 // A plain reactive-friendly object describing the streaming assistant turn.
 function reactiveLive() {
-  return { blocks: [] as any[], status: '正在连接模型…', spinner: true, finished: false, error: '', stopped: false, tools: {} as Record<string, any> };
+  return { blocks: [] as any[], approvals: [] as any[], status: '正在连接模型…', spinner: true, finished: false, error: '', stopped: false, tools: {} as Record<string, any> };
 }
 
 // Reduce a runner stream event into the live view model's block list.
 function handleEvent(event: any, live: any) {
   if (!event || typeof event !== 'object') return;
   const vm = live;
+  if (event.type === 'extension_ui_request' && event.method === 'confirm') {
+    vm.approvals.push({ id: event.id, title: event.title, message: event.message, expiresAt: event.expiresAt, state: 'pending', saving: false, error: '' });
+    vm.status = '等待你审批工具操作…'; vm.spinner = false;
+    return;
+  }
+  if (event.type === 'approval_resolved') {
+    const item = vm.approvals.find((a: any) => a.id === event.id);
+    if (item) item.state = event.allowed ? 'allowed' : 'denied';
+    vm.status = event.reason || '审批已处理';
+    return;
+  }
   const ensureBlock = (index: number, type: string) => {
     let b = vm.blocks.find((x: any) => x.index === index);
     if (!b) { b = { index, type, text: '', fresh: true }; vm.blocks.push(b); vm.blocks.sort((a: any, z: any) => a.index - z.index); }

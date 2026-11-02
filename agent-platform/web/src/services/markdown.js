@@ -11,6 +11,14 @@ const UL = /^( {0,3})([-+*])[ \t]+(.*)$/;
 const OL = /^( {0,3})(\d{1,9})[.)][ \t]+(.*)$/;
 const SEPARATOR = /^ {0,3}\|?[ \t]*:?-{2,}:?[ \t]*(?:\|[ \t]*:?-{2,}:?[ \t]*)*\|?[ \t]*$/;
 
+export function isWsFilePath(raw) {
+  if (typeof raw !== 'string') return false;
+  const v = raw.trim();
+  if (!v || v.length > 500 || /\s/.test(v)) return false;
+  if (v.startsWith('/workspace/') || v.startsWith('workspace/')) return true;
+  return /^[a-zA-Z0-9_\-一-龥./]+\.(?:py|js|mjs|cjs|ts|tsx|jsx|vue|html|css|scss|json|md|txt|csv|tsv|png|jpe?g|gif|svg|webp|sh|bash|yml|yaml|sql|go|rs|c|cpp|h|toml|ini|env)$/i.test(v) && !v.includes('://');
+}
+
 export function safeHref(raw) {
   if (typeof raw !== 'string') return null;
   const value = raw.trim();
@@ -31,6 +39,14 @@ function node(doc, tag, className, text) {
   return element;
 }
 function link(doc, href, label, className = '') {
+  if (isWsFilePath(href)) {
+    const cleanPath = href.trim();
+    const anchor = node(doc, 'a', (className ? className + ' ' : '') + 'md-ws-link', label);
+    anchor.setAttribute('href', '#');
+    anchor.setAttribute('data-ws-file', cleanPath);
+    anchor.setAttribute('title', `点击在工作区中定位并查看此文件：${cleanPath}`);
+    return anchor;
+  }
   const safe = safeHref(href);
   if (!safe) return node(doc, 'span', 'md-blocked-link', label);
   const anchor = node(doc, 'a', className || null, label);
@@ -366,7 +382,16 @@ export function renderInline(value, parent, doc = globalThis.document, depth = 0
       if (close >= 0) {
         let content = value.slice(index + size, close);
         if (content.startsWith(' ') && content.endsWith(' ') && content.trim()) content = content.slice(1, -1);
-        flush(); parent.append(node(doc, 'code', 'md-code', content)); index = close + size; continue;
+        flush();
+        const codeElement = node(doc, 'code', 'md-code', content);
+        if (isWsFilePath(content)) {
+          codeElement.classList.add('md-ws-file');
+          codeElement.setAttribute('data-ws-file', content.trim());
+          codeElement.setAttribute('title', `点击在工作区中定位并查看此文件：${content.trim()}`);
+        }
+        parent.append(codeElement);
+        index = close + size;
+        continue;
       }
     }
     // Inline math $…$ / \(…\): opener followed by non-space, closer preceded by non-space, not a price.

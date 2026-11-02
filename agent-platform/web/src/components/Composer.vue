@@ -2,12 +2,16 @@
 import { ref, computed, watch, nextTick } from 'vue';
 import Icon from './Icon.vue';
 import ModelMenu from './ModelMenu.vue';
-import { useSession } from '../stores/session';
+import DropMenu from './DropMenu.vue';
+import type { MenuItem } from './DropMenu.vue';
+import { useSession, type PermissionScope } from '../stores/session';
+import { useWorkspace } from '../stores/workspace';
 import { useUi } from '../stores/ui';
 import { post } from '../services/api';
 import { formatBytes } from '../services/format';
 
 const session = useSession();
+const ws = useWorkspace();
 const ui = useUi();
 const text = ref('');
 const area = ref<HTMLTextAreaElement | null>(null);
@@ -16,6 +20,37 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const modelOpen = ref(false);
 const uploading = ref(false);
 const dragOver = ref(false);
+
+const isNewSession = computed(() => !session.currentChat);
+const projectMenu = ref<{ anchor: HTMLElement; items: MenuItem[] } | null>(null);
+const branchMenu = ref<{ anchor: HTMLElement; items: MenuItem[] } | null>(null);
+const permissionMenu = ref<{ anchor: HTMLElement; items: MenuItem[] } | null>(null);
+
+const gitInfo = ref<{ isGit: boolean; branch: string; branches: string[] }>({
+  isGit: false,
+  branch: '',
+  branches: [],
+});
+const gitLoading = ref(false);
+
+async function refreshGitStatus() {
+  if (!session.canExecute) return;
+  const pid = session.currentProjectId;
+  try {
+    const res = await session.getGitStatus(pid);
+    gitInfo.value = res;
+  } catch {
+    gitInfo.value = { isGit: false, branch: '', branches: [] };
+  }
+}
+
+watch(() => session.currentProjectId, () => {
+  void refreshGitStatus();
+}, { immediate: true });
+
+watch(() => session.chatId, () => {
+  void refreshGitStatus();
+});
 
 const workspaceRefs = computed(() => session.workspaceRefs || []);
 const textQuotes = computed(() => session.textQuotes || []);
@@ -29,6 +64,10 @@ const placeholder = computed(() => {
 });
 const stateText = computed(() => session.busy ? (session.stopping ? '正在停止任务…' : 'Iris 正在处理任务…') : (session.canExecute ? '' : '尚未开通执行权限'));
 const effortLabel = computed(() => ({ off: '', low: '低', medium: '中', high: '高', max: '极高' }[ui.thinkingLevel] || ''));
+
+const currentScope = computed(() => session.currentChatPermission.scope || 'project_only');
+const executionMode = computed(() => session.currentChatPermission.execution === 'auto' ? 'auto' : 'ask');
+const executionLabel = computed(() => executionMode.value === 'auto' ? '自动执行' : '需要审批');
 
 function autosize() {
   const el = area.value; if (!el) return;
@@ -113,13 +152,13 @@ async function uploadFiles(files: File[]) {
       if (safeName.startsWith('image.') || safeName === 'image.png') {
         safeName = `img_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}.png`;
       }
-      const targetPath = `uploads/${safeName}`;
+      const targetPath = `${session.currentProjectId}/uploads/${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}_${safeName}`;
 
       await post('/api/files/upload', {
         path: targetPath,
         content: base64,
         encoding: 'base64',
-        overwrite: true,
+        overwrite: false,
       });
 
       session.addWorkspaceRef({
@@ -175,6 +214,249 @@ function onDrop(e: DragEvent) {
   }
 }
 
+function buildProjectMenuItems(anchor: HTMLElement): MenuItem[] {
+  const currentPid = session.currentProjectId;
+  const isNew = isNewSession.value;
+  const items: MenuItem[] = [];
+
+  if (isNew) {
+    items.push({ header: '主项目空间 (会话开启后不可变更)' });
+    for (const p of session.projects) {
+      items.push({
+        icon: p.id === currentPid ? 'check' : 'folder',
+        label: p.name + (p.id !== p.name && p.id !== 'default' ? ` (${p.id})` : ''),
+        action: () => {
+          session.newChatProjectId = p.id;
+          session.lastProjectId = p.id;
+          try { localStorage.setItem('iris-last-project', p.id); } catch {}
+          ws.setTerminalCwd(`/workspace/${p.id}`);
+          ui.toast(`已将新任务主空间设为“${p.name}”`, { tone: 'info', duration: 1500 });
+        },
+      });
+    }
+  } else {
+    items.push({
+      header: `主项目空间：${session.currentProject?.name || currentPid} (已锁定)`,
+    });
+  }
+
+  // Subordinate project spaces management (按需添加，右侧切换权限开关 只读/读写)
+  const otherProjects = session.projects.filter(p => p.id !== currentPid);
+  if (otherProjects.length > 0) {
+    items.push({ divider: true });
+    items.push({ header: '从属空间授权' });
+    const curPerm = session.currentChatPermission;
+    const extra = curPerm.extraProjects || {};
+    const addedProjects = otherProjects.filter(p => extra[p.id] === 'read' || extra[p.id] === 'write');
+    const unaddedProjects = otherProjects.filter(p => !extra[p.id]);
+
+    for (const p of addedProjects) {
+      items.push({
+        type: 'subordinate',
+        disabled: session.busy || currentScope.value === 'full',
+        icon: 'folder',
+        label: p.name,
+        permission: extra[p.id] as 'read' | 'write',
+        onSetPermission: (perm: 'read' | 'write') => setSubordinatePermission(p.id, p.name, perm, anchor),
+        onRemove: () => removeSubordinate(p.id, p.name, anchor),
+      });
+    }
+
+    if (unaddedProjects.length > 0) {
+      items.push({
+        icon: 'plus',
+        label: '添加从属项目…',
+        disabled: session.busy || currentScope.value === 'full',
+        action: () => ui.openDialog('add-subordinate'),
+      });
+    }
+  }
+
+  items.push({ divider: true });
+  items.push({
+    icon: currentScope.value === 'full' ? 'check' : 'folder',
+    label: currentScope.value === 'full' ? '已授权整个 /workspace（点击收回）' : '授权整个 /workspace…',
+    disabled: session.busy,
+    action: async () => {
+      if (currentScope.value === 'full') { await setScope('project_only'); return; }
+      const ok = await ui.confirm({ title: '授权整个工作区', message: 'Agent 将能访问你工作区内的所有项目与根目录文件；工具执行仍遵循下方审批模式。', confirmText: '授予访问' });
+      if (ok) await setScope('full');
+    },
+  });
+  items.push({
+    icon: 'plus',
+    label: '新建项目空间',
+    action: handleCreateProject,
+  });
+  return items;
+}
+
+function openProjectMenu(e: MouseEvent) {
+  const anchor = e.currentTarget as HTMLElement;
+  openProjectMenuWithAnchor(anchor);
+}
+
+function openProjectMenuWithAnchor(anchor: HTMLElement) {
+  projectMenu.value = { anchor, items: buildProjectMenuItems(anchor) };
+}
+
+async function setSubordinatePermission(targetProjectId: string, projectName: string, perm: 'read' | 'write', anchor?: HTMLElement) {
+  if (session.busy || currentScope.value === 'full') return;
+  const curPerm = { ...session.currentChatPermission };
+  const extra = { ...(curPerm.extraProjects || {}) };
+  if (extra[targetProjectId] === perm) return;
+  extra[targetProjectId] = perm;
+  const nextPerm = {
+    ...curPerm,
+    scope: curPerm.scope === 'project_only' ? 'scoped' as PermissionScope : curPerm.scope,
+    extraProjects: extra,
+  };
+  try {
+    if (session.chatId && !isNewSession.value) {
+      await session.setChatPermission(session.chatId, nextPerm);
+    } else {
+      session.newChatPermission = nextPerm;
+    }
+    ui.toast(`已将“${projectName}”权限设为${perm === 'write' ? '读写' : '只读'}`, { tone: 'info', duration: 1500 });
+  } catch (err: any) {
+    ui.toast(err.message || '更新权限失败', { tone: 'error' });
+  }
+  if (anchor) {
+    openProjectMenuWithAnchor(anchor);
+  }
+}
+
+async function removeSubordinate(targetProjectId: string, projectName: string, anchor?: HTMLElement) {
+  if (session.busy || currentScope.value === 'full') return;
+  const curPerm = { ...session.currentChatPermission };
+  const extra = { ...(curPerm.extraProjects || {}) };
+  delete extra[targetProjectId];
+  const nextPerm = {
+    ...curPerm,
+    extraProjects: extra,
+  };
+  try {
+    if (session.chatId && !isNewSession.value) {
+      await session.setChatPermission(session.chatId, nextPerm);
+    } else {
+      session.newChatPermission = nextPerm;
+    }
+    ui.toast(`已移除从属空间“${projectName}”授权`, { tone: 'info', duration: 1500 });
+  } catch (err: any) {
+    ui.toast(err.message || '移除失败', { tone: 'error' });
+  }
+  if (anchor) {
+    openProjectMenuWithAnchor(anchor);
+  }
+}
+
+function openBranchMenu(e: MouseEvent) {
+  if (!gitInfo.value.isGit) return;
+  const currentBranch = gitInfo.value.branch;
+  const items: MenuItem[] = [
+    { header: `Git 分支 (${currentBranch || 'HEAD'})` },
+    ...gitInfo.value.branches.map(b => ({
+      icon: b === currentBranch ? 'check' : 'git-branch',
+      label: b,
+      action: () => checkoutBranch(b),
+    })),
+    { divider: true },
+    {
+      icon: 'rotate-ccw',
+      label: '刷新分支状态',
+      action: refreshGitStatus,
+    },
+  ];
+  branchMenu.value = { anchor: e.currentTarget as HTMLElement, items };
+}
+
+async function checkoutBranch(targetBranch: string) {
+  if (targetBranch === gitInfo.value.branch) return;
+  gitLoading.value = true;
+  try {
+    await session.checkoutGitBranch(targetBranch, session.currentProjectId);
+    ui.toast(`已切换至分支 ${targetBranch}`, { tone: 'success' });
+    await refreshGitStatus();
+  } catch (err: any) {
+    ui.toast(err.message || '切换分支失败', { tone: 'error' });
+  } finally {
+    gitLoading.value = false;
+  }
+}
+
+function openPermissionMenu(e: MouseEvent) {
+  const items: MenuItem[] = [
+    { header: '工具执行方式（不改变项目范围）' },
+    {
+      icon: executionMode.value === 'ask' ? 'check' : 'shield',
+      label: '需要审批 · 每次工具调用前询问',
+      action: () => setExecution('ask'),
+    },
+    {
+      icon: executionMode.value === 'auto' ? 'check' : 'play',
+      label: '自动执行 · 在已授权范围内运行',
+      action: () => setExecution('auto'),
+    },
+  ];
+  permissionMenu.value = { anchor: e.currentTarget as HTMLElement, items };
+}
+async function setExecution(execution: 'ask' | 'auto') {
+  if (session.busy || execution === executionMode.value) return;
+  if (execution === 'auto' && !await ui.confirm({ title: '启用自动执行', message: '后续工具调用将在已选项目范围内直接执行，不再逐次询问。你仍可随时停止任务。', confirmText: '启用自动执行' })) return;
+  const next = { ...session.currentChatPermission, execution };
+  try {
+    if (session.chatId && !isNewSession.value) await session.setChatPermission(session.chatId, next);
+    else session.newChatPermission = next;
+    ui.toast(execution === 'auto' ? '已启用自动执行' : '已启用逐次审批', { tone: 'success' });
+  } catch (error: any) { ui.toast(error.message || '更新执行方式失败', { tone: 'error' }); }
+}
+
+async function setScope(scope: PermissionScope) {
+  if (session.busy || scope === currentScope.value) return;
+  const nextPerm = {
+    ...session.currentChatPermission,
+    scope,
+  };
+  try {
+    if (session.chatId && !isNewSession.value) {
+      await session.setChatPermission(session.chatId, nextPerm);
+    } else {
+      session.newChatPermission = nextPerm;
+    }
+    const nameMap: Record<string, string> = {
+      project_only: '项目内编辑',
+      scoped: '受限授权',
+      full: '完全权限',
+    };
+    ui.toast(`已切换为“${nameMap[scope]}”`, { tone: 'info', duration: 1500 });
+  } catch (err: any) {
+    ui.toast(err.message || '更新权限失败', { tone: 'error' });
+  }
+}
+
+async function handleCreateProject() {
+  const nameOrId = await ui.prompt({
+    title: '新建项目空间',
+    message: '输入项目标识（字母、数字、短横线、中文，1–40 字符）',
+    placeholder: '例如 app-backend 或 数据分析',
+    confirmText: '创建项目',
+  });
+  if (!nameOrId?.trim()) return;
+  const clean = nameOrId.trim();
+  try {
+    const created = await session.createProject(clean, clean);
+    if (isNewSession.value) {
+      session.newChatProjectId = created.id;
+      session.lastProjectId = created.id;
+      try { localStorage.setItem('iris-last-project', created.id); } catch {}
+      ws.setTerminalCwd(`/workspace/${created.id}`);
+    }
+    ui.toast(`已创建项目空间“${created.name}”`, { tone: 'success' });
+  } catch (err: any) {
+    ui.toast(err.message || '创建项目空间失败', { tone: 'error' });
+  }
+}
+
 // Watch draft text from rewind
 watch(() => session.draftText, (val) => {
   if (val !== undefined && val !== null && val !== '') {
@@ -190,7 +472,7 @@ watch(() => session.draftText, (val) => {
 
 <template>
   <footer class="composer-area" :class="{ 'is-welcome': session.isEmpty }">
-    <form
+    <form novalidate
       class="composer"
       :class="{ 'is-disabled': !session.canExecute, 'is-dragover': dragOver }"
       @submit.prevent="submit"
@@ -208,6 +490,46 @@ watch(() => session.draftText, (val) => {
         tabindex="-1"
         @change="onFilesSelected"
       />
+
+      <!-- ZCode-style persistent protrusion tab bar -->
+      <div v-if="session.canExecute" class="composer-project-tab-bar">
+        <button
+          type="button"
+          class="composer-project-tab-btn"
+          :title="isNewSession
+            ? ('当前任务主空间：' + (session.currentProject?.name || '默认项目') + '（点击切换主空间或管理从属空间）')
+            : ('当前任务主空间：' + (session.currentProject?.name || '默认项目') + '（已锁定 · 点击管理从属空间权限）')"
+          @click="openProjectMenu"
+        >
+          <Icon name="folder" :size="13" />
+          <span class="composer-project-tab-name">{{ session.currentProject?.name || '默认项目' }}{{ currentScope === 'full' ? ' · 全工作区' : '' }}</span>
+          <Icon name="chevron-down" :size="11" class="composer-project-tab-arrow" />
+        </button>
+
+        <!-- Git branch tab pill (when primary project space is a git repo) -->
+        <button
+          v-if="gitInfo.isGit"
+          type="button"
+          class="composer-project-tab-btn composer-git-tab-btn"
+          :class="{ 'is-loading': gitLoading }"
+          :title="'当前 Git 分支：' + (gitInfo.branch || 'HEAD') + '（点击切换分支）'"
+          @click="openBranchMenu"
+        >
+          <Icon name="git-branch" :size="12" />
+          <span class="composer-project-tab-name">{{ gitInfo.branch || 'detached' }}</span>
+          <Icon name="chevron-down" :size="11" class="composer-project-tab-arrow" />
+        </button>
+
+        <button
+          type="button"
+          class="composer-project-tab-add"
+          title="新建项目空间"
+          aria-label="新建项目空间"
+          @click="handleCreateProject"
+        >
+          <Icon name="plus" :size="13" />
+        </button>
+      </div>
 
       <!-- GPT-style quoted text cards -->
       <div v-if="textQuotes.length" class="composer-quotes">
@@ -262,7 +584,7 @@ watch(() => session.draftText, (val) => {
         </div>
       </div>
 
-      <textarea
+      <textarea style="resize: none"
         ref="area"
         v-model="text"
         rows="1"
@@ -290,6 +612,20 @@ watch(() => session.draftText, (val) => {
           <Icon v-else name="plus" :size="18" />
         </button>
 
+        <!-- Simplified Permission Chip: pops up a lightweight DropMenu to switch permission scopes -->
+        <button
+          v-if="session.canExecute"
+          type="button"
+          class="composer-project-chip"
+          :title="'工具执行方式：' + executionLabel"
+          :disabled="session.busy"
+          @click="openPermissionMenu"
+        >
+          <Icon :name="executionMode === 'auto' ? 'play' : 'shield'" :size="12" />
+          <span class="composer-project-label">{{ executionLabel }}</span>
+          <Icon name="chevron-down" :size="10" class="composer-project-arrow" />
+        </button>
+
         <span class="composer-spacer"></span>
         <span v-if="text.length > 16000" class="composer-count">{{ text.length }} / 20000</span>
         <button ref="chipEl" type="button" class="model-chip" title="切换模型与思考强度" @click="modelOpen = !modelOpen">
@@ -303,6 +639,9 @@ watch(() => session.draftText, (val) => {
     </form>
     <div class="composer-footer"><span class="task-state">{{ stateText }}</span></div>
     <ModelMenu v-if="modelOpen && chipEl" :anchor="chipEl" @close="modelOpen = false" />
+    <DropMenu v-if="projectMenu" :anchor="projectMenu.anchor" :items="projectMenu.items" label="项目空间选项" @close="projectMenu = null" />
+    <DropMenu v-if="branchMenu" :anchor="branchMenu.anchor" :items="branchMenu.items" label="Git 分支" @close="branchMenu = null" />
+    <DropMenu v-if="permissionMenu" :anchor="permissionMenu.anchor" :items="permissionMenu.items" label="Agent 权限" up @close="permissionMenu = null" />
   </footer>
 </template>
 
@@ -312,10 +651,101 @@ watch(() => session.draftText, (val) => {
 @media (max-width: 860px) {
   .composer-area.is-welcome { padding-bottom: max(20px, calc(50dvh - 142px)); }
 }
-.composer { max-width: 760px; margin: 0 auto; padding: 11px 13px 9px 17px; border: 1px solid var(--line-2); border-radius: 24px; background: var(--surface); box-shadow: var(--shadow); transition: border-color var(--fast), box-shadow var(--fast), background-color var(--fast); }
+.composer {
+  position: relative;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 11px 13px 9px 17px;
+  border: 1px solid var(--line-2);
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  transition: border-color var(--fast), box-shadow var(--fast), background-color var(--fast);
+}
 .composer:focus-within { border-color: var(--line-focus); }
 .composer.is-dragover { border-color: var(--accent); background: var(--accent-softer); box-shadow: 0 0 0 3px var(--accent-soft); }
 .composer-hidden-input { display: none; }
+
+/* ZCode-style project tab protrusion (only on new session page) */
+.composer-project-tab-bar {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  z-index: 3;
+  pointer-events: auto;
+  animation: comp-tab-in 160ms var(--ease);
+}
+@keyframes comp-tab-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+.composer-project-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: background-color var(--fast), border-color var(--fast), color var(--fast), transform var(--fast);
+  max-width: 260px;
+}
+.composer-project-tab-btn:hover {
+  background: color-mix(in srgb, var(--text) 4%, var(--surface));
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.composer-project-tab-btn:active {
+  transform: scale(0.98);
+}
+.composer-project-tab-btn svg {
+  flex: none;
+  color: var(--muted);
+  transition: color var(--fast);
+}
+.composer-project-tab-btn:hover svg {
+  color: var(--text);
+}
+.composer-project-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-project-tab-arrow {
+  opacity: 0.65;
+  margin-left: -1px;
+}
+.composer-project-tab-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: background-color var(--fast), border-color var(--fast), color var(--fast), transform var(--fast);
+}
+.composer-project-tab-add:hover {
+  background: color-mix(in srgb, var(--text) 4%, var(--surface));
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.composer-project-tab-add:active {
+  transform: scale(0.96);
+}
 
 .composer-quotes { display: flex; flex-wrap: wrap; align-items: stretch; gap: 7px; padding: 2px 1px 8px; animation: comp-chips-in 160ms var(--ease); }
 .composer-quote-card {
@@ -395,6 +825,72 @@ watch(() => session.draftText, (val) => {
 .composer-icon-btn.is-uploading { pointer-events: none; opacity: 0.7; }
 .composer-upload-spin { width: 14px; height: 14px; border: 1.8px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: comp-spin 0.65s linear infinite; }
 @keyframes comp-spin { to { transform: rotate(360deg); } }
+
+.composer-project-chip {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 520;
+  cursor: pointer;
+  transition: border-color var(--fast), background-color var(--fast), color var(--fast);
+  flex: none;
+}
+.composer-project-chip:hover {
+  border-color: var(--line-2);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  color: var(--text);
+}
+.composer-project-label {
+  white-space: nowrap;
+}
+.composer-project-arrow {
+  opacity: 0.6;
+  margin-left: -2px;
+}
+.composer-git-tab-btn {
+  max-width: 200px;
+}
+.composer-git-tab-btn.is-loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+@media (max-width: 640px) {
+  .composer-project-tab-bar {
+    left: 8px;
+    bottom: calc(100% + 6px);
+  }
+  .composer-project-tab-btn {
+    max-width: 170px;
+    height: 25px;
+    padding: 0 8px 0 7px;
+    font-size: 11px;
+  }
+  .composer-project-tab-add {
+    width: 25px;
+    height: 25px;
+  }
+  .composer-project-chip {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    justify-content: center;
+  }
+  .composer-project-chip svg {
+    width: 15px;
+    height: 15px;
+  }
+  .composer-project-label,
+  .composer-project-arrow {
+    display: none;
+  }
+}
 
 .composer-count { flex: none; color: var(--faint); font-size: 10px; font-variant-numeric: tabular-nums; }
 .model-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 256px; height: 30px; padding: 0 9px 0 10px; overflow: hidden; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--text-2); font-size: 11.5px; font-weight: 520; transition: border-color var(--fast), background-color var(--fast); }

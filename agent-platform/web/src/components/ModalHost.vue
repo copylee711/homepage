@@ -2,10 +2,13 @@
 import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useUi } from '../stores/ui';
 import ImageLightbox from './ImageLightbox.vue';
+import { useDialogFocus } from '../services/dialog-focus';
 
 const ui = useUi();
 const inputEl = ref<HTMLInputElement | null>(null);
 const draft = ref('');
+const dialogEl = ref<HTMLElement | null>(null);
+useDialogFocus(dialogEl);
 
 watch(
   () => ui.modal,
@@ -55,7 +58,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey, true));
 <template>
   <teleport to="body">
     <div v-if="ui.modal" class="iris-modal-backdrop" @click.self="cancel">
-      <form class="iris-modal" role="dialog" aria-modal="true" :aria-label="ui.modal.title" @submit.prevent="submit">
+      <form ref="dialogEl" tabindex="-1" novalidate class="iris-modal" role="dialog" aria-modal="true" :aria-label="ui.modal.title" @submit.prevent="submit">
         <h3 class="iris-modal-title">{{ ui.modal.title }}</h3>
         <p v-if="ui.modal.message" class="iris-modal-msg">{{ ui.modal.message }}</p>
 

@@ -222,6 +222,9 @@ export const server = createServer(async (req, res) => {
       if (url.pathname === '/api/packages' && req.method === 'GET') {
         const response = await runner('/packages', auth.user.id, { query: url.searchParams.get('q') || '' }); return json(res, 200, await response.json());
       }
+      if (url.pathname === '/api/projects' && req.method === 'GET') {
+        const response = await runner('/projects', auth.user.id, {}); return json(res, 200, await response.json());
+      }
       if (url.pathname === '/api/chats' && req.method === 'GET') {
         const response = await runner('/chats', auth.user.id, {}); return json(res, 200, await response.json());
       }
@@ -250,10 +253,14 @@ export const server = createServer(async (req, res) => {
       if (url.pathname === '/api/session' && req.method === 'GET') {
         const response = await runner('/session', auth.user.id, { thread: url.searchParams.get('chat') }); return json(res, 200, await response.json());
       }
+      if (url.pathname === '/api/git/status' && req.method === 'GET') {
+        const response = await runner('/git/status', auth.user.id, { project: url.searchParams.get('project') || 'default' });
+        return json(res, 200, await response.json());
+      }
       if (req.method !== 'POST') fail(405, '请求方法不支持');
       writeAccess(req, auth);
       if (url.pathname === '/api/files/upload') {
-        const input = await body(req, 20 * 1024 * 1024);
+        const input = await body(req, 21 * 1024 * 1024);
         if (typeof input.path !== 'string' || !input.path || input.path.length > 1024 || /[\u0000\r\n]/.test(input.path)) fail(422, '工作区路径无效');
         if (typeof input.content !== 'string') fail(422, '请选择文件内容');
         const isBase64 = input.encoding === 'base64';
@@ -274,6 +281,10 @@ export const server = createServer(async (req, res) => {
         return json(res, 200, await response.json());
       }
       const input = await body(req);
+      if (url.pathname === '/api/approvals/resolve') {
+        const response = await runner('/approvals/resolve', auth.user.id, { thread: input.thread, id: input.id, allow: input.allow });
+        return json(res, 200, await response.json());
+      }
       if (url.pathname === '/api/quotas/save') {
         const response = await runner('/quotas/save', auth.user.id, { target: input.user_id, quota: input.quota }, AbortSignal.timeout(135000));
         return json(res, 200, await response.json());
@@ -313,7 +324,7 @@ export const server = createServer(async (req, res) => {
         const response = await runner('/web-read', auth.user.id, { url: input.url });
         return json(res, 200, await response.json());
       }
-      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/chats/fork', '/api/chats/truncate'].includes(url.pathname)) {
+      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/chats/fork', '/api/chats/truncate', '/api/chats/project', '/api/chats/permission', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/terminal/exec', '/api/git/status', '/api/git/checkout'].includes(url.pathname)) {
         const response = await runner(url.pathname.replace('/api', ''), auth.user.id, input);
         return json(res, 200, await response.json());
       }
@@ -337,7 +348,7 @@ export const server = createServer(async (req, res) => {
           finally { checking = false; }
         }, 5000);
         try {
-          const response = await runner('/prompt', auth.user.id, { message: input.message, thread: input.thread, thinking }, abort.signal);
+          const response = await runner('/prompt', auth.user.id, { message: input.message, thread: input.thread, thinking, projectId: input.projectId, permission: input.permission }, abort.signal);
           res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Accel-Buffering': 'no' });
           await pipeline(Readable.fromWeb(response.body), res);
         } finally { clearInterval(timer); await runner('/cancel', auth.user.id, {}).catch(() => {}); }

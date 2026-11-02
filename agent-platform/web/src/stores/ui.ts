@@ -45,8 +45,10 @@ export const useUi = defineStore('ui', {
     workspaceOpen: readLS('iris-workspace', 'closed') === 'open',
     workspaceW: readNum('iris-workspace-w', 380),
     workspaceDual: readLS('iris-workspace-dual', 'off') === 'on',
+    showHiddenFiles: readLS('iris-show-hidden-files', 'off') === 'on',
     chatDensity: (readLS('iris-chat-density', 'cozy') as 'cozy' | 'compact'),
     chatGroupByDate: readLS('iris-chat-group', 'on') !== 'off',
+    chatGroupMode: (readLS('iris-chat-group-mode', 'date') as 'date' | 'project' | 'none'),
     mobileDrawer: null as null | 'sidebar' | 'workspace',
     toasts: [] as Toast[],
     dialog: null as null | string,
@@ -57,6 +59,10 @@ export const useUi = defineStore('ui', {
     lightbox: null as LightboxState | null,
   }),
   actions: {
+    toggleHiddenFiles() {
+      this.showHiddenFiles = !this.showHiddenFiles;
+      try { localStorage.setItem('iris-show-hidden-files', this.showHiddenFiles ? 'on' : 'off'); } catch {}
+    },
     setTheme(next: 'light' | 'dark', event?: MouseEvent) {
       if (this.theme === next) return;
       const root = document.documentElement;
@@ -125,10 +131,25 @@ export const useUi = defineStore('ui', {
     },
     setChatGroupByDate(on: boolean) {
       this.chatGroupByDate = on;
+      this.chatGroupMode = on ? 'date' : 'none';
       try { localStorage.setItem('iris-chat-group', on ? 'on' : 'off'); } catch {}
     },
     toggleChatGroupByDate() {
       this.setChatGroupByDate(!this.chatGroupByDate);
+    },
+    setChatGroupMode(mode: 'date' | 'project' | 'none') {
+      this.chatGroupMode = mode;
+      this.chatGroupByDate = mode === 'date';
+      try {
+        localStorage.setItem('iris-chat-group-mode', mode);
+        localStorage.setItem('iris-chat-group', mode === 'date' ? 'on' : 'off');
+      } catch {}
+    },
+    cycleChatGroupMode() {
+      const order: Array<'date' | 'project' | 'none'> = ['date', 'project', 'none'];
+      const next = order[(order.indexOf(this.chatGroupMode) + 1) % order.length];
+      this.setChatGroupMode(next);
+      return next;
     },
     toast(message: string, opts: { tone?: Tone; action?: Toast['action']; duration?: number } = {}) {
       const id = ++toastSeq;

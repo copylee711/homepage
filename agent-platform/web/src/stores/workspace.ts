@@ -50,20 +50,39 @@ export function normalizeWsPath(p: string) {
   return String(p || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
 }
 
+export interface TerminalLine {
+  id: number;
+  type: 'cmd' | 'output' | 'error' | 'info';
+  text: string;
+  cwd?: string;
+  time: number;
+}
+
+let termLineSeq = 0;
+
 export const FILES_TAB = '__files__';
+export const TERMINAL_TAB = '__terminal__';
 
 export const useWorkspace = defineStore('workspace', {
   state: () => ({
     path: '',
-    entries: [] as any[],
+    allEntries: [] as any[],
     loading: false,
     error: '',
     selected: null as string | null,
     tabs: [] as OpenFileTab[],
     activeTab: FILES_TAB as string,
+    terminalOpen: false,
+    terminalCwd: '/workspace/default',
+    terminalLoading: false,
+    terminalLines: [] as TerminalLine[],
+    terminalHistory: [] as string[],
     snapshots: new Map<string, any>(),
   }),
   getters: {
+    entries(state): any[] {
+      return useUi().showHiddenFiles ? state.allEntries : state.allEntries.filter(e => !String(e.name || '').startsWith('.'));
+    },
     currentTab(state): OpenFileTab | null {
       return state.tabs.find(t => t.path === state.activeTab) || state.tabs[0] || null;
     },
@@ -92,7 +111,7 @@ export const useWorkspace = defineStore('workspace', {
     },
     apply(value: any) {
       this.path = normalizeWsPath(value.path);
-      this.entries = (Array.isArray(value.entries) ? value.entries : [])
+      this.allEntries = (Array.isArray(value.entries) ? value.entries : [])
         .map((e: any) => ({ ...e, path: normalizeWsPath(e.path) }))
         .filter((e: any) => e.path && !(this.path === '' && (e.name === 'lost+found' || e.path === 'lost+found')));
     },
@@ -105,6 +124,7 @@ export const useWorkspace = defineStore('workspace', {
       if (!path) return;
       this.selected = path;
       let tab = this.tabs.find(t => t.path === path);
+      if (tab && tab.draft !== tab.text) { this.activeTab = path; return; }
       if (!tab) {
         tab = {
           path,
@@ -136,15 +156,15 @@ export const useWorkspace = defineStore('workspace', {
       tab.loading = true;
       tab.note = '';
       try {
-        const value = await get('/api/files/preview?path=' + encodeURIComponent(path) + '&limit=262144&fresh=1');
+        const value = await get('/api/files/preview?path=' + encodeURIComponent(path) + '&limit=' + (isImageFile(tab.name) ? '1048576' : '262144') + '&fresh=1');
         const current = this.tabs.find(t => t.path === path);
         if (!current) return;
         const isImg = isImageFile(current.name);
         const rawB64 = value.data || '';
         const { text, binary } = decodePreview(value);
         current.size = Number(value.size ?? (isImg && rawB64 ? Math.floor(rawB64.length * 0.75) : text.length));
-        current.isImage = isImg;
-        current.binary = !isImg && binary;
+        current.isImage = isImg && !value.truncated;
+        current.binary = isImg ? value.truncated === true : binary;
         current.imageUrl = isImg ? (rawB64 ? `data:${imageMime(current.name)};base64,${rawB64}` : `/api/files/download?path=${encodeURIComponent(path)}&inline=1`) : undefined;
         current.truncated = value.truncated === true;
         current.revision = typeof value.revision === 'string' ? value.revision : null;
@@ -152,7 +172,7 @@ export const useWorkspace = defineStore('workspace', {
         current.draft = current.text;
         current.meta = formatBytes(current.size) + (current.truncated ? ' · 已截断' : '');
         current.note = isImg
-          ? ''
+          ? (value.truncated ? '图片超过 1 MiB 预览上限，文件已保留在工作区。' : '')
           : binary
             ? '二进制或非 UTF-8 文件，无法直接预览文本。'
             : current.truncated
@@ -280,6 +300,102 @@ export const useWorkspace = defineStore('workspace', {
       this.snapshots.clear();
       await this.load(this.path, true);
       return { deleted, failed };
+    },
+    async execTerminal(command: string) {
+      const cmd = String(command || '').trim();
+      if (!cmd) return;
+      if (!this.terminalHistory.includes(cmd)) {
+        this.terminalHistory.push(cmd);
+        if (this.terminalHistory.length > 100) this.terminalHistory.shift();
+      }
+      this.terminalLines.push({
+        id: ++termLineSeq,
+        type: 'cmd',
+        text: cmd,
+        cwd: this.terminalCwd,
+        time: Date.now(),
+      });
+      if (cmd === 'clear') {
+        this.terminalLines = [];
+        return;
+      }
+      this.terminalLoading = true;
+      try {
+        const res = await post('/api/terminal/exec', {
+          command: cmd,
+          cwd: this.terminalCwd,
+        });
+        if (typeof res.cwd === 'string' && res.cwd) {
+          this.terminalCwd = res.cwd;
+        } else if (cmd.startsWith('cd ')) {
+          // If response didn't explicitly give cwd, query pwd
+          try {
+            const check = await post('/api/terminal/exec', {
+              command: 'pwd',
+              cwd: this.terminalCwd,
+            });
+            if (check.output?.trim()) this.terminalCwd = check.output.trim();
+          } catch {}
+        }
+        if (res.output) {
+          this.terminalLines.push({
+            id: ++termLineSeq,
+            type: res.exitCode === 0 ? 'output' : 'error',
+            text: res.output,
+            time: Date.now(),
+          });
+        }
+        // Invalidate snapshots if file-changing command was run
+        if (/^(mkdir|touch|rm|mv|cp|git|npm|python|cat\s*>|echo\s*>)/.test(cmd)) {
+          this.snapshots.clear();
+          void this.load(this.path, true);
+        }
+      } catch (err: any) {
+        this.terminalLines.push({
+          id: ++termLineSeq,
+          type: 'error',
+          text: err.message || '命令执行失败\n',
+          time: Date.now(),
+        });
+      } finally {
+        this.terminalLoading = false;
+      }
+    },
+    clearTerminal() {
+      this.terminalLines = [];
+    },
+    setTerminalCwd(cwd: string) {
+      this.terminalCwd = cwd || '/workspace';
+    },
+    async locateAndOpenFile(rawPath: string, preferredProject?: string) {
+      if (!rawPath) return;
+      let clean = String(rawPath).trim().replace(/^\/workspace\/?/, '').replace(/^\/+/, '');
+      // Try opening directly
+      try {
+        await this.openFile(clean);
+        useUi().setWorkspaceOpen(true);
+        return;
+      } catch {}
+      // If not found and a preferredProject is set, try `${preferredProject}/${clean}`
+      if (preferredProject && preferredProject !== 'default' && !clean.startsWith(preferredProject + '/')) {
+        try {
+          const projectPath = `${preferredProject}/${clean}`;
+          await this.openFile(projectPath);
+          useUi().setWorkspaceOpen(true);
+          return;
+        } catch {}
+      }
+      // If still not found, try `default/${clean}`
+      if (!clean.startsWith('default/')) {
+        try {
+          const defPath = `default/${clean}`;
+          await this.openFile(defPath);
+          useUi().setWorkspaceOpen(true);
+          return;
+        } catch {}
+      }
+      // If failed, still open workspace and navigate to current folder
+      useUi().setWorkspaceOpen(true);
     },
   },
 });

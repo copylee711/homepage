@@ -4,11 +4,13 @@ import Icon from './Icon.vue';
 import DropMenu from './DropMenu.vue';
 import type { MenuItem } from './DropMenu.vue';
 import { useSession, type Chat } from '../stores/session';
+import { useWorkspace } from '../stores/workspace';
 import { useUi } from '../stores/ui';
 import { groupChats, formatShort } from '../services/format';
 import { post } from '../services/api';
 
 const session = useSession();
+const ws = useWorkspace();
 const ui = useUi();
 
 const query = ref('');
@@ -36,8 +38,122 @@ const groups = computed(() => {
   const filtered = session.chats
     .filter(c => c.archived !== true)
     .filter(c => !q || (c.title || '').toLowerCase().includes(q));
-  return groupChats(filtered, ui.chatGroupByDate);
+  const res = groupChats(filtered, ui.chatGroupMode, session.projects);
+  return q ? res.filter(g => g.chats.length > 0) : res;
 });
+
+const groupModeIcon = computed(() => {
+  if (ui.chatGroupMode === 'project') return 'folder';
+  if (ui.chatGroupMode === 'date') return 'calendar';
+  return 'layers';
+});
+
+const groupModeTitle = computed(() => {
+  if (ui.chatGroupMode === 'project') return '分组规则：按项目空间 (点击切换)';
+  if (ui.chatGroupMode === 'date') return '分组规则：按时间 (点击切换)';
+  return '分组规则：平铺不分组 (点击切换)';
+});
+
+function cycleGroupMode() {
+  const next = ui.cycleChatGroupMode();
+  const labelMap: Record<string, string> = {
+    date: '已切换为按时间分组',
+    project: '已切换为按项目空间分组',
+    none: '已切换为平铺不分组',
+  };
+  ui.toast(labelMap[next] || '已切换分组规则', { tone: 'info', duration: 1800 });
+}
+
+const collapsedGroups = ref<Record<string, boolean>>({});
+function toggleGroup(key: string) {
+  collapsedGroups.value[key] = !collapsedGroups.value[key];
+}
+function isGroupCollapsed(key: string) {
+  return !!collapsedGroups.value[key];
+}
+
+function startNewInGroup(g: { key: string; label: string }) {
+  const pid = g.key.startsWith('proj:') ? g.key.replace(/^proj:/, '') : undefined;
+  session.startNew(pid);
+  if (pid) {
+    ws.setTerminalCwd(`/workspace/${pid}`);
+    ui.toast(`已在“${g.label}”中开启新任务`, { tone: 'info', duration: 1800 });
+  }
+  if (ui.mobileDrawer) ui.mobileDrawer = null;
+}
+
+const projectMenu = ref<{ anchor: HTMLElement; items: MenuItem[] } | null>(null);
+
+function openProjectMenu(e: MouseEvent, g: { key: string; label: string }) {
+  const pid = g.key.replace(/^proj:/, '');
+  const items: MenuItem[] = [
+    { icon: 'plus', label: '以该空间为主空间新建任务', action: () => startNewInGroup(g) },
+    { icon: 'edit', label: '重命名项目', action: () => renameProjectPrompt(pid, g.label) },
+    { icon: 'plus', label: '新建其他项目空间', action: createNewProject },
+  ];
+  if (pid !== 'default') {
+    items.push({ icon: 'trash', label: '删除项目空间', danger: true, action: () => deleteProjectPrompt(pid, g.label) });
+  }
+  projectMenu.value = { anchor: e.currentTarget as HTMLElement, items };
+}
+
+async function createNewProject() {
+  const nameOrId = await ui.prompt({
+    title: '新建项目空间',
+    message: '输入项目标识（字母、数字、短横线、中文，1–40 字符）',
+    placeholder: '例如 app-backend 或 数据分析',
+    confirmText: '创建项目',
+  });
+  if (!nameOrId?.trim()) return;
+  const clean = nameOrId.trim();
+  try {
+    const created = await session.createProject(clean, clean);
+    ui.toast(`已创建项目空间“${created.name}”`, { tone: 'success' });
+    if (ui.chatGroupMode !== 'project') {
+      ui.setChatGroupMode('project');
+    }
+  } catch (err: any) {
+    ui.toast(err.message || '创建项目空间失败', { tone: 'error' });
+  }
+}
+
+async function renameProjectPrompt(projectId: string, currentName: string) {
+  const newName = await ui.prompt({
+    title: '重命名项目空间',
+    message: `修改“${currentName}”的显示名称`,
+    defaultValue: currentName,
+    placeholder: '输入新的项目名称',
+    confirmText: '保存名称',
+    maxLength: 40,
+  });
+  if (!newName?.trim() || newName.trim() === currentName) return;
+  try {
+    await session.renameProject(projectId, newName.trim());
+    ui.toast('项目空间已重命名', { tone: 'success' });
+  } catch (err: any) {
+    ui.toast(err.message || '重命名失败', { tone: 'error' });
+  }
+}
+
+async function deleteProjectPrompt(projectId: string, currentName: string) {
+  if (projectId === 'default') {
+    ui.toast('默认项目空间不可删除', { tone: 'warning' });
+    return;
+  }
+  const ok = await ui.confirm({
+    title: '删除项目空间',
+      message: `确定删除项目“${currentName}”？请先删除关联对话；工作区文件夹会保留。`,
+    confirmText: '删除空间',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await session.deleteProject(projectId);
+    ui.toast(`已删除项目空间“${currentName}”`, { tone: 'success' });
+  } catch (err: any) {
+    ui.toast(err.message || '删除失败', { tone: 'error' });
+  }
+}
 
 const accountMenuAnchor = ref<HTMLElement | null>(null);
 const chatMenu = ref<{ anchor: HTMLElement; items: MenuItem[] } | null>(null);
@@ -57,8 +173,8 @@ async function togglePin(c: Chat) { try { await post('/api/chats/pin', { thread:
 async function toggleArchive(c: Chat) { try { await post('/api/chats/archive', { thread: c.id, archived: !c.archived }); await session.loadChats(); ui.toast(c.archived ? '已恢复对话' : '已归档对话', { tone: 'success' }); } catch (e: any) { ui.toast(e.message, { tone: 'error' }); } }
 function exportChat(c: Chat, format: string) { const a = document.createElement('a'); a.href = '/api/chats/export?chat=' + encodeURIComponent(c.id) + '&format=' + format; a.click(); ui.toast('已开始导出 ' + (format === 'json' ? 'JSON' : 'Markdown'), { tone: 'success' }); }
 async function removeChat(c: Chat) {
-  if (!(await ui.confirm({ title: '删除对话', message: `删除“${c.title || '新对话'}”？此操作无法撤销，但会保留工作区文件。`, confirmText: '删除', danger: true }))) return;
-  try { await post('/api/chats/delete', { thread: c.id }); session.chats = session.chats.filter(x => x.id !== c.id); if (session.chatId === c.id) session.startNew(); ui.toast('对话已删除', { tone: 'success' }); }
+  if (!(await ui.confirm({ title: '删除任务', message: `删除“${c.title || '新任务'}”？此操作无法撤销，但会保留工作区文件。`, confirmText: '删除', danger: true }))) return;
+  try { await post('/api/chats/delete', { thread: c.id }); session.chats = session.chats.filter(x => x.id !== c.id); if (session.chatId === c.id) session.startNew(); ui.toast('任务已删除', { tone: 'success' }); }
   catch (e: any) { ui.toast(e.message, { tone: 'error' }); }
 }
 
@@ -107,7 +223,7 @@ watch(avatarUrl, () => { avatarError.value = false; });
     </div>
 
     <button class="new-chat" :disabled="session.busy || !session.canExecute" @click="session.startNew(); if (ui.mobileDrawer) ui.mobileDrawer = null">
-      <Icon name="plus" :size="18" /><span>新对话</span>
+      <Icon name="plus" :size="18" /><span>新任务</span>
     </button>
 
     <button class="command-trigger" @click="ui.openCommand()">
@@ -144,14 +260,24 @@ watch(avatarUrl, () => { avatarError.value = false; });
         </button>
         <template v-else>
           <button
+            v-if="ui.chatGroupMode === 'project'"
             type="button"
             class="icon-button mini"
-            :aria-label="ui.chatGroupByDate ? '取消按时间分组 (平铺显示)' : '按时间分组显示'"
-            :title="ui.chatGroupByDate ? '时间分组 (开)' : '时间分组 (关)'"
-            :class="{ 'is-dim': !ui.chatGroupByDate }"
-            @click="ui.toggleChatGroupByDate()"
+            aria-label="新建项目空间"
+            title="新建项目空间"
+            @click="createNewProject"
           >
-            <Icon name="calendar" :size="15" />
+            <Icon name="plus" :size="15" />
+          </button>
+          <button
+            type="button"
+            class="icon-button mini"
+            :aria-label="groupModeTitle"
+            :title="groupModeTitle"
+            :class="{ 'is-dim': ui.chatGroupMode === 'none' }"
+            @click="cycleGroupMode"
+          >
+            <Icon :name="groupModeIcon" :size="15" />
           </button>
           <button
             type="button"
@@ -165,8 +291,8 @@ watch(avatarUrl, () => { avatarError.value = false; });
           <button
             type="button"
             class="icon-button mini"
-            aria-label="筛选对话"
-            title="筛选对话"
+            aria-label="筛选任务"
+            title="筛选任务"
             @click="openSearch"
           >
             <Icon name="search" :size="15" />
@@ -180,11 +306,50 @@ watch(avatarUrl, () => { avatarError.value = false; });
       <p v-else-if="session.chatsError" class="list-empty">{{ session.chatsError }}</p>
       <p v-else-if="!groups.length" class="list-empty">{{ query ? '没有匹配的对话。' : '还没有对话，发送第一条消息后会出现在这里。' }}</p>
       <section v-for="g in groups" :key="g.key" class="chat-group">
-        <h2 v-if="g.label" class="chat-group-title">{{ g.label }}</h2>
-        <ul class="chat-items">
+        <header
+          v-if="g.label"
+          class="chat-group-head"
+          :class="{ 'is-collapsed': isGroupCollapsed(g.key) }"
+          @click="toggleGroup(g.key)"
+        >
+          <div class="chat-group-left">
+            <Icon
+              :name="isGroupCollapsed(g.key) ? 'chevron-right' : 'chevron-down'"
+              :size="11"
+              class="chat-group-caret"
+            />
+            <h2 class="chat-group-title">{{ g.label }}</h2>
+            <span class="chat-group-count">{{ g.chats.length }}</span>
+          </div>
+          <div v-if="g.key.startsWith('proj:')" class="chat-group-actions" @click.stop>
+            <button
+              type="button"
+              class="group-action-btn"
+              :title="'以“' + g.label + '”为主空间新建任务'"
+              :aria-label="'以“' + g.label + '”为主空间新建任务'"
+              @click="startNewInGroup(g)"
+            >
+              <Icon name="plus" :size="12" />
+            </button>
+            <button
+              type="button"
+              class="group-action-btn"
+              title="项目空间选项"
+              aria-label="项目空间选项"
+              @click="openProjectMenu($event, g)"
+            >
+              <Icon name="more-horizontal" :size="12" />
+            </button>
+          </div>
+        </header>
+
+        <ul v-show="!isGroupCollapsed(g.key)" class="chat-items">
+          <li v-if="!g.chats.length" class="chat-group-empty" @click="startNewInGroup(g)">
+            <span>暂无任务，点击开启</span>
+          </li>
           <li v-for="c in g.chats" :key="c.id" class="chat-item" :class="{ 'is-active': c.id === session.chatId }">
             <button class="chat-select" :aria-current="c.id === session.chatId ? 'page' : undefined" :title="c.title" @click="pickChat(c)" @contextmenu="e => chatContext(e, c)">
-              <span class="chat-title">{{ c.title || '新对话' }}</span>
+              <span class="chat-title">{{ c.title || '新任务' }}</span>
               <span class="chat-meta"><span class="chat-time">{{ formatShort(c.updated) }}</span><Icon v-if="c.pinned" name="pin" :size="12" /><Icon v-if="c.archived" name="archive" :size="12" /></span>
             </button>
             <button class="icon-button chat-more" aria-label="对话操作" @click="e => openChatMenu(e, c)"><Icon name="more-horizontal" /></button>
@@ -210,6 +375,7 @@ watch(avatarUrl, () => { avatarError.value = false; });
     <div class="resize-handle resize-sidebar" role="separator" aria-orientation="vertical" aria-label="调整导航宽度" @pointerdown="startResize"></div>
 
     <DropMenu v-if="chatMenu" :anchor="chatMenu.anchor" :items="chatMenu.items" label="对话操作" @close="chatMenu = null" />
+    <DropMenu v-if="projectMenu" :anchor="projectMenu.anchor" :items="projectMenu.items" label="项目选项" @close="projectMenu = null" />
     <DropMenu v-if="accountMenu && accountMenuAnchor" :anchor="accountMenuAnchor" :items="accountMenu" label="账户菜单" up @close="accountMenu = null" />
   </aside>
 </template>

@@ -50,7 +50,8 @@
 
   --font: 'Outfit Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'HarmonyOS Sans SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Cascadia Code', 'JetBrains Mono', Consolas,
+    'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei', monospace;
   --font-display: 'Outfit Variable', Georgia, 'Source Han Serif SC', 'Source Han Serif CN',
     'Noto Serif CJK SC', 'Noto Serif SC', 'Songti SC', STSong, 'SimSun', serif;
 

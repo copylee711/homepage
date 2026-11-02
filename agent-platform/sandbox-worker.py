@@ -190,7 +190,10 @@ def bash(value):
     command = value.get("command", "")
     if not isinstance(command, str) or len(command) > 20000:
         raise ValueError("命令无效")
-    proc = subprocess.Popen(["/bin/bash", "-c", command], cwd="/workspace",
+    cwd, _ = inside(candidate(value.get("cwd") or "."))
+    if not cwd.is_dir():
+        raise ValueError("命令工作目录不存在")
+    proc = subprocess.Popen(["/bin/bash", "-c", command], cwd=str(cwd),
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=True,
                             env={"PATH": "/workspace/.venv/bin:/workspace/.tools/bin:/workspace/.tools/node_modules/.bin:/workspace/node_modules/.bin:/usr/local/bin:/usr/bin:/bin", "HOME": "/tmp",

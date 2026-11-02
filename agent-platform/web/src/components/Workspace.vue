@@ -3,11 +3,12 @@ import { ref, computed, watch, nextTick, onMounted } from 'vue';
 import Icon from './Icon.vue';
 import MarkdownView from './MarkdownView.vue';
 import DropMenu, { type MenuItem } from './DropMenu.vue';
-import { useWorkspace, FILES_TAB, type OpenFileTab } from '../stores/workspace';
+import { useWorkspace, FILES_TAB, TERMINAL_TAB, type OpenFileTab } from '../stores/workspace';
 import { useUi } from '../stores/ui';
 import { useSession } from '../stores/session';
 import { formatBytes } from '../services/format';
 import { highlightInto } from '../services/highlight.js';
+import { renderAnsiToHtml } from '../services/ansi';
 
 const ws = useWorkspace();
 const ui = useUi();
@@ -19,6 +20,12 @@ const addAnchor = ref<HTMLElement | null>(null);
 const addMenu = ref<MenuItem[] | null>(null);
 const codeRef = ref<HTMLElement | null>(null);
 const fileListRef = ref<HTMLElement | null>(null);
+const breadcrumbRef = ref<HTMLElement | null>(null);
+watch(() => ws.path, async () => {
+  await nextTick();
+  const el = breadcrumbRef.value;
+  if (el) el.scrollLeft = el.scrollWidth;
+});
 const mdSourceMode = ref<Record<string, boolean>>({});
 
 // Multi-select & Rubber-band Marquee state
@@ -58,12 +65,118 @@ const crumbs = computed(() => {
   return out;
 });
 
-const activeFileTab = computed<OpenFileTab | null>(() => {
-  if (isDual.value) {
-    return ws.tabs.find(t => t.path === ws.activeTab) || ws.tabs[0] || null;
+const isTerminalActive = computed(() => ws.activeTab === TERMINAL_TAB);
+
+const currentFolderLabel = computed(() => {
+  if (activeFileTab.value) {
+    const parts = activeFileTab.value.path.split('/').filter(Boolean);
+    if (parts.length > 1) {
+      return parts[parts.length - 2];
+    }
+    return 'workspace';
   }
-  if (ws.activeTab === FILES_TAB) return null;
-  return ws.tabs.find(t => t.path === ws.activeTab) || null;
+  if (ws.path) {
+    const parts = ws.path.split('/').filter(Boolean);
+    return parts[parts.length - 1] || 'workspace';
+  }
+  return 'workspace';
+});
+
+// Terminal interactive state
+const termInput = ref('');
+const termHistoryIndex = ref(-1);
+const termInputRef = ref<HTMLInputElement | null>(null);
+const termLogsRef = ref<HTMLElement | null>(null);
+
+function scrollTerminalToBottom() {
+  void nextTick(() => {
+    if (termLogsRef.value) {
+      termLogsRef.value.scrollTop = termLogsRef.value.scrollHeight;
+    }
+  });
+}
+
+function openTerminalTab() {
+  ws.activeTab = TERMINAL_TAB;
+  const proj = session.currentProjectId || 'default';
+  if (!ws.terminalCwd || ws.terminalCwd === '/workspace' || ws.terminalCwd === '/workspace/default') {
+    ws.terminalCwd = `/workspace/${proj}`;
+  }
+  void nextTick(() => {
+    termInputRef.value?.focus();
+    scrollTerminalToBottom();
+  });
+}
+
+function toggleTerminal() {
+  if (isTerminalActive.value) {
+    ws.activeTab = ws.tabs[0]?.path || FILES_TAB;
+  } else {
+    openTerminalTab();
+  }
+}
+
+function onTermKeydown(ev: KeyboardEvent) {
+  if (ev.key === 'ArrowUp') {
+    ev.preventDefault();
+    const history = ws.terminalHistory;
+    if (!history.length) return;
+    if (termHistoryIndex.value === -1) {
+      termHistoryIndex.value = history.length - 1;
+    } else if (termHistoryIndex.value > 0) {
+      termHistoryIndex.value--;
+    }
+    termInput.value = history[termHistoryIndex.value] || '';
+  } else if (ev.key === 'ArrowDown') {
+    ev.preventDefault();
+    const history = ws.terminalHistory;
+    if (termHistoryIndex.value === -1) return;
+    if (termHistoryIndex.value < history.length - 1) {
+      termHistoryIndex.value++;
+      termInput.value = history[termHistoryIndex.value] || '';
+    } else {
+      termHistoryIndex.value = -1;
+      termInput.value = '';
+    }
+  } else if (ev.key === 'c' && ev.ctrlKey) {
+    termInput.value = '';
+    termHistoryIndex.value = -1;
+  } else if (ev.key === 'l' && ev.ctrlKey) {
+    ev.preventDefault();
+    ws.clearTerminal();
+  }
+}
+
+async function submitTermCommand() {
+  const cmd = termInput.value.trim();
+  if (!cmd) return;
+  termInput.value = '';
+  termHistoryIndex.value = -1;
+  await ws.execTerminal(cmd);
+  scrollTerminalToBottom();
+  void nextTick(() => termInputRef.value?.focus());
+}
+
+function execQuickCmd(cmd: string) {
+  termInput.value = cmd;
+  void submitTermCommand();
+}
+
+function formatTermCwd(cwd?: string) {
+  if (!cwd) return '~';
+  if (cwd === '/workspace') return '/workspace';
+  if (cwd.startsWith('/workspace/')) return cwd.replace('/workspace/', '');
+  return cwd;
+}
+
+const activeFileTab = computed<OpenFileTab | null>(() => {
+  if (ws.activeTab === FILES_TAB || ws.activeTab === TERMINAL_TAB) {
+    if (isDual.value && ws.activeTab === FILES_TAB) {
+      return ws.tabs[0] || null;
+    }
+    return null;
+  }
+  return ws.tabs.find(t => t.path === ws.activeTab) || (isDual.value ? ws.tabs[0] || null : null);
 });
 
 function extLang(name: string) {
@@ -526,8 +639,9 @@ onMounted(() => {
   <aside class="workspace" :class="{ 'is-dual': isDual }" aria-label="workspace">
     <div class="resize-handle resize-workspace" role="separator" aria-orientation="vertical" aria-label="调整工作区宽度" @pointerdown="startResize"></div>
 
-    <!-- Single unified header bar: breadcrumbs directly on top + compact actions -->
+    <!-- Separate rows keep the full path clear of toolbar controls. -->
     <header class="workspace-head">
+      <span class="workspace-title">工作区</span>
       <div class="ws-crumb-wrap">
         <button
           v-if="ws.path"
@@ -539,13 +653,15 @@ onMounted(() => {
         >
           <Icon name="chevron-left" :size="16" />
         </button>
-        <nav class="breadcrumb" aria-label="当前路径">
+        <nav ref="breadcrumbRef" class="breadcrumb" aria-label="当前路径" :title="'/workspace' + (ws.path ? '/' + ws.path : '')">
           <template v-for="(c, i) in crumbs" :key="c.path">
             <span v-if="i > 0" class="crumb-sep">/</span>
             <button
               type="button"
               class="crumb"
               :class="{ 'is-current': i === crumbs.length - 1 }"
+              :title="'/workspace' + (c.path ? '/' + c.path : '')"
+              :aria-current="i === crumbs.length - 1 ? 'location' : undefined"
               @click="ws.navigate(c.path)"
             >{{ c.label }}</button>
           </template>
@@ -553,8 +669,23 @@ onMounted(() => {
       </div>
 
       <div class="workspace-actions">
+        <button
+          type="button"
+          class="icon-button small"
+          :class="{ 'is-on': isTerminalActive }"
+          aria-label="打开 Linux 终端"
+          title="虚拟 Linux 终端"
+          @click="toggleTerminal"
+        >
+          <Icon name="terminal" :size="15" />
+        </button>
         <button ref="addAnchor" type="button" class="icon-button small" aria-label="新建或上传" title="新建或上传" @click="openAddMenu">
           <Icon name="plus" :size="16" />
+        </button>
+        <button type="button" class="icon-button small" :class="{ 'is-on': ui.showHiddenFiles }"
+          :aria-pressed="ui.showHiddenFiles" :aria-label="ui.showHiddenFiles ? '隐藏隐藏文件' : '显示隐藏文件'"
+          :title="ui.showHiddenFiles ? '隐藏以点开头的文件和目录' : '显示隐藏文件（如 .git、.env）'" @click="ui.toggleHiddenFiles">
+          <Icon :name="ui.showHiddenFiles ? 'eye' : 'eye-off'" :size="15" />
         </button>
         <button type="button" class="icon-button small" aria-label="刷新" title="刷新目录" @click="ws.load(ws.path, true)">
           <Icon name="refresh" :size="15" />
@@ -577,17 +708,29 @@ onMounted(() => {
       <input ref="fileInput" type="file" hidden @change="onFilePicked">
     </header>
 
-    <!-- Single-sidebar Tab Bar (shown when not in dual mode and at least 1 file tab is open) -->
-    <div v-if="!isDual && ws.tabs.length" class="ws-tabs" role="tablist">
+    <!-- Single-sidebar Tab Bar (shown when not in dual mode and (tabs exist or terminal active)) -->
+    <div v-if="!isDual && (ws.tabs.length || isTerminalActive)" class="ws-tabs" role="tablist">
       <button
         type="button"
         role="tab"
         class="ws-tab"
         :class="{ 'is-active': ws.activeTab === FILES_TAB }"
+        :title="'浏览目录：' + currentFolderLabel"
         @click="ws.activeTab = FILES_TAB"
       >
         <Icon name="folder" :size="13" />
-        <span>workspace</span>
+        <span>{{ currentFolderLabel }}</span>
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="ws-tab ws-tab-terminal"
+        :class="{ 'is-active': isTerminalActive }"
+        title="Linux 终端"
+        @click="openTerminalTab"
+      >
+        <Icon name="terminal" :size="13" />
+        <span>终端</span>
       </button>
       <div
         v-for="t in ws.tabs"
@@ -610,7 +753,7 @@ onMounted(() => {
     <div class="ws-stage" :class="{ 'is-dual': isDual }">
       <!-- Explorer Pane (supports rubber-band marquee + Ctrl/Shift multi-select) -->
       <div
-        v-show="isDual || !activeFileTab"
+        v-show="isDual ? true : (!activeFileTab && !isTerminalActive)"
         ref="fileListRef"
         tabindex="-1"
         class="file-list"
@@ -692,16 +835,80 @@ onMounted(() => {
         </div>
       </div>
 
+      <!-- Terminal Pane (Linux Sandbox Control) -->
+      <section v-if="isTerminalActive" class="ws-terminal-pane">
+        <header class="ws-term-bar">
+          <div class="ws-term-meta">
+            <span class="ws-term-title"><Icon name="terminal" :size="13" /> 终端</span>
+          </div>
+          <div class="ws-term-tools">
+            <button
+              type="button"
+              class="icon-button mini"
+              title="清屏 (Ctrl+L)"
+              aria-label="清屏"
+              @click="ws.clearTerminal"
+            >
+              <Icon name="trash" :size="13" />
+            </button>
+          </div>
+        </header>
+
+        <div ref="termLogsRef" class="ws-term-logs" @click="termInputRef?.focus()">
+          <div v-for="line in ws.terminalLines" :key="line.id" class="ws-term-line" :class="'is-' + line.type">
+            <template v-if="line.type === 'cmd'">
+              <span class="ws-term-prompt">
+                <span class="ws-term-u">iris</span><span class="ws-term-at">@</span><span class="ws-term-h">sandbox</span>:<span class="ws-term-d">{{ formatTermCwd(line.cwd) }}</span>$&nbsp;
+              </span>
+              <span class="ws-term-cmd-text">{{ line.text }}</span>
+            </template>
+            <pre v-else-if="line.type === 'output'" class="ws-term-out" v-html="renderAnsiToHtml(line.text)"></pre>
+            <pre v-else-if="line.type === 'error'" class="ws-term-out is-error" v-html="renderAnsiToHtml(line.text)"></pre>
+            <div v-else class="ws-term-info">{{ line.text }}</div>
+          </div>
+
+          <!-- Active Prompt Line -->
+          <form novalidate class="ws-term-input-line" @submit.prevent="submitTermCommand">
+            <span class="ws-term-prompt">
+              <span class="ws-term-u">iris</span><span class="ws-term-at">@</span><span class="ws-term-h">sandbox</span>:<span class="ws-term-d">{{ formatTermCwd(ws.terminalCwd) }}</span>$&nbsp;
+            </span>
+            <input
+              ref="termInputRef"
+              v-model="termInput"
+              type="text"
+              class="ws-term-input"
+              spellcheck="false"
+              autocomplete="off"
+              :disabled="ws.terminalLoading"
+              placeholder="输入 shell 命令…"
+              @keydown="onTermKeydown"
+            />
+            <span v-if="ws.terminalLoading" class="spinner ws-term-spinner" aria-label="执行中…"></span>
+          </form>
+        </div>
+      </section>
+
       <!-- File Viewer / Editor Pane -->
-      <section v-if="isDual || activeFileTab" class="ws-viewer">
+      <section v-else-if="isDual || activeFileTab" class="ws-viewer">
         <!-- In dual mode, file tabs sit across the top of the right column -->
-        <div v-if="isDual && ws.tabs.length" class="ws-tabs ws-tabs-dual" role="tablist">
+        <div v-if="isDual && (ws.tabs.length || isTerminalActive)" class="ws-tabs ws-tabs-dual" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            class="ws-tab ws-tab-terminal"
+            :class="{ 'is-active': isTerminalActive }"
+            title="Linux 终端"
+            @click="openTerminalTab"
+          >
+            <Icon name="terminal" :size="13" />
+            <span>终端</span>
+          </button>
           <div
             v-for="t in ws.tabs"
             :key="t.path"
             role="tab"
             class="ws-tab"
-            :class="{ 'is-active': activeFileTab?.path === t.path }"
+            :class="{ 'is-active': !isTerminalActive && activeFileTab?.path === t.path }"
             :title="t.path"
             @click="ws.activeTab = t.path; ws.selected = t.path"
           >
@@ -771,7 +978,7 @@ onMounted(() => {
           <div v-if="activeFileTab.loading" class="workspace-status">
             <span class="spinner"></span><span>正在读取文件…</span>
           </div>
-          <textarea
+          <textarea style="resize: none"
             v-else-if="activeFileTab.editing"
             v-model="activeFileTab.draft"
             class="ws-editor"

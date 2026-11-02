@@ -32,7 +32,7 @@ const commands = computed<Cmd[]>(() => {
     .filter(c => !c.archived)
     .filter(c => !q || (c.title || '').toLowerCase().includes(q))
     .slice(0, 6)
-    .map(c => ({ id: 'chat:' + c.id, icon: 'message', label: c.title || '新对话', hint: '对话', run: () => session.selectChat(c.id) }));
+    .map(c => ({ id: 'chat:' + c.id, icon: 'message', label: c.title || '新任务', hint: '任务', run: () => session.selectChat(c.id) }));
   const filteredBase = base.filter(c => !q || c.label.toLowerCase().includes(q));
   return [...filteredBase, ...chatCmds];
 });

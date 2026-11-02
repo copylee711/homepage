@@ -23,6 +23,7 @@ Caddy 转发至 xa 时只保留两个 ai 专属 Cookie，剥离既有 Cloud 兼�
 - `compose.yaml`：服务、资源限制与回环端口；不挂载 Docker socket、宿主机目录或 SSH 密钥到 runner。
 - `Dockerfile.*`、`package-lock.json`：固定 Node 版本、Pi 1.4.0 及锁定 npm 依赖，安装禁用生命周期脚本。
 - `gateway.mjs`：SSO、权限、CSRF、流式代理；`runner.mjs`：Pi RPC、会话和工作目录。
+- `project-policy.py`：服务端租约绑定项目挂载；`tool-approvals.mjs`：Pi 工具审批请求的一次性确认、超时与取消。
 - `web/`：Iris 控制台，Vue 3 + Vite 单页应用（`src/` 源码、`package.json`、`vite.config.mjs`）。`Dockerfile.gateway` 多阶段构建先 `npm ci && npm run build` 生成 `web/dist/`，网关据此提供静态资源；`web/dist`、`web/node_modules` 不进构建上下文。自建中性设计令牌，不再复制主站 `tokens.css`。
 - `.env.example`、`Caddyfile.example`、`*.service.example`：配置模板；必须按实际环境生成。
 - 服务器 `.env`：客户端密钥、内部 runner 密钥、OpenCode Go 密钥，root 0600，禁止提交。
@@ -85,6 +86,7 @@ Docker daemon 必须运行 iptables 后端并提供 DOCKER-USER；不同防火�
 工作区读快照最多 2 秒，模型运行及写操作会失效；未命中的首次文件读取仍通过一次性容器。
 
 文件面板支持右键/Shift+F10/可见操作按钮、新建、移动重命名、删除空目录/文件、文本编辑。
+标题栏眼睛按钮按需显示 `.git`、`.env` 等隐藏文件，默认关闭并在浏览器记住；面包屑单独占一行。
 编辑上限 256 KiB，Ctrl/Cmd+S 保存，未保存退出确认；SHA-256 乐观锁拒绝覆盖其他操作的更新，
 原子替换避免空间不足留下半个文件。删除需确认，目录非空拒绝，不做隐式递归删除。
 
@@ -162,6 +164,18 @@ Mihomo 中 Docker blob 的 `cloudflarestorage.com` 与 npm registry 应走代理
 node --test agent-platform/tests/*.test.mjs
 cd backend && uv run pytest tests/test_agent_sso.py -q
 ```
+
+项目范围在输入框上方菜单管理，包含主项目、从属项目读写与整个 `/workspace`。
+添加从属项目统一使用选择弹窗。下方“需要审批 / 自动执行”独立控制工具是否逐次确认；
+默认需要审批。审批由 Pi `tool_call` 在执行前发起，经 RPC 流送达浏览器，后端校验用户、
+会话和一次性请求 ID 后才能允许，120 秒超时或任务取消均拒绝执行。自动执行不会扩大项目范围。
+项目目录通过租约绑定到 host broker；只读和未授权目录的限制同时适用于 Bash。
+修改权限必须先等待任务停止，下一次任务重建 Pi 进程；旧根目录文件不会被自动搬迁。
+
+Linux 主机执行 `python3 agent-platform/tests/project-mounts-live.py` 可验收真实挂载策略
+（`TEST_SANDBOX_IMAGE` 指定候选镜像）。`tests/projects-runner-live.mjs` 与
+`tests/approvals-runner-live.mjs` 是可信 runner 内的显式验收脚本，使用独立测试租户；
+后者应在隔离临时会话存储的候选 runner 中运行，会调用真实模型。
 
 上线验证包括匿名跳转、管理员登录、普通用户拒绝执行、CSRF、过期与重复授权码、会话撤销、
 真实模型调用、工具执行、重启后会话与文件保留、停止任务、代理连通与密钥不回显。
