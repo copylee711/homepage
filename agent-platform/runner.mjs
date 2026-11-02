@@ -120,7 +120,7 @@ class Pi {
     const output = this.output; this.output = undefined;
     if (output && !output.destroyed) output.end();
   }
-  command(type, fields = {}, timeout = 30000) {
+  command(type, fields = {}, timeout = 120000) {
     const id = randomUUID();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(id); reject(Object.assign(new Error('Pi 响应超时'), { status: 504 })); this.proc.kill(); }, timeout);
@@ -130,7 +130,7 @@ class Pi {
       });
     });
   }
-  async prompt(res, message, thinking) {
+  async prompt(res, message, thinking, images, permission) {
     if (this.maintenance) fail(409, '正在压缩此对话');
     if (deleting.has(this.key)) fail(409, '正在删除此对话');
     invalidateWorkspace(this.user);
@@ -140,23 +140,28 @@ class Pi {
     if (deleting.has(this.key)) fail(409, '正在删除此对话');
     // Recheck after the asynchronous capacity read before claiming this user's task.
     if ([...sessions.values()].some(entry => entry.pi.user === this.user && entry.pi.busy)) fail(409, '每个用户同时只能运行一个任务');
+    if (permission?.execution && ['auto', 'edit', 'ask'].includes(permission.execution)) {
+      this.execution = permission.execution;
+    }
     this.busy = true; this.output = res;
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
     const abort = () => { if (this.busy && this.output === res) void cancel(this.user).catch(() => this.proc?.kill()); };
     res.once('close', abort);
-    this.deadline = setTimeout(abort, 10 * 60000);
+    this.deadline = setTimeout(abort, 30 * 60000);
     let checking = false;
     this.storageCheck = setInterval(async () => {
       if (checking) return; checking = true;
       try { await sessionCapacity(`/data/sessions/${this.user}`, this.thread); }
       catch { if (this.output === res) { res.write(JSON.stringify({ type: 'gateway_error', error: '对话存储达到上限，任务已停止。请联系管理员归档。' }) + '\n'); abort(); } }
       finally { checking = false; }
-    }, 500);
+    }, 10000);
     try {
       if (typeof thinking === 'string' && ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(thinking)) {
         await this.command('set_thinking_level', { level: thinking }).catch(() => {});
       }
-      await this.command('prompt', { message });
+      const promptFields = { message };
+      if (Array.isArray(images) && images.length) promptFields.images = images;
+      await this.command('prompt', promptFields, 120000);
     }
     catch (error) { res.write(JSON.stringify({ type: 'gateway_error', error: error.message }) + '\n'); this.finish(); }
   }
@@ -560,7 +565,7 @@ export const server = createServer(async (req, res) => {
       if (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 20000) fail(422, '任务内容无效');
       await chats.initialize(input.user, input.thread, input.projectId, input.permission);
       const pi = await instance(input.user, input.thread);
-      return await pi.prompt(res, input.message, input.thinking);
+      return await pi.prompt(res, input.message, input.thinking, input.images, input.permission);
     }
     fail(404, '接口不存在');
   } catch (error) {

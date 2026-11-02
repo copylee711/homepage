@@ -399,9 +399,12 @@ function openArgFile(v: string) {
 }
 .tc-failed {
   flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--danger-soft);
   color: var(--danger);
-  font-size: 12px;
-  font-weight: 560;
+  font-size: 11px;
+  font-weight: 520;
   white-space: nowrap;
 }
 .tc-dur {
@@ -469,8 +472,12 @@ function openArgFile(v: string) {
   color: var(--muted);
 }
 .tg-failed-note {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--danger-soft);
   color: var(--danger);
-  font-weight: 500;
+  font-size: 11px;
+  font-weight: 520;
 }
 .tg-diff-badge {
   display: inline-flex;
@@ -636,6 +643,10 @@ function openArgFile(v: string) {
   border-top: 1px dashed var(--line);
 }
 .tc-out.is-error {
-  color: var(--danger);
+  padding: 6px 10px;
+  border-radius: 7px;
+  background: var(--danger-soft);
+  color: var(--text-2);
+  border: 1px solid color-mix(in srgb, var(--danger) 16%, transparent);
 }
 </style>

@@ -26,7 +26,10 @@ export function buildTranscript(messages) {
     if (m.role !== 'assistant') continue;
     const blocks = normalizeBlocks(m.content, results);
     const last = items.at(-1);
-    if (last?.role === 'assistant') last.content.push(...blocks);
+    if (last?.role === 'assistant') {
+      last.content.push(...blocks);
+      if (m.durationMs) last.durationMs = (last.durationMs || 0) + m.durationMs;
+    }
     else items.push({ ...m, content: [...blocks] });
   }
   return items;

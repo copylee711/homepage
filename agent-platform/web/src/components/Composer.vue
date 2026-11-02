@@ -161,6 +161,8 @@ async function uploadFiles(files: File[]) {
         type: isImg ? 'image' : 'file',
         size: file.size,
         previewUrl: isImg ? URL.createObjectURL(file) : undefined,
+        base64: isImg ? base64 : undefined,
+        mimeType: isImg ? (file.type || 'image/png') : undefined,
       });
       count++;
     } catch (err: any) {
@@ -627,11 +629,21 @@ watch(() => session.draftText, (val) => {
           <span v-if="effortLabel" class="model-chip-effort">{{ effortLabel }}</span>
           <Icon name="chevron-down" :size="12" />
         </button>
+        <button
+          v-if="session.busy"
+          type="button"
+          class="stop"
+          :class="{ 'is-stopping': session.stopping }"
+          :disabled="session.stopping"
+          aria-label="停止任务"
+          title="停止任务"
+          @click="session.stop()"
+        >
+          <span class="stop-square" aria-hidden="true"></span>
+        </button>
         <button v-if="!session.busy || text.trim()" type="submit" class="send" :disabled="!canSend" :aria-label="session.busy ? '补充指令' : '发送任务'" :title="session.busy ? '补充指令' : '发送任务'"><Icon name="arrow-up" :size="17" /></button>
-        <button v-if="session.busy" type="button" class="stop" :disabled="session.stopping" @click="session.stop()"><Icon name="square" :size="14" /><span>停止</span></button>
       </div>
     </form>
-    <div class="composer-footer"><span class="task-state">{{ stateText }}</span></div>
     <ModelMenu v-if="modelOpen && chipEl" :anchor="chipEl" @close="modelOpen = false" />
     <DropMenu v-if="projectMenu" :anchor="projectMenu.anchor" :items="projectMenu.items" label="项目空间选项" @close="projectMenu = null" />
     <DropMenu v-if="branchMenu" :anchor="branchMenu.anchor" :items="branchMenu.items" label="Git 分支" @close="branchMenu = null" />
@@ -896,10 +908,37 @@ watch(() => session.draftText, (val) => {
 .send:hover:not(:disabled) { filter: brightness(1.12); }
 .send:active:not(:disabled) { transform: scale(0.94); }
 .send:disabled { opacity: 0.25; }
-.stop { flex: none; height: 36px; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; border-radius: 12px; font-size: 13px; font-weight: 600; background: var(--danger-soft); color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent); }
-.stop:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 16%, transparent); }
-.composer-footer { max-width: 760px; margin: 0 auto; display: flex; align-items: center; height: 0; overflow: visible; padding: 0 4px; }
-.composer-footer:not(:empty) { min-height: 0; }
-.task-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; line-height: 16px; margin-top: 4px; }
-.task-state:empty { display: none; }
+.stop {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--fast), background-color var(--fast), border-color var(--fast), opacity var(--fast);
+}
+.stop:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line-strong));
+  color: var(--danger);
+  transform: scale(1.04);
+}
+.stop:active:not(:disabled) {
+  transform: scale(0.94);
+}
+.stop.is-stopping {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.stop-square {
+  width: 11px;
+  height: 11px;
+  border-radius: 2.5px;
+  background: currentColor;
+}
 </style>

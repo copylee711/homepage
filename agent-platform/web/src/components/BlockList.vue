@@ -33,7 +33,7 @@ const citations=computed(()=>{
       <PlanCard v-else-if="seg.type === 'plan'" :block="seg.block" />
       <ToolCard v-else-if="seg.type === 'tools'" :tools="seg.items" />
     </template>
-    <SourceList v-if="!nested" :sources="citations" />
+    <SourceList v-if="!nested && !streaming && citations.length" :sources="citations" />
   </div>
 </template>
 

@@ -62,3 +62,24 @@ h1.md-heading { font-size: 1.48em; } h2.md-heading { font-size: 1.28em; } h3.md-
 :root[data-theme='dark'] .tok-kw { color: #c4b5fd; } :root[data-theme='dark'] .tok-str { color: #86efac; } :root[data-theme='dark'] .tok-num { color: #fdba74; } :root[data-theme='dark'] .tok-fn { color: #93c5fd; } :root[data-theme='dark'] .tok-type { color: #5eead4; } :root[data-theme='dark'] .tok-attr { color: #7dd3fc; } :root[data-theme='dark'] .tok-tag { color: #fda4af; }
 
 .md-citation{position:relative;overflow:visible}.md-citation-preview{display:none;position:absolute;z-index:20;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%);width:max-content;max-width:min(320px,75vw);padding:13px 15px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:var(--shadow-lg);color:var(--text);text-align:left;white-space:normal;font-size:12px;line-height:1.6;font-weight:400}.md-citation:hover .md-citation-preview,.md-citation:focus-visible .md-citation-preview{display:block}.md-citation-host,.md-citation-snippet{display:block;color:var(--muted)}.md-citation-preview strong{display:block;margin:4px 0;font-weight:600}.md-citation-snippet{font-size:11px}
+
+/* Subtle typing cursor during streaming */
+.md-stream-tail {
+  display: inline;
+}
+.md-stream-tail::after {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: -1.5px;
+  border-radius: 2px;
+  background: var(--text-2);
+  opacity: 0.8;
+  animation: stream-blink 850ms ease-in-out infinite;
+}
+@keyframes stream-blink {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 0.12; }
+}

@@ -42,6 +42,8 @@ export interface WorkspaceRef {
   type?: 'file' | 'dir' | 'symlink' | 'image';
   size?: number;
   previewUrl?: string;
+  base64?: string;
+  mimeType?: string;
 }
 
 export interface TextQuote {
@@ -228,7 +230,7 @@ export const useSession = defineStore('session', {
       try { localStorage.setItem('iris-last-project', chosen); } catch {}
       this.setChatUrl(this.chatId);
     },
-    addWorkspaceRef(item: { path: string; name?: string; type?: 'file' | 'dir' | 'symlink' | 'image'; size?: number; previewUrl?: string }) {
+    addWorkspaceRef(item: { path: string; name?: string; type?: 'file' | 'dir' | 'symlink' | 'image'; size?: number; previewUrl?: string; base64?: string; mimeType?: string }) {
       const clean = String(item.path || '').replace(/^\/workspace\/?/, '').replace(/^\/+/, '');
       if (!clean) return;
       const name = item.name || clean.split('/').pop() || clean;
@@ -239,6 +241,8 @@ export const useSession = defineStore('session', {
           type: item.type || (clean.endsWith('/') ? 'dir' : 'file'),
           size: item.size,
           previewUrl: item.previewUrl,
+          base64: item.base64,
+          mimeType: item.mimeType,
         });
       }
     },
@@ -326,11 +330,28 @@ export const useSession = defineStore('session', {
       this.workspaceRefs = [];
       this.textQuotes = [];
 
+      const images: Array<{ type: 'image'; data: string; mimeType: string }> = [];
+      for (const r of attachedRefs) {
+        if (r.type === 'image' || /\.(png|jpe?g|gif|webp|bmp)$/i.test(r.name)) {
+          if (r.base64) {
+            images.push({ type: 'image', data: r.base64, mimeType: r.mimeType || 'image/png' });
+          } else if (r.path) {
+            try {
+              const imgData: any = await post('/api/image', { path: r.path });
+              if (imgData?.data && imgData?.mime) {
+                images.push({ type: 'image', data: imgData.data, mimeType: imgData.mime });
+              }
+            } catch {}
+          }
+        }
+      }
+
+      const turnStartTime = Date.now();
       this.messages.push({
         role: 'user',
-        timestamp: Date.now(),
+        timestamp: turnStartTime,
         content: message,
-        refs: attachedRefs.map(r => ({ path: r.path, name: r.name, type: r.type, size: r.size })),
+        refs: attachedRefs.map(r => ({ path: r.path, name: r.name, type: r.type, size: r.size, previewUrl: r.previewUrl })),
         quotes: attachedQuotes.map(q => ({ id: q.id, text: q.text, source: q.source })),
         _rawPrompt: rawText,
         _fresh: true,
@@ -345,7 +366,7 @@ export const useSession = defineStore('session', {
       let received = false;
       try {
         const result = await streamPrompt({
-          thread, message, thinking: useUi().thinkingLevel, projectId: this.currentProjectId,
+          thread, message, images: images.length ? images : undefined, thinking: useUi().thinkingLevel, projectId: this.currentProjectId,
           permission: this.currentChatPermission, signal: controller.signal,
           onEvent: (event) => { received = true; handleEvent(event, live); },
         });
@@ -362,7 +383,8 @@ export const useSession = defineStore('session', {
         }
       } finally {
         // fold the live view model into the transcript as a finalized message
-        this.messages.push({ role: 'assistant', timestamp: Date.now(), content: live.blocks, _vm: live, _fresh: true });
+        const durationMs = Math.max(0, Date.now() - turnStartTime);
+        this.messages.push({ role: 'assistant', timestamp: Date.now(), durationMs, content: live.blocks, _vm: live, _fresh: true });
         this.live = null;
         this.controller = null;
         this.busy = false;

@@ -334,7 +334,7 @@ export const server = createServer(async (req, res) => {
         });
         return json(res, 200, await response.json());
       }
-      const input = await body(req, url.pathname === '/api/features/save' ? 256 * 1024 : url.pathname === '/api/search/settings/save' ? 512 * 1024 : 65536);
+      const input = await body(req, url.pathname === '/api/prompt' ? 15 * 1024 * 1024 : url.pathname === '/api/features/save' ? 256 * 1024 : url.pathname === '/api/search/settings/save' ? 512 * 1024 : 65536);
       if (['/api/features/save','/api/features/mcp/test','/api/context/compact'].includes(url.pathname)) { const response = await runner(url.pathname.replace('/api',''), auth.user.id, {config:input.config,id:input.id,thread:input.thread,instructions:input.instructions}, AbortSignal.timeout(190000));return json(res,200,await response.json()); }
       if (url.pathname === '/api/memory/update') {
         const response = await runner('/memory/update', auth.user.id, { project: input.project, scope: input.scope, action: input.action, content: input.content, revision: input.revision }); return json(res, 200, await response.json());
@@ -396,20 +396,27 @@ export const server = createServer(async (req, res) => {
         if (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 20000) fail(422, '请输入 1–20000 个字符的任务');
         const validThinking = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
         const thinking = typeof input.thinking === 'string' && validThinking.includes(input.thinking) ? input.thinking : undefined;
+        const images = Array.isArray(input.images) ? input.images.filter(img => img && typeof img.data === 'string' && typeof img.mimeType === 'string' && img.data.length <= 12 * 1024 * 1024) : undefined;
         const abort = new AbortController();
         res.once('close', () => abort.abort());
-        let checking = false;
+        let checking = false, consecutiveFailures = 0;
         const timer = setInterval(async () => {
           if (checking) return; checking = true;
           try {
             const current = await identity(req);
             if (!current.can_execute) abort.abort();
-            else await runner('/renew', auth.user.id, {});
-          } catch { abort.abort(); }
+            else {
+              await runner('/renew', auth.user.id, {});
+              consecutiveFailures = 0;
+            }
+          } catch {
+            consecutiveFailures++;
+            if (consecutiveFailures >= 5) abort.abort();
+          }
           finally { checking = false; }
-        }, 5000);
+        }, 10000);
         try {
-          const response = await runner('/prompt', auth.user.id, { message: input.message, thread: input.thread, thinking, projectId: input.projectId, permission: input.permission }, abort.signal);
+          const response = await runner('/prompt', auth.user.id, { message: input.message, images, thread: input.thread, thinking, projectId: input.projectId, permission: input.permission }, abort.signal);
           res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Accel-Buffering': 'no' });
           await pipeline(Readable.fromWeb(response.body), res);
         } finally { clearInterval(timer); await runner('/cancel', auth.user.id, {}).catch(() => {}); }

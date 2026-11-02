@@ -16,6 +16,32 @@ const userRawText = computed(() => textContent(props.message.content));
 const blocks = computed(() => normalizeBlocks(props.message.content, props.toolResults));
 const time = computed(() => formatClock(props.message.timestamp || Date.now()));
 
+const durationText = computed(() => {
+  if (isUser.value) return '';
+  let ms = Number(props.message.durationMs) || 0;
+  if (!ms && props.message.timestamp) {
+    const list = session.messages || [];
+    const idx = list.findIndex((m: any) => m === props.message || (m.timestamp === props.message.timestamp && m.role === 'assistant'));
+    if (idx > 0) {
+      for (let i = idx - 1; i >= 0; i--) {
+        if (list[i]?.role === 'user' && list[i]?.timestamp) {
+          const diff = props.message.timestamp - list[i].timestamp;
+          if (diff > 0 && diff < 3600000) {
+            ms = diff;
+            break;
+          }
+        }
+      }
+    }
+  }
+  if (!ms || ms <= 0) return '';
+  if (ms < 1000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  const mins = Math.floor(ms / 60000);
+  const secs = Math.round((ms % 60000) / 1000);
+  return `${mins}分${secs ? ' ' + secs + '秒' : ''}`;
+});
+
 const rootRef = ref<HTMLElement | null>(null);
 const contentRef = ref<HTMLElement | null>(null);
 const copied = ref(false);
@@ -258,7 +284,6 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
 
         <MarkdownView v-if="userDisplayText" :source="userDisplayText" />
       </div>
-      <div v-if="isUser" class="user-bubble-footer"><time class="user-bubble-time">{{ time }}</time></div>
       <div v-if="!isUser" class="assistant-body">
         <div ref="contentRef" class="message-content"><BlockList :blocks="blocks" /></div>
         <footer class="assistant-footer">
@@ -304,9 +329,15 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
               <Icon name="git-branch" :size="13.5" />
             </button>
           </div>
-          <time class="assistant-time" :title="new Date(props.message.timestamp || Date.now()).toLocaleString()">
-            {{ time }}
-          </time>
+          <div class="assistant-meta-time">
+            <span v-if="durationText" class="assistant-duration" :title="'本轮耗时 ' + durationText">
+              <Icon name="clock" :size="11" />
+              <span>耗时 {{ durationText }}</span>
+            </span>
+            <time class="assistant-time" :title="new Date(props.message.timestamp || Date.now()).toLocaleString()">
+              {{ time }}
+            </time>
+          </div>
         </footer>
       </div>
     </div>
@@ -401,54 +432,21 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
 .user-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .user-chip-dir { color: var(--muted); font-size: 10px; opacity: 0.75; }
 
-.user-bubble-footer { display: flex; justify-content: flex-end; margin-top: 4px; }
-.user-bubble-time { font-size: 10px; color: color-mix(in srgb, var(--text) 44%, transparent); font-variant-numeric: tabular-nums; user-select: none; }
-
-.assistant-body { width: 100%; min-width: 0; display: flex; flex-direction: column; }
-.message-content { min-width: 0; width: 100%; color: var(--text); font-size: 15px; line-height: 1.74; overflow-wrap: anywhere; }
-
-/* Editorial assistant footer: action buttons + timestamp */
-.assistant-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 10px;
-  min-height: 28px;
-}
-.assistant-actions {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  opacity: 0;
-  transition: opacity var(--fast);
-}
-.message:hover .assistant-actions,
-.message:focus-within .assistant-actions {
-  opacity: 1;
-}
-.msg-action-btn {
+.assistant-meta-time {
+  flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 26px;
-  padding: 0 7px;
-  border-radius: 7px;
+  gap: 8px;
+  user-select: none;
+}
+.assistant-duration {
+  display: inline-flex;
+  align-items: center;
+  gap: 3.5px;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 500;
-  transition: background-color var(--fast), color var(--fast);
-}
-.msg-action-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--text) 6.5%, transparent);
-  color: var(--text);
-}
-.msg-action-btn:disabled {
-  opacity: 0.35;
-}
-.msg-action-label {
-  color: var(--ok);
-  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
 }
 .assistant-time {
   flex: none;

@@ -3,15 +3,15 @@ import { eventBatch } from './event-batch.mjs';
 
 // Parses the runner's NDJSON prompt stream. Handles UTF-8 split across chunks and
 // records split across arbitrary network boundaries.
-export async function streamPrompt({ thread, message, thinking, projectId, permission, signal, onEvent }: {
-  thread: string; message: string; thinking?: string; projectId?: string; permission?: any; signal: AbortSignal; onEvent: (event: any) => void;
+export async function streamPrompt({ thread, message, images, thinking, projectId, permission, signal, onEvent }: {
+  thread: string; message: string; images?: Array<{ type: 'image'; data: string; mimeType: string }>; thinking?: string; projectId?: string; permission?: any; signal: AbortSignal; onEvent: (event: any) => void;
 }): Promise<{ settled: boolean }> {
   let response: Response;
   try {
     response = await fetch('/api/prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrf() },
-      body: JSON.stringify({ thread, message, thinking, projectId, permission }),
+      body: JSON.stringify({ thread, message, images, thinking, projectId, permission }),
       signal, credentials: 'same-origin', redirect: 'error',
     });
   } catch (error: any) {

@@ -176,7 +176,7 @@ async function syncModelsJson(config) {
     return [item.id, {
       baseUrl: item.baseUrl, api: item.api, apiKey: item.apiKey || '$OPENCODE_API_KEY', authHeader: item.api.startsWith('openai-'),
       headers: { 'User-Agent': 'copylee-pi-agent/0.1.0' },
-      models: ordered.map(id => ({ id, reasoning: item.reasoning === true, input: ['text'], contextWindow: 128000, maxTokens: 16384 })),
+      models: ordered.map(id => ({ id, reasoning: item.reasoning === true, input: ['text', 'image'], contextWindow: 128000, maxTokens: 16384 })),
     }];
   }));
   await mkdir(root + '/agent', { recursive: true, mode: 0o700 });

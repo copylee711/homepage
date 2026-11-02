@@ -31,7 +31,7 @@
 
   --ok: #1a8a4e; --ok-soft: rgba(26, 138, 78, 0.09);
   --warn: #9a6a00; --warn-soft: rgba(154, 106, 0, 0.09);
-  --danger: #cf3b31; --danger-soft: rgba(207, 59, 49, 0.09);
+  --danger: #c44d47; --danger-soft: rgba(196, 77, 71, 0.08);
 
   --btn-bg: #1d1d1f; --btn-fg: #ffffff;
   --bg-tint: rgba(20, 20, 26, 0.04);
@@ -75,7 +75,7 @@
 
   --ok: #4ad07f; --ok-soft: rgba(74, 208, 127, 0.13);
   --warn: #e0b254; --warn-soft: rgba(224, 178, 84, 0.13);
-  --danger: #ff6b61; --danger-soft: rgba(255, 107, 97, 0.13);
+  --danger: #e27d75; --danger-soft: rgba(226, 125, 117, 0.12);
 
   --btn-bg: #ececed; --btn-fg: #18181a; --bg-tint: rgba(255, 255, 255, 0.055); --code-bg: #141416;
 

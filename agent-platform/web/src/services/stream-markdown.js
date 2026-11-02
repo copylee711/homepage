@@ -23,7 +23,7 @@ export function streamingMarkdown(host, doc = document, options = {}) {
   }
   return (source, streaming, latestOptions=options) => {
     options=latestOptions;
-    if (!streaming) { host.replaceChildren(renderMarkdown(source, doc, {...options,sources:true})); stable = ''; tail = null; return; }
+    if (!streaming) { host.replaceChildren(renderMarkdown(source, doc, { ...options, sources: false })); stable = ''; tail = null; return; }
     if (!tail || !source.startsWith(stable)) { host.replaceChildren(); stable = ''; tail = doc.createElement('div'); tail.className = 'md-stream-tail'; host.append(tail); }
     const boundary = stableBoundary(source), prefix = source.slice(0, boundary);
     if (boundary > stable.length && prefix.startsWith(stable)) {

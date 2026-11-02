@@ -6,7 +6,6 @@ import BlockList from './BlockList.vue';
 import UserQuestion from './UserQuestion.vue';
 import { buildTranscript } from '../services/transcript.mjs';
 import WelcomeHero from './WelcomeHero.vue';
-import TurnNavigator from './TurnNavigator.vue';
 import { textContent } from '../services/format';
 import { useSession } from '../stores/session';
 
@@ -68,19 +67,25 @@ onMounted(() => nextTick(() => toBottom(false)));
             <div class="message-meta"><strong class="message-author">Iris</strong></div>
             <div class="message-content"><BlockList :blocks="session.live.blocks" :streaming="true" /></div>
             <UserQuestion v-for="question in session.live.questions" :key="question.id" :request="question" />
-            <section v-for="approval in session.live.approvals" :key="approval.id" class="tool-approval" :aria-label="approval.title" aria-live="polite">
-              <strong>{{ approval.title }}</strong>
-              <pre>{{ approval.message }}</pre>
-              <template v-if="approval.state === 'pending'">
-                <p>允许后仅执行本次操作；两分钟内未处理则拒绝执行。</p>
+            <template v-for="approval in session.live.approvals" :key="approval.id">
+              <section v-if="approval.state === 'pending'" class="tool-approval" :aria-label="approval.title" aria-live="polite">
+                <div class="tool-approval-title">
+                  <Icon name="shield" :size="14" />
+                  <strong>{{ approval.title }}</strong>
+                </div>
+                <pre>{{ approval.message }}</pre>
+                <p>允许后仅执行本次操作；5 分钟内未处理则自动取消。</p>
                 <div class="approval-actions">
                   <button type="button" class="btn btn-quiet" :disabled="approval.saving" @click="session.resolveApproval(approval.id, false)">拒绝本次</button>
                   <button type="button" class="btn btn-solid" :disabled="approval.saving" @click="session.resolveApproval(approval.id, true)">允许本次</button>
                 </div>
-              </template>
-              <p v-else>{{ approval.state === 'allowed' ? '已允许本次执行' : '未允许执行' }}</p>
-              <p v-if="approval.error" class="status-error" role="alert">{{ approval.error }}</p>
-            </section>
+                <p v-if="approval.error" class="status-error" role="alert">{{ approval.error }}</p>
+              </section>
+              <div v-else class="tool-approval-resolved">
+                <Icon :name="approval.state === 'allowed' ? 'check' : 'x'" :size="12" />
+                <span>{{ approval.state === 'allowed' ? '已允许执行本次操作' : '已拒绝执行本次操作' }} · {{ approval.title }}</span>
+              </div>
+            </template>
             <div v-if="session.live.status || session.live.error || session.live.stopped" class="message-status" :class="{ 'is-error': session.live.error }">
               <span v-if="session.live.spinner && !session.live.error && !session.live.stopped" class="working-dot"></span>
               <span v-if="session.live.error" class="status-error">{{ session.live.error }}</span>
@@ -91,7 +96,6 @@ onMounted(() => nextTick(() => toBottom(false)));
         </article>
       </div>
     </div>
-    <TurnNavigator :items="userTurns" :active="activeTurn" @jump="jumpToTurn" />
     <button v-if="showJump" type="button" class="jump-latest" aria-label="回到最新" title="回到最新" @click="toBottom()"><Icon name="arrow-down" :size="16" /></button>
   </div>
 </template>
