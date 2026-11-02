@@ -13,6 +13,21 @@ export interface ChatPermission {
   execution?: 'ask' | 'edit' | 'auto';
 }
 
+// The execution mode is a habit, not a per-chat setting: remember the last
+// choice so a brand-new task starts in the mode the user last picked.
+const EXECUTION_KEY = 'iris-execution';
+function readExecutionPref(): ChatPermission['execution'] {
+  try {
+    const value = localStorage.getItem(EXECUTION_KEY);
+    if (value === 'ask' || value === 'edit' || value === 'auto') return value;
+  } catch {}
+  return undefined;
+}
+function writeExecutionPref(execution?: ChatPermission['execution']) {
+  if (!execution) return;
+  try { localStorage.setItem(EXECUTION_KEY, execution); } catch {}
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -68,7 +83,7 @@ export const useSession = defineStore('session', {
     projectsLoading: false,
     lastProjectId: (typeof localStorage !== 'undefined' ? localStorage.getItem('iris-last-project') : null) || 'default',
     newChatProjectId: null as string | null,
-    newChatPermission: { scope: 'project_only', extraProjects: {} as Record<string, 'read' | 'write'> } as ChatPermission,
+    newChatPermission: { scope: 'project_only', extraProjects: {} as Record<string, 'read' | 'write'>, execution: readExecutionPref() } as ChatPermission,
     chats: [] as Chat[],
     chatsLoading: true,
     chatsError: '' as string,
@@ -198,6 +213,7 @@ export const useSession = defineStore('session', {
       await this.loadProjects();
     },
     async setChatPermission(thread: string, permission: ChatPermission) {
+      writeExecutionPref(permission.execution);
       const c = this.chats.find(x => x.id === thread);
       if (c || this.busy) {
         const result = await post('/api/chats/permission', { thread, permission });
@@ -206,6 +222,11 @@ export const useSession = defineStore('session', {
       } else {
         this.newChatPermission = permission;
       }
+    },
+    // New tasks keep the mode they were created with; remember it even when
+    // the choice was made before a chat exists (no setChatPermission round-trip).
+    rememberExecution(execution?: ChatPermission['execution']) {
+      writeExecutionPref(execution);
     },
     async loadChats() {
       this.chatsLoading = true; this.chatsError = '';
@@ -227,6 +248,7 @@ export const useSession = defineStore('session', {
       const chosen = targetProjectId || this.currentChat?.projectId || this.lastProjectId || 'default';
       this.newChatProjectId = chosen;
       this.lastProjectId = chosen;
+      this.newChatPermission = { ...this.newChatPermission, execution: readExecutionPref() };
       try { localStorage.setItem('iris-last-project', chosen); } catch {}
       this.setChatUrl(this.chatId);
     },

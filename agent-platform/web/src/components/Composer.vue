@@ -116,11 +116,32 @@ function isImage(name: string) {
 
 function onChipClick(r: any) {
   if (r.previewUrl || isImage(r.name) || r.type === 'image') {
+    // Prefer the uploaded copy: the app CSP allows 'self' and data:, not blob:.
     ui.openLightbox({
-      url: r.previewUrl || ('/api/files/download?path=' + encodeURIComponent(r.path) + '&inline=1'),
+      url: '/api/files/download?path=' + encodeURIComponent(r.path) + '&inline=1',
       name: r.name,
       size: r.size,
     });
+  }
+}
+
+// Small inline thumbnail for the composer chip. A blob: URL is blocked by the
+// app's img-src CSP, so downscale into a data: URL instead of piping the full
+// 15 MB image through the DOM.
+async function makeThumb(file: File): Promise<string | undefined> {
+  if (!file.type.startsWith('image/')) return undefined;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 160 / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    canvas.getContext('2d')?.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close?.();
+    return canvas.toDataURL('image/png');
+  } catch {
+    return undefined;
   }
 }
 
@@ -160,7 +181,7 @@ async function uploadFiles(files: File[]) {
         name: file.name,
         type: isImg ? 'image' : 'file',
         size: file.size,
-        previewUrl: isImg ? URL.createObjectURL(file) : undefined,
+        previewUrl: isImg ? await makeThumb(file) : undefined,
         base64: isImg ? base64 : undefined,
         mimeType: isImg ? (file.type || 'image/png') : undefined,
       });
@@ -401,6 +422,7 @@ async function setExecution(execution: 'ask' | 'edit' | 'auto') {
   if (execution === executionMode.value) return;
   if (execution === 'auto' && !await ui.confirm({ title: '启用自动执行', message: '后续工具调用将在已选项目范围内直接执行，不再逐次询问。你仍可随时停止任务。', confirmText: '启用自动执行' })) return;
   const next = { ...session.currentChatPermission, execution };
+  session.rememberExecution(execution);
   try {
     if (session.chatId && (!isNewSession.value || session.busy)) await session.setChatPermission(session.chatId, next);
     else session.newChatPermission = next;
