@@ -38,7 +38,7 @@ export function sanitizePermission(value, currentProject = 'default') {
       }
     }
   }
-  return { scope, extraProjects, execution: value.execution === 'auto' ? 'auto' : 'ask' };
+  return { scope, extraProjects, execution: ['auto', 'edit'].includes(value.execution) ? value.execution : 'ask' };
 }
 export function normalizeTitle(value) {
   if (typeof value !== 'string') fail(422, '请填写对话标题');

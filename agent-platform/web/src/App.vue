@@ -9,7 +9,6 @@ import Toasts from './components/Toasts.vue';
 import ContextMenu from './components/ContextMenu.vue';
 import CommandPalette from './components/CommandPalette.vue';
 import ModalHost from './components/ModalHost.vue';
-import WebReadDialog from './components/dialogs/WebReadDialog.vue';
 import SettingsDialog from './components/dialogs/SettingsDialog.vue';
 import SubordinateDialog from './components/dialogs/SubordinateDialog.vue';
 import { useSession } from './stores/session';
@@ -50,7 +49,7 @@ onMounted(() => {
     <main class="main-col">
       <TopBar />
       <Conversation />
-      <Composer />
+      <Composer v-if="session.canExecute" />
     </main>
     <Workspace v-if="session.canExecute" class="app-workspace" :aria-hidden="!workspaceVisible" :inert="!workspaceVisible" />
 
@@ -64,7 +63,6 @@ onMounted(() => {
     <CommandPalette v-if="ui.commandOpen" />
     <SettingsDialog v-if="ui.dialog === 'settings'" />
     <SubordinateDialog v-if="ui.dialog === 'add-subordinate'" />
-    <WebReadDialog v-if="ui.dialog === 'webread'" />
     <ModalHost />
   </div>
 </template>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue';
 import Icon from './Icon.vue';
+import { fileToBase64 } from '../services/files';
 import ModelMenu from './ModelMenu.vue';
 import DropMenu from './DropMenu.vue';
 import type { MenuItem } from './DropMenu.vue';
@@ -55,9 +56,10 @@ watch(() => session.chatId, () => {
 const workspaceRefs = computed(() => session.workspaceRefs || []);
 const textQuotes = computed(() => session.textQuotes || []);
 
-const canSend = computed(() => !session.busy && session.canExecute && (text.value.trim().length > 0 || workspaceRefs.value.length > 0 || textQuotes.value.length > 0));
+const canSend = computed(() => !session.stopping && session.canExecute && (text.value.trim().length > 0 || workspaceRefs.value.length > 0 || textQuotes.value.length > 0));
 const placeholder = computed(() => {
   if (!session.canExecute) return '此账户尚未获得 Iris 执行权限';
+  if (session.busy) return '补充要求，发送后在下一个处理点接收…';
   if (textQuotes.value.length > 0) return '描述针对引用内容的要求，或直接发送…';
   if (workspaceRefs.value.length > 0) return '描述针对引用文件的要求，或直接发送…';
   return '描述任务，或直接粘贴图片、拖入文件…';
@@ -66,8 +68,8 @@ const stateText = computed(() => session.busy ? (session.stopping ? '正在停�
 const effortLabel = computed(() => ({ off: '', low: '低', medium: '中', high: '高', max: '极高' }[ui.thinkingLevel] || ''));
 
 const currentScope = computed(() => session.currentChatPermission.scope || 'project_only');
-const executionMode = computed(() => session.currentChatPermission.execution === 'auto' ? 'auto' : 'ask');
-const executionLabel = computed(() => executionMode.value === 'auto' ? '自动执行' : '需要审批');
+const executionMode = computed(() => session.currentChatPermission.execution || 'ask');
+const executionLabel = computed(() => executionMode.value === 'auto' ? '自动执行' : executionMode.value === 'edit' ? '允许编辑' : '需要审批');
 
 function autosize() {
   const el = area.value; if (!el) return;
@@ -79,6 +81,11 @@ function onInput() { autosize(); }
 async function submit() {
   if (!canSend.value) return;
   const value = text.value;
+  if (session.busy) {
+    try { await session.steer(value); text.value = ''; await nextTick(); autosize(); }
+    catch(e: any) { ui.toast(e.message || '补充指令失败', { tone: 'error' }); }
+    return;
+  }
   text.value = '';
   await nextTick(); autosize();
   await session.send(value);
@@ -117,19 +124,6 @@ function onChipClick(r: any) {
   }
 }
 
-// Convert a File to Base64 data string
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const res = String(reader.result || '');
-      const comma = res.indexOf(',');
-      resolve(comma >= 0 ? res.slice(comma + 1) : res);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
 
 function triggerUpload() {
   if (!session.canExecute || uploading.value) return;
@@ -389,9 +383,10 @@ function openPermissionMenu(e: MouseEvent) {
     { header: '工具执行方式（不改变项目范围）' },
     {
       icon: executionMode.value === 'ask' ? 'check' : 'shield',
-      label: '需要审批 · 每次工具调用前询问',
+      label: '需要审批 · 读取自动放行，修改与命令询问',
       action: () => setExecution('ask'),
     },
+    { icon: executionMode.value === 'edit' ? 'check' : 'edit', label: '允许编辑 · 文件修改自动，Bash 需审批', action: () => setExecution('edit') },
     {
       icon: executionMode.value === 'auto' ? 'check' : 'play',
       label: '自动执行 · 在已授权范围内运行',
@@ -400,14 +395,14 @@ function openPermissionMenu(e: MouseEvent) {
   ];
   permissionMenu.value = { anchor: e.currentTarget as HTMLElement, items };
 }
-async function setExecution(execution: 'ask' | 'auto') {
-  if (session.busy || execution === executionMode.value) return;
+async function setExecution(execution: 'ask' | 'edit' | 'auto') {
+  if (execution === executionMode.value) return;
   if (execution === 'auto' && !await ui.confirm({ title: '启用自动执行', message: '后续工具调用将在已选项目范围内直接执行，不再逐次询问。你仍可随时停止任务。', confirmText: '启用自动执行' })) return;
   const next = { ...session.currentChatPermission, execution };
   try {
-    if (session.chatId && !isNewSession.value) await session.setChatPermission(session.chatId, next);
+    if (session.chatId && (!isNewSession.value || session.busy)) await session.setChatPermission(session.chatId, next);
     else session.newChatPermission = next;
-    ui.toast(execution === 'auto' ? '已启用自动执行' : '已启用逐次审批', { tone: 'success' });
+    ui.toast(execution === 'auto' ? '已启用自动执行' : execution === 'edit' ? '已允许文件编辑，Bash 仍需审批' : '已启用风险操作审批', { tone: 'success' });
   } catch (error: any) { ui.toast(error.message || '更新执行方式失败', { tone: 'error' }); }
 }
 
@@ -618,7 +613,6 @@ watch(() => session.draftText, (val) => {
           type="button"
           class="composer-project-chip"
           :title="'工具执行方式：' + executionLabel"
-          :disabled="session.busy"
           @click="openPermissionMenu"
         >
           <Icon :name="executionMode === 'auto' ? 'play' : 'shield'" :size="12" />
@@ -633,8 +627,8 @@ watch(() => session.draftText, (val) => {
           <span v-if="effortLabel" class="model-chip-effort">{{ effortLabel }}</span>
           <Icon name="chevron-down" :size="12" />
         </button>
-        <button v-if="!session.busy" type="submit" class="send" :disabled="!canSend" aria-label="发送任务" title="发送任务"><Icon name="arrow-up" :size="17" /></button>
-        <button v-else type="button" class="stop" :disabled="session.stopping" @click="session.stop()"><Icon name="square" :size="14" /><span>停止</span></button>
+        <button v-if="!session.busy || text.trim()" type="submit" class="send" :disabled="!canSend" :aria-label="session.busy ? '补充指令' : '发送任务'" :title="session.busy ? '补充指令' : '发送任务'"><Icon name="arrow-up" :size="17" /></button>
+        <button v-if="session.busy" type="button" class="stop" :disabled="session.stopping" @click="session.stop()"><Icon name="square" :size="14" /><span>停止</span></button>
       </div>
     </form>
     <div class="composer-footer"><span class="task-state">{{ stateText }}</span></div>

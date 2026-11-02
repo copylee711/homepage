@@ -1,3 +1,5 @@
+import { BUILTIN_SKILLS, publicFeatures } from '../../features.mjs';
+import { normalizeSearch, publicSearch } from '../../search.mjs';
 // Vite dev-only middleware that emulates the gateway API so the Iris console can be
 // previewed without the backend. Never included in the production build.
 import { createHash, randomUUID } from 'node:crypto';
@@ -82,7 +84,11 @@ const fileText = {
   'iris-rebuild/README.md': '# Iris 控制台项目\n\n位于 /workspace/iris-rebuild 的项目工作区。\n',
   'iris-rebuild/src/app.ts': 'export const version = "0.2.0";\n',
 };
+const encodedFiles = new Set();
 const pendingApprovals = new Map();
+let searchConfig = normalizeSearch();
+let featureConfig={revision:0,autoCompaction:true,skills:BUILTIN_SKILLS.map(s=>s.id),customSkills:[],mcpServers:[]};
+const memoryConfig = {revision:0,persona:'',global:'',projects:{}};
 
 function normPath(p) {
   return String(p || '').replace(/\\/g, '/').replace(/^\/workspace\/?/, '').replace(/^\/+|\/+$/g, '');
@@ -106,7 +112,7 @@ function listDir(dirPath) {
     if (fp.startsWith(prefix)) {
       const rest = fp.slice(prefix.length);
       if (rest && !rest.includes('/')) {
-        entries.push({ name: rest, path: fp, type: 'file', size: Buffer.byteLength(content, 'utf8') });
+        entries.push({ name: rest, path: fp, type: 'file', size: encodedFiles.has(fp) ? Buffer.from(content, 'base64').length : Buffer.byteLength(content, 'utf8') });
       }
     }
   }
@@ -216,6 +222,20 @@ export function devMock() {
 
         if (path === '/auth/logout') return send({ ok: true });
         if (path === '/api/avatar') return send({ error: '暂无头像' }, 404);
+        if(path==='/api/features')return send(publicFeatures(featureConfig));
+        if(path==='/api/features/save'){const next=body.config;featureConfig={...next,revision:featureConfig.revision+1,mcpServers:next.mcpServers.map(s=>({...s,token:s.token||featureConfig.mcpServers.find(o=>o.id===s.id)?.token||''}))};return send(publicFeatures(featureConfig));}
+        if(path==='/api/features/mcp/test'){const server=featureConfig.mcpServers.find(s=>s.id===body.id);if(server)server.tools=[{name:'echo',inputSchema:{type:'object'}}];featureConfig.revision++;return send(publicFeatures(featureConfig));}
+        if(path==='/api/context/stats')return send({tokens:{total:1024},totalMessages:8,toolCalls:2,contextUsage:{tokens:1024,contextWindow:128000,percent:.8}});
+        if(path==='/api/context/compact')return send({ok:true,skipped:true,reason:'当前上下文较短，暂不需要压缩'});
+        if (path === '/api/search/settings') return send(publicSearch(searchConfig));
+        if (path === '/api/search/settings/save') { searchConfig=normalizeSearch(body.config,searchConfig);return send(publicSearch(searchConfig)); }
+        if (path === '/api/search/test') return send({engine:'示例来源',results:[{title:'Python 官方文档',url:'https://docs.python.org/3/',snippet:'开发模式搜索结果'}]});
+        if (path === '/api/background') return send({tasks:[]});
+        if (path === '/api/memory' || path === '/api/memory/update') {
+          const project=body.project||q.get('project')||'default';
+          if(path.endsWith('/update')){if(body.revision!==memoryConfig.revision)return send({error:'记忆已更新'},409);const next=body.action==='clear'?'':String(body.content||'');if(body.scope==='project')memoryConfig.projects[project]=next;else memoryConfig[body.scope]=next;memoryConfig.revision++;}
+          return send({revision:memoryConfig.revision,persona:memoryConfig.persona,global:memoryConfig.global,project:memoryConfig.projects[project]||'',projectId:project});
+        }
         if (path === '/api/me') return send(state.me());
         if (path === '/api/projects') {
           return send({ projects: projects.map(p => ({ ...p, chatCount: chats.filter(c => c.projectId === p.id).length })) });
@@ -396,7 +416,7 @@ export function devMock() {
           };
           const mime = mimeMap[ext] || 'application/octet-stream';
           const isImg = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(p);
-          const isB64 = (isImg || p.endsWith('.pdf')) && /^[A-Za-z0-9+/=\r\n]+$/.test(raw.trim());
+          const isB64 = encodedFiles.has(p) || (isImg || p.endsWith('.pdf')) && /^[A-Za-z0-9+/=\r\n]+$/.test(raw.trim());
           const buffer = isB64 ? Buffer.from(raw.trim(), 'base64') : Buffer.from(raw, 'utf8');
           res.statusCode = 200;
           res.setHeader('Content-Type', mime);
@@ -413,7 +433,7 @@ export function devMock() {
           if (!(p in fileText)) return send({ error: '文件不存在' }, 404);
           const text = fileText[p];
           const isImg = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(p);
-          const isB64 = (isImg || p.endsWith('.pdf')) && /^[A-Za-z0-9+/=\r\n]+$/.test(text.trim());
+          const isB64 = encodedFiles.has(p) || (isImg || p.endsWith('.pdf')) && /^[A-Za-z0-9+/=\r\n]+$/.test(text.trim());
           const b64Data = isB64 ? text.trim() : Buffer.from(text, 'utf8').toString('base64');
           return send({
             data: b64Data,
@@ -432,6 +452,7 @@ export function devMock() {
           const parent = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
           if (parent) dirs.add(parent);
           fileText[p] = String(body.content ?? '');
+          if(body.encoding==='base64')encodedFiles.add(p);else encodedFiles.delete(p);
           return send({ ok: true, revision: sha256(fileText[p]) });
         }
         if (path === '/api/files/manage') {
@@ -439,14 +460,14 @@ export function devMock() {
           const p = normPath(body.path);
           if (act === 'mkdir') { dirs.add(p); return send({ ok: true }); }
           if (act === 'delete') {
-            delete fileText[p];
+            delete fileText[p];encodedFiles.delete(p);
             dirs.delete(p);
             for (const k of Object.keys(fileText)) if (k.startsWith(p + '/')) delete fileText[k];
             return send({ ok: true });
           }
           if (act === 'move') {
             const dest = normPath(body.destination);
-            if (p in fileText) { fileText[dest] = fileText[p]; delete fileText[p]; }
+            if (p in fileText) { fileText[dest] = fileText[p];if(encodedFiles.has(p)){encodedFiles.delete(p);encodedFiles.add(dest);}delete fileText[p]; }
             else if (dirs.has(p)) { dirs.delete(p); dirs.add(dest); }
             return send({ ok: true });
           }

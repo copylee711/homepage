@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue';
 import Icon from './Icon.vue';
+import { fileToBase64 } from '../services/files';
 import MarkdownView from './MarkdownView.vue';
 import DropMenu, { type MenuItem } from './DropMenu.vue';
 import { useWorkspace, FILES_TAB, TERMINAL_TAB, type OpenFileTab } from '../stores/workspace';
@@ -422,9 +423,9 @@ function openAddMenu() {
   addMenu.value = [
     {
       icon: 'file',
-      label: '新建文本文件',
+      label: '新建文件',
       action: async () => {
-        const p = await ui.prompt({ title: '新建文本文件', message: '输入相对于 /workspace 的文件路径', defaultValue: prefix + 'untitled.txt', placeholder: '例如 notes.md 或 src/app.py', confirmText: '创建' });
+        const p = await ui.prompt({ title: '新建文件', message: '输入相对于 /workspace 的文件路径', defaultValue: prefix + 'untitled.txt', placeholder: '例如 notes.md 或 src/app.py', confirmText: '创建' });
         if (!p?.trim()) return;
         try { await ws.createFile(p.trim()); ui.toast('已创建文件', { tone: 'success' }); }
         catch (err: any) { ui.toast(err.message, { tone: 'error' }); }
@@ -442,7 +443,7 @@ function openAddMenu() {
     },
     {
       icon: 'upload',
-      label: '上传文本文件…',
+      label: '上传文件…',
       action: () => fileInput.value?.click(),
     },
   ];
@@ -515,9 +516,9 @@ function onListContext(ev: MouseEvent) {
     selectedEntries.value.length > 0 ? { icon: 'x', label: '取消选择', action: () => { selectedPaths.value = []; } } : null,
     {
       icon: 'file',
-      label: '新建文本文件…',
+      label: '新建文件…',
       action: async () => {
-        const p = await ui.prompt({ title: '新建文本文件', message: '输入相对于 /workspace 的文件路径', defaultValue: prefix + 'untitled.txt', confirmText: '创建' });
+        const p = await ui.prompt({ title: '新建文件', message: '输入相对于 /workspace 的文件路径', defaultValue: prefix + 'untitled.txt', confirmText: '创建' });
         if (p?.trim()) await ws.createFile(p.trim());
       },
     },
@@ -554,17 +555,14 @@ function startResize(ev: PointerEvent) {
 
 async function handleSelectedFile(file: File | undefined) {
   if (!file) return;
-  if (file.size > 256 * 1024) {
-    ui.toast('上传文件不能超过 256 KiB', { tone: 'error' });
+  if (file.size > 15 * 1024 * 1024) {
+    ui.toast('上传文件不能超过 15 MiB', { tone: 'error' });
     return;
   }
   try {
-    const content = await file.text();
-    if (content.includes('\u0000')) {
-      ui.toast('暂不支持上传二进制文件', { tone: 'error' });
-      return;
-    }
-    const ok = await ws.upload(file.name, content, false);
+    const folder = ws.path;
+    const content = await fileToBase64(file);
+    const ok = await ws.upload(file.name, content, false, 'base64', folder);
     if (ok) ui.toast('已上传 ' + file.name, { tone: 'success' });
   } catch (err: any) {
     ui.toast(err.message, { tone: 'error' });
@@ -769,7 +767,7 @@ onMounted(() => {
           <span class="spinner"></span><span>正在读取…</span>
         </div>
         <p v-else-if="ws.error" class="list-empty">{{ ws.error }}</p>
-        <p v-else-if="!ws.entries.length" class="list-empty">当前目录为空，可点击右上角 + 新建或拖拽文本文件上传。</p>
+        <p v-else-if="!ws.entries.length" class="list-empty">当前目录为空，可点击右上角 + 新建或拖拽文件上传。</p>
 
         <button
           v-for="e in ws.entries"

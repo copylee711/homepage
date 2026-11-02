@@ -139,6 +139,29 @@ export const server = createServer(async (req, res) => {
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   try {
     const url = new URL(req.url, publicURL);
+      if (url.pathname.startsWith('/preview/')) {
+        if (req.method !== 'GET') fail(405, '预览仅支持 GET');
+        const match = url.pathname.match(/^\/preview\/([A-Za-z0-9_-]{43})(\/.*)?$/);
+        if (!match) fail(404, '预览链接无效');
+        const response = await runner('/background/preview', 'preview-capability', { token: match[1], path: (match[2] || '/') + url.search });
+        const value = await response.json();
+        let data = Buffer.from(value.data || '', 'base64');
+        if (data.length > 2 * 1024 * 1024) fail(413, '预览资源过大');
+        if ([301, 302, 303, 307, 308].includes(value.status)) {
+          const location = String(value.location || '');
+          if (!location.startsWith('/') || location.startsWith('//')) fail(502, '预览重定向已阻止');
+          const prefix = '/preview/' + match[1] + '/';
+          res.writeHead(302, { Location: location.startsWith(prefix) ? location : prefix.slice(0, -1) + location }); return res.end();
+        }
+        // Bearer preview links are short-lived and scoped to one task. A CSP
+        // sandbox gives active preview documents an opaque origin: they cannot
+        // read Iris cookies/storage or call authenticated Iris APIs as the user.
+        res.setHeader('Content-Security-Policy', "sandbox allow-scripts allow-forms; default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src * data: blob:; connect-src 'self' ws: wss:; object-src 'none'; frame-ancestors 'self'");
+        res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.writeHead(value.status >= 100 && value.status <= 599 ? value.status : 502, { 'Content-Type': value.contentType || 'application/octet-stream' });
+        return res.end(data);
+      }
     if (url.pathname === '/healthz' && req.method === 'GET') return json(res, 200, { ok: true });
     if (url.pathname === '/auth/login' && req.method === 'GET') {
       const state = randomBytes(32).toString('base64url'), verifier = randomBytes(32).toString('base64url');
@@ -250,6 +273,17 @@ export const server = createServer(async (req, res) => {
       if (url.pathname === '/api/greeting' && req.method === 'GET') {
         const response = await runner('/greeting', auth.user.id, {}); return json(res, 200, await response.json());
       }
+      if (url.pathname === '/api/search/settings' && req.method === 'GET') {
+        const response = await runner('/search/settings', auth.user.id, {}); return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/features' && req.method === 'GET') { const response = await runner('/features', auth.user.id, {}); return json(res, 200, await response.json()); }
+      if (url.pathname === '/api/context/stats' && req.method === 'GET') { const response = await runner('/context/stats', auth.user.id, { thread:url.searchParams.get('chat') }); return json(res, 200, await response.json()); }
+      if (url.pathname === '/api/memory' && req.method === 'GET') {
+        const response = await runner('/memory', auth.user.id, { project: url.searchParams.get('project') || 'default' }); return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/background' && req.method === 'GET') {
+        const response = await runner('/background/list', auth.user.id, { id: url.searchParams.get('id') || undefined }); return json(res, 200, await response.json());
+      }
       if (url.pathname === '/api/session' && req.method === 'GET') {
         const response = await runner('/session', auth.user.id, { thread: url.searchParams.get('chat') }); return json(res, 200, await response.json());
       }
@@ -280,7 +314,18 @@ export const server = createServer(async (req, res) => {
         });
         return json(res, 200, await response.json());
       }
-      const input = await body(req);
+      const input = await body(req, url.pathname === '/api/features/save' ? 256 * 1024 : url.pathname === '/api/search/settings/save' ? 512 * 1024 : 65536);
+      if (['/api/features/save','/api/features/mcp/test','/api/context/compact'].includes(url.pathname)) { const response = await runner(url.pathname.replace('/api',''), auth.user.id, {config:input.config,id:input.id,thread:input.thread,instructions:input.instructions}, AbortSignal.timeout(190000));return json(res,200,await response.json()); }
+      if (url.pathname === '/api/memory/update') {
+        const response = await runner('/memory/update', auth.user.id, { project: input.project, scope: input.scope, action: input.action, content: input.content, revision: input.revision }); return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/background/stop') {
+        const response = await runner('/background/stop', auth.user.id, { id: input.id }); return json(res, 200, await response.json());
+      }
+      if (['/api/questions/answer', '/api/steer', '/api/search/settings/save', '/api/search/test'].includes(url.pathname)) {
+        const response = await runner(url.pathname.replace('/api', ''), auth.user.id, { thread: input.thread, id: input.id, answer: input.answer, message: input.message, config: input.config, query: input.query }, AbortSignal.timeout(55000));
+        return json(res, 200, await response.json());
+      }
       if (url.pathname === '/api/approvals/resolve') {
         const response = await runner('/approvals/resolve', auth.user.id, { thread: input.thread, id: input.id, allow: input.allow });
         return json(res, 200, await response.json());
@@ -319,11 +364,7 @@ export const server = createServer(async (req, res) => {
         modelCache.expires = 0;
         return json(res, 200, await response.json());
       }
-      if (url.pathname === '/api/web-read') {
-        if (typeof input.url !== 'string' || !/^https?:\/\//i.test(input.url) || input.url.length > 2048) fail(422, '请输入有效的网址');
-        const response = await runner('/web-read', auth.user.id, { url: input.url });
-        return json(res, 200, await response.json());
-      }
+
       if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/chats/fork', '/api/chats/truncate', '/api/chats/project', '/api/chats/permission', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/terminal/exec', '/api/git/status', '/api/git/checkout'].includes(url.pathname)) {
         const response = await runner(url.pathname.replace('/api', ''), auth.user.id, input);
         return json(res, 200, await response.json());

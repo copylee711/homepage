@@ -12,6 +12,9 @@ COPY agent-platform/sandbox-client.mjs agent-platform/session-limits.mjs agent-p
 COPY agent-platform/conversations.mjs agent-platform/workspace.mjs ./
 COPY agent-platform/session-snapshot.mjs ./
 COPY agent-platform/tool-approvals.mjs ./
+COPY agent-platform/execution-policy.mjs agent-platform/search.mjs agent-platform/memory.mjs ./
+COPY agent-platform/features.mjs agent-platform/mcp.mjs ./
+COPY agent-platform/execution-policy.mjs /opt/pi/execution-policy.mjs
 COPY agent-platform/packages.mjs ./
 COPY agent-platform/toolchains.mjs agent-platform/toolchains.json ./
 COPY agent-platform/sandbox-extension.ts /opt/pi/sandbox-extension.ts

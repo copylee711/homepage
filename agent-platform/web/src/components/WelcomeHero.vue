@@ -10,12 +10,12 @@ onMounted(async () => { if (session.canExecute) greeting.value = await loadGreet
 </script>
 
 <template>
-  <section class="welcome">
+  <section class="welcome" :class="{ 'welcome-permission': permission }">
     <span class="welcome-mark"><Icon name="iris" :size="34" /></span>
     <h2 v-if="!permission">{{ greeting }}</h2>
     <template v-else>
       <h2>尚未开通执行权限</h2>
-      <p>此账户可以登录，但尚未获得执行权限，请联系管理员开通。</p>
+      <p>请联系管理员为当前账户开通 Iris 执行权限。</p>
     </template>
   </section>
 </template>
@@ -28,4 +28,6 @@ onMounted(async () => { if (session.canExecute) greeting.value = await loadGreet
 @keyframes mark-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
 .welcome h2 { margin: 0 0 12px; font-family: var(--font-display); font-size: clamp(27px, 3.1vw, 36px); font-weight: 650; line-height: 1.25; letter-spacing: -0.01em; }
 .welcome p { max-width: 520px; margin: 0; color: var(--muted); font-size: 14.5px; line-height: 1.7; }
+.welcome-permission h2 { font-family: var(--font); font-size: clamp(22px, 4vw, 28px); }
+.welcome-permission .welcome-mark { animation: none; }
 </style>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue';
 import Icon from './Icon.vue';
+import SlimScrollRail from './SlimScrollRail.vue';
 import DropMenu from './DropMenu.vue';
 import type { MenuItem } from './DropMenu.vue';
 import { useSession, type Chat } from '../stores/session';
@@ -13,6 +14,7 @@ const session = useSession();
 const ws = useWorkspace();
 const ui = useUi();
 
+const chatList = ref<HTMLElement | null>(null);
 const query = ref('');
 const searchOpen = ref(false);
 const searchInput = ref<HTMLInputElement | null>(null);
@@ -301,10 +303,11 @@ watch(avatarUrl, () => { avatarError.value = false; });
       </div>
     </div>
 
-    <nav class="chat-list" :class="{ 'is-compact': ui.chatDensity === 'compact' }" aria-label="对话列表">
+    <div class="chat-list-shell">
+    <nav ref="chatList" class="chat-list slim-scroll-target" :class="{ 'is-compact': ui.chatDensity === 'compact' }" aria-label="对话列表">
       <div v-if="session.chatsLoading" class="list-state"><span class="spinner"></span><span>正在读取对话…</span></div>
       <p v-else-if="session.chatsError" class="list-empty">{{ session.chatsError }}</p>
-      <p v-else-if="!groups.length" class="list-empty">{{ query ? '没有匹配的对话。' : '还没有对话，发送第一条消息后会出现在这里。' }}</p>
+      <p v-else-if="!groups.length" class="list-empty">{{ !session.canExecute ? '开通执行权限后，可在这里管理对话。' : query ? '没有匹配的对话。' : '还没有对话，发送第一条消息后会出现在这里。' }}</p>
       <section v-for="g in groups" :key="g.key" class="chat-group">
         <header
           v-if="g.label"
@@ -357,6 +360,8 @@ watch(avatarUrl, () => { avatarError.value = false; });
         </ul>
       </section>
     </nav>
+    <SlimScrollRail :target="chatList" />
+    </div>
 
     <div class="sidebar-foot">
       <button ref="accountMenuAnchor" class="account" aria-haspopup="menu" @click="openAccountMenu">

@@ -75,6 +75,12 @@ const VERBS: Record<string, string> = {
   grep: '搜索',
   search: '搜索',
   web_search: '搜索',
+  memory_read: '读取记忆',
+  memory_update: '保存记忆',
+  ask_user: '询问用户',
+  background_start: '启动后台任务',
+  background_status: '后台任务状态',
+  background_stop: '停止后台任务',
   web_fetch: '访问',
   fetch: '访问',
 };

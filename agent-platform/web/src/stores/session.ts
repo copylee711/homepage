@@ -1,3 +1,4 @@
+import { reactiveLive, handleEvent } from '../services/live.mjs';
 import { defineStore } from 'pinia';
 import { reactive } from 'vue';
 import { get, post, setCsrf, ApiError } from '../services/api';
@@ -9,7 +10,7 @@ export type PermissionScope = 'project_only' | 'scoped' | 'full';
 export interface ChatPermission {
   scope: PermissionScope;
   extraProjects?: Record<string, 'read' | 'write'>;
-  execution?: 'ask' | 'auto';
+  execution?: 'ask' | 'edit' | 'auto';
 }
 
 export interface Project {
@@ -102,6 +103,19 @@ export const useSession = defineStore('session', {
     },
   },
   actions: {
+    async answerQuestion(id: string, answer: string) {
+      const item = this.live?.questions?.find((q: any) => q.id === id);
+      if (!item || item.state !== 'pending' || item.saving) return;
+      item.saving = true; item.error = '';
+      try { await post('/api/questions/answer', { thread: this.chatId, id, answer }); item.state = 'answered'; item.answer = answer; }
+      catch(e: any) { item.error = e.message; if (e.status === 409) item.state = 'expired'; }
+      finally { item.saving = false; }
+    },
+    async steer(message: string) {
+      await post('/api/steer', { thread: this.chatId, message });
+      if (this.live) this.live.status = '补充指令已发送，模型将在下一个处理点接收';
+      useUi().toast('已补充指令', { tone: 'success' });
+    },
     async resolveApproval(id: string, allow: boolean) {
       const approval = this.live?.approvals?.find((item: any) => item.id === id);
       if (!approval || approval.state !== 'pending' || approval.saving) return;
@@ -183,9 +197,10 @@ export const useSession = defineStore('session', {
     },
     async setChatPermission(thread: string, permission: ChatPermission) {
       const c = this.chats.find(x => x.id === thread);
-      if (c) {
+      if (c || this.busy) {
         const result = await post('/api/chats/permission', { thread, permission });
-        c.permission = result.permission || permission;
+        if (c) c.permission = result.permission || permission;
+        else this.newChatPermission = result.permission || permission;
       } else {
         this.newChatPermission = permission;
       }
@@ -455,66 +470,4 @@ function lastUser(items: any[]): string {
     if (m?.role === 'user') return typeof m.content === 'string' ? m.content : (Array.isArray(m.content) ? m.content.filter((p: any) => p?.type === 'text').map((p: any) => p.text).join('\n') : '');
   }
   return '';
-}
-
-// A plain reactive-friendly object describing the streaming assistant turn.
-function reactiveLive() {
-  return { blocks: [] as any[], approvals: [] as any[], status: '正在连接模型…', spinner: true, finished: false, error: '', stopped: false, tools: {} as Record<string, any> };
-}
-
-// Reduce a runner stream event into the live view model's block list.
-function handleEvent(event: any, live: any) {
-  if (!event || typeof event !== 'object') return;
-  const vm = live;
-  if (event.type === 'extension_ui_request' && event.method === 'confirm') {
-    vm.approvals.push({ id: event.id, title: event.title, message: event.message, expiresAt: event.expiresAt, state: 'pending', saving: false, error: '' });
-    vm.status = '等待你审批工具操作…'; vm.spinner = false;
-    return;
-  }
-  if (event.type === 'approval_resolved') {
-    const item = vm.approvals.find((a: any) => a.id === event.id);
-    if (item) item.state = event.allowed ? 'allowed' : 'denied';
-    vm.status = event.reason || '审批已处理';
-    return;
-  }
-  const ensureBlock = (index: number, type: string) => {
-    let b = vm.blocks.find((x: any) => x.index === index);
-    if (!b) { b = { index, type, text: '', fresh: true }; vm.blocks.push(b); vm.blocks.sort((a: any, z: any) => a.index - z.index); }
-    return b;
-  };
-  if (event.type === 'message_update') {
-    const u = event.assistantMessageEvent; if (!u) return;
-    switch (u.type) {
-      case 'text_start': ensureBlock(u.contentIndex, 'text'); break;
-      case 'text_delta': { const b = ensureBlock(u.contentIndex, 'text'); b.text += u.delta || ''; break; }
-      case 'text_end': { const b = ensureBlock(u.contentIndex, 'text'); if (typeof u.content === 'string') b.text = u.content; break; }
-      case 'thinking_start': ensureBlock(u.contentIndex, 'thinking'); break;
-      case 'thinking_delta': { const b = ensureBlock(u.contentIndex, 'thinking'); b.text += u.delta || ''; break; }
-      case 'thinking_end': { const b = ensureBlock(u.contentIndex, 'thinking'); if (typeof u.content === 'string') b.text = u.content; break; }
-      case 'toolcall_start': { const b = ensureBlock(u.contentIndex, 'tool'); b.id = u.id || u.toolCall?.id; b.name = u.toolName || u.toolCall?.name || 'tool'; b.state = 'pending'; b.args = ''; vm.status = '正在准备工具…'; break; }
-      case 'toolcall_delta': { const b = ensureBlock(u.contentIndex, 'tool'); b.args = (b.args || '') + (u.delta || ''); break; }
-      case 'toolcall_end': { const b = ensureBlock(u.contentIndex, 'tool'); const tc = u.toolCall || {}; b.id = tc.id || b.id; b.name = tc.name || b.name; b.args = tc.arguments ? JSON.stringify(tc.arguments, null, 2) : b.args; b.state = 'pending'; break; }
-    }
-    return;
-  }
-  if (event.type === 'tool_execution_start') {
-    const b = vm.blocks.find((x: any) => x.type === 'tool' && x.id === event.toolCallId) || ensureBlock(1e6 + Object.keys(vm.tools).length, 'tool');
-    b.id = event.toolCallId; b.name = event.toolName || b.name; b.state = 'running'; if (event.args) b.args = JSON.stringify(event.args, null, 2);
-    b.started = Date.now(); vm.status = '正在执行工具 · ' + (event.toolName || ''); vm.spinner = true;
-    return;
-  }
-  if (event.type === 'tool_execution_end') {
-    const b = vm.blocks.find((x: any) => x.type === 'tool' && x.id === event.toolCallId);
-    if (b) { b.state = event.isError ? 'error' : 'success'; b.result = toolText(event.result); b.durationMs = event.durationMs || (b.started ? Date.now() - b.started : 0); }
-    vm.status = '正在整理结果…'; return;
-  }
-  if (event.type === 'gateway_error') throw new ApiError(event.error || '任务中断，请重试', 0);
-  if (event.type === 'agent_settled') { if (event.aborted) vm.stopped = true; vm.status = ''; vm.spinner = false; }
-}
-
-function toolText(value: any): string {
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return value.filter(p => p?.type === 'text').map(p => p.text || '').join('\n') || value.map(p => p?.text || '').join('');
-  if (value && typeof value === 'object') return String(value.output || value.stdout || JSON.stringify(value));
-  return String(value ?? '');
 }

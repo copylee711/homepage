@@ -35,6 +35,11 @@ try:
         os.chown(directory / 'value.txt', 1000, 1000)
     (root / 'app' / 'escape').symlink_to('/workspace/private/value.txt')
     only = {'project': 'app', 'scope': 'project_only'}
+    (root / '.tools' / 'bin').mkdir(parents=True)
+    (root / '.tools' / 'bin' / 'qa-shared').write_text('#!/bin/sh\necho SHARED_TOOL_OK\n')
+    (root / '.tools' / 'bin' / 'qa-shared').chmod(0o755)
+    assert run(only, 'qa-shared')['output'].strip() == 'SHARED_TOOL_OK'
+    assert run(only, 'echo changed > /workspace/.tools/bin/qa-shared')['exitCode'] != 0
     assert run(only, 'pwd')['output'].strip() == '/workspace/app'
     assert run(only, 'echo own > own.txt; cat own.txt')['exitCode'] == 0
     for command in ['cat ../private/value.txt', 'cat escape', 'cat /workspace/reference/value.txt',
@@ -53,6 +58,6 @@ try:
         raise AssertionError('Symlink project accepted')
     except ValueError:
         pass
-    print('PASS: real bash cwd, own writes, hidden projects, traversal/symlink escape, read-only/write grants, full scope, symlink project rejection')
+    print('PASS: real bash cwd, shared read-only toolchain, own writes, hidden projects, traversal/symlink escape, read-only/write grants, full scope, symlink project rejection')
 finally:
     shutil.rmtree(root)

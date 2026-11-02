@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 
 export type Tone = 'info' | 'success' | 'warning' | 'error';
-export type SettingsTab = 'general' | 'providers' | 'grants' | 'packages' | 'toolchains' | 'archived' | 'shortcuts';
+export type SettingsTab = 'general' | 'capabilities' | 'memory' | 'background' | 'search' | 'providers' | 'grants' | 'packages' | 'toolchains' | 'archived' | 'shortcuts';
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'max';
 export interface Toast { id: number; message: string; tone: Tone; action?: { label: string; run: () => void } | null; }
 
@@ -53,6 +53,7 @@ export const useUi = defineStore('ui', {
     toasts: [] as Toast[],
     dialog: null as null | string,
     settingsTab: 'general' as SettingsTab,
+    dialogGuard: null as null | (() => Promise<boolean>),
     commandOpen: false,
     context: null as null | { x: number; y: number; items: any[] },
     modal: null as ModalState | null,
@@ -169,7 +170,7 @@ export const useUi = defineStore('ui', {
       if (tabMap[name]) { this.openSettings(tabMap[name]); return; }
       this.dialog = name;
     },
-    closeDialog() { this.dialog = null; },
+    async closeDialog() { if (this.dialogGuard && !await this.dialogGuard()) return; this.dialog = null; },
     openCommand() { this.commandOpen = true; },
     closeCommand() { this.commandOpen = false; },
     openContext(event: MouseEvent, items: any[]) {

@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import Icon from './Icon.vue';
 import Message from './Message.vue';
 import BlockList from './BlockList.vue';
+import UserQuestion from './UserQuestion.vue';
+import { buildTranscript } from '../services/transcript.mjs';
 import WelcomeHero from './WelcomeHero.vue';
+import TurnNavigator from './TurnNavigator.vue';
+import { textContent } from '../services/format';
 import { useSession } from '../stores/session';
 
 const session = useSession();
@@ -13,28 +17,34 @@ const showJump = ref(false);
 
 // Build the display list: user/assistant messages, with toolResult messages
 // folded into a lookup so tool cards show their results.
-const display = computed(() => {
-  const items: any[] = [];
-  const toolResults: Record<string, any> = {};
-  for (const m of session.messages) {
-    if (m.role === 'toolResult') { toolResults[m.toolCallId] = { isError: m.isError === true, text: typeof m.content === 'string' ? m.content : '' }; }
-  }
-  for (const m of session.messages) {
-    if (m.role === 'user' || m.role === 'assistant') items.push({ m, toolResults });
-  }
-  return items;
-});
+const display = computed(() => buildTranscript(session.messages));
+const userTurns = computed(() => display.value.flatMap((message:any,index:number) => message.role === 'user' ? [{index,label:String(message._rawPrompt || textContent(message.content) || '文件与引用消息').replace(/\s+/g,' ').slice(0,180)}] : []));
+const activeTurn = ref(-1), flashTurn = ref(-1);
+let flashTimer: ReturnType<typeof setTimeout> | undefined;
+function updateActiveTurn() {
+  const root=scroller.value;if(!root)return;
+  const top=root.getBoundingClientRect().top+80;let current=userTurns.value[0]?.index??-1;
+  for(const element of Array.from(root.querySelectorAll<HTMLElement>('[data-user-index]'))) { if(element.getBoundingClientRect().top<=top)current=Number(element.dataset.userIndex);else break; }
+  activeTurn.value=nearBottom()?(userTurns.value.at(-1)?.index??current):current;
+}
+function jumpToTurn(index:number) {
+  const root=scroller.value,target=root?.querySelector<HTMLElement>('[data-user-index="'+index+'"]');if(!root||!target)return;
+  follow.value=false;showJump.value=true;activeTurn.value=index;flashTurn.value=index;
+  root.scrollTo({top:root.scrollTop+target.getBoundingClientRect().top-root.getBoundingClientRect().top-16,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+  if(flashTimer)clearTimeout(flashTimer);flashTimer=setTimeout(()=>{flashTurn.value=-1;},1800);
+}
+onBeforeUnmount(()=>{if(flashTimer)clearTimeout(flashTimer);});
 
 function nearBottom() {
   const el = scroller.value; if (!el) return true;
   return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
 }
-function onScroll() { follow.value = nearBottom(); showJump.value = !follow.value && session.messages.length > 0; }
+function onScroll() { follow.value = nearBottom(); showJump.value = !follow.value && session.messages.length > 0; updateActiveTurn(); }
 function toBottom(smooth = true) {
   const el = scroller.value; if (!el) return;
   el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
 }
-function autoFollow() { if (follow.value) nextTick(() => toBottom(false)); }
+function autoFollow() { nextTick(() => { if (follow.value) toBottom(false); updateActiveTurn(); }); }
 
 watch(() => session.messages.length, autoFollow);
 watch(() => session.live && JSON.stringify(session.live.blocks.map((b: any) => b.text?.length || b.state)), autoFollow);
@@ -44,17 +54,18 @@ onMounted(() => nextTick(() => toBottom(false)));
 
 <template>
   <div class="stage">
-    <div class="conversation" :class="{ 'is-empty': session.isEmpty && !session.loadingChat }" ref="scroller" tabindex="0" aria-label="对话内容" @scroll.passive="onScroll">
+    <div class="conversation" :class="{ 'is-empty': session.isEmpty && !session.loadingChat, 'is-unauthorized': session.booted && !session.canExecute }" ref="scroller" tabindex="0" aria-label="对话内容" @scroll.passive="onScroll">
       <WelcomeHero v-if="session.isEmpty && !session.loadingChat" />
       <div v-else class="messages">
         <div v-if="session.loadingChat" class="conversation-state"><span class="spinner"></span><span>正在读取对话…</span></div>
-        <Message v-for="(it, i) in display" :key="i" :message="it.m" :tool-results="it.toolResults" />
+        <Message v-for="(it, i) in display" :key="i" :message="it" :data-user-index="it.role==='user'?i:undefined" :class="{'is-jump-target':flashTurn===i}" />
         <!-- live streaming assistant -->
         <article v-if="session.live" class="message message-assistant">
           <div class="message-avatar"><Icon name="iris" :size="18" /></div>
           <div class="message-inner">
             <div class="message-meta"><strong class="message-author">Iris</strong></div>
             <div class="message-content"><BlockList :blocks="session.live.blocks" :streaming="true" /></div>
+            <UserQuestion v-for="question in session.live.questions" :key="question.id" :request="question" />
             <section v-for="approval in session.live.approvals" :key="approval.id" class="tool-approval" :aria-label="approval.title" aria-live="polite">
               <strong>{{ approval.title }}</strong>
               <pre>{{ approval.message }}</pre>
@@ -78,15 +89,19 @@ onMounted(() => nextTick(() => toBottom(false)));
         </article>
       </div>
     </div>
+    <TurnNavigator :items="userTurns" :active="activeTurn" @jump="jumpToTurn" />
     <button v-if="showJump" type="button" class="jump-latest" aria-label="回到最新" title="回到最新" @click="toBottom()"><Icon name="arrow-down" :size="16" /></button>
   </div>
 </template>
 
 <style>
 .stage { position: relative; min-height: 0; flex: 1; display: flex; overflow: hidden; }
-.conversation { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable both-edges; padding: 0 clamp(16px, 4vw, 40px); scroll-behavior: smooth; overscroll-behavior: contain; }
+.conversation { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable both-edges; padding: 0 clamp(16px, 4vw, 40px); scroll-behavior: auto; overscroll-behavior: contain; }
+.conversation.is-unauthorized.is-empty { justify-content: center; }
 .conversation.is-empty { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
 .messages { width: 100%; max-width: 760px; margin: 0 auto; padding: 30px 0 44px; display: flex; flex-direction: column; gap: 30px; }
+.is-jump-target .user-bubble { box-shadow:0 0 0 2px var(--line-strong); }
+@media(max-width:640px){.conversation{padding-right:30px;}}
 .conversation-state { padding: 40px 0; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: 12.5px; }
 .message-status { min-height: 18px; display: flex; align-items: center; gap: 8px; margin-top: 9px; color: var(--muted); font-size: 11.5px; }
 .message-status.is-error { color: var(--danger); }

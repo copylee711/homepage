@@ -51,4 +51,10 @@ def mount_arguments(root, rules):
         if not stat.S_ISDIR(target.lstat().st_mode) or target.is_symlink():
             raise ValueError("项目目录不是普通目录，请在工作区修复")
         args += ["--mount", f"type=bind,src={target},dst=/workspace/{name},bind-recursive=disabled" + (",readonly" if access == "read" else "")]
+    # Owner-installed toolchains are executable/readable in each project, while
+    # their shared installation is immutable from scoped Agent containers.
+    tools = root / '.tools'
+    if tools.exists() or tools.is_symlink():
+        if tools.is_symlink() or not stat.S_ISDIR(tools.lstat().st_mode): raise ValueError('共享工具链目录不是普通目录')
+        args += ['--mount', f'type=bind,src={tools},dst=/workspace/.tools,readonly,bind-recursive=disabled']
     return args

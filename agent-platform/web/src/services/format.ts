@@ -86,21 +86,4 @@ export function textContent(value: any): string {
   return (Array.isArray(value) ? value : []).filter((p: any) => p?.type === 'text').map((p: any) => p.text || '').join('\n');
 }
 
-// Normalize an assistant message's content (Pi shape or live view-model) into
-// the block list BlockList.vue renders.
-export function normalizeBlocks(content: any, toolResults?: Record<string, any>): any[] {
-  if (!Array.isArray(content)) return content ? [{ type: 'text', text: String(content) }] : [];
-  // Live view-model blocks already use {type:'text'|'thinking'|'tool'}.
-  if (content.some((b: any) => b && (b.type === 'tool' || (b.type === 'text' && 'index' in b)))) return content;
-  const blocks: any[] = [];
-  for (const part of content) {
-    if (!part || typeof part !== 'object') continue;
-    if (part.type === 'text') blocks.push({ type: 'text', text: part.text || '' });
-    else if (part.type === 'thinking' && part.thinking) blocks.push({ type: 'thinking', text: part.thinking });
-    else if (part.type === 'toolCall') {
-      const r = toolResults?.[part.id];
-      blocks.push({ type: 'tool', id: part.id, name: part.name || 'tool', args: part.arguments ? JSON.stringify(part.arguments, null, 2) : '', state: r ? (r.isError ? 'error' : 'success') : 'success', result: r ? r.text : '', durationMs: 0 });
-    }
-  }
-  return blocks;
-}
+export { normalizeBlocks } from './transcript.mjs';

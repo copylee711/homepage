@@ -27,5 +27,9 @@ export class SessionSnapshots {
 export async function projectSession(text) {
   // Use Pi's canonical branch/compaction/context-edit semantics, not a flat JSONL scan.
   const { SessionManager, parseSessionEntries } = await import('/opt/pi/node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js');
-  return SessionManager.inMemory('/tmp', {}, parseSessionEntries(text)).buildSessionContext().messages;
+  const manager = SessionManager.inMemory('/tmp', {}, parseSessionEntries(text));
+  // Model context and the visible transcript serve different purposes. Preserve
+  // the selected branch's original messages when compaction shrinks model input.
+  return manager.getBranch().flatMap(entry => entry.type === 'message' ? [entry.message]
+    : entry.type === 'compaction' ? [{ role: 'assistant', timestamp: entry.timestamp, content: [{ type: 'text', text: '上下文已压缩，前面的原始消息仍保留在对话记录中。' }] }] : []);
 }

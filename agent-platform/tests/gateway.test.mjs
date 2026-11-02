@@ -86,7 +86,7 @@ test('new file/chat endpoints enforce CSRF and derive tenant identity; local mod
   assert.equal((await fetch(base + '/api/git/status?project=app', { headers })).status, 200);
   assert.equal(lastRunner.path, '/git/status');
   assert.equal(lastRunner.value.project, 'app');
-  for (const path of ['/api/approvals/resolve', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/chats/project', '/api/chats/permission', '/api/terminal/exec', '/api/git/checkout', '/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/files/upload', '/api/files/manage', '/api/toolchains/change', '/api/toolchains/cancel']) {
+  for (const path of ['/api/approvals/resolve', '/api/questions/answer', '/api/steer', '/api/search/settings/save', '/api/search/test', '/api/memory/update', '/api/background/stop', '/api/features/save', '/api/features/mcp/test', '/api/context/compact', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/chats/project', '/api/chats/permission', '/api/terminal/exec', '/api/git/checkout', '/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/files/upload', '/api/files/manage', '/api/toolchains/change', '/api/toolchains/cancel']) {
     const value = JSON.stringify({ user: 'forged', thread: '11111111-1111-4111-8111-111111111111', title: 'test', content: 'test', path: 'test.txt' });
     assert.equal((await fetch(base + path, { method: 'POST', headers: { cookie }, body: value })).status, 403);
     assert.equal((await fetch(base + path, { method: 'POST', headers, body: value })).status, 200);
@@ -109,4 +109,13 @@ test('new file/chat endpoints enforce CSRF and derive tenant identity; local mod
   assert.equal((await fetch(base + '/api/files', { headers })).status, 403);
   assert.equal((await fetch(base + '/api/chats/export', { headers })).status, 403);
   admin = true;
+});
+test('preview capabilities are structurally validated and sandbox active content',async()=>{
+ assert.equal((await fetch(base+'/preview/not-a-token/')).status,404);
+ assert.equal((await fetch(base+'/preview/'+'a'.repeat(43)+'/',{method:'POST'})).status,405);
+ const response=await fetch(base+'/preview/'+'a'.repeat(43)+'/');
+ assert.equal(lastRunner.path,'/background/preview');
+ assert.match(response.headers.get('content-security-policy'),/sandbox allow-scripts allow-forms/);
+ assert.doesNotMatch(response.headers.get('content-security-policy'),/allow-same-origin/);
+ assert.equal(response.headers.get('access-control-allow-origin'),'*');
 });

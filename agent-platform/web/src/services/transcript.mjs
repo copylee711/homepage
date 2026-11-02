@@ -1,0 +1,45 @@
+// Normalize an assistant message's content (Pi shape or live view-model) into
+// the block list BlockList.vue renders.
+export function normalizeBlocks(content, toolResults) {
+  if (!Array.isArray(content)) return content ? [{ type: 'text', text: String(content) }] : [];
+  // Live view-model blocks already use {type:'text'|'thinking'|'tool'}.
+  const blocks = [];
+  for (const part of content) {
+    if (!part || typeof part !== 'object') continue;
+    if (part.type === 'text') blocks.push({ type: 'text', text: part.text || '' });
+    else if (part.type === 'thinking' && (part.thinking || part.text)) blocks.push({ ...part, type: 'thinking', text: part.thinking || part.text });
+    else if (part.type === 'tool') blocks.push(part);
+    else if (part.type === 'toolCall') {
+      const r = toolResults?.[part.id];
+      blocks.push({ type: 'tool', id: part.id, name: part.name || 'tool', args: part.arguments ? JSON.stringify(part.arguments, null, 2) : '', state: r ? (r.isError ? 'error' : 'success') : 'success', result: r ? r.text : '', durationMs: 0 });
+    }
+  }
+  return blocks;
+}
+
+export function buildTranscript(messages) {
+  const results = {};
+  for (const m of messages) if (m.role === 'toolResult') results[m.toolCallId] = { isError: m.isError === true, text: typeof m.content === 'string' ? m.content : (m.content || []).filter(p => p.type === 'text').map(p => p.text).join('\n') };
+  const items = [];
+  for (const m of messages) {
+    if (m.role === 'user') { items.push({ ...m }); continue; }
+    if (m.role !== 'assistant') continue;
+    const blocks = normalizeBlocks(m.content, results);
+    const last = items.at(-1);
+    if (last?.role === 'assistant') last.content.push(...blocks);
+    else items.push({ ...m, content: [...blocks] });
+  }
+  return items;
+}
+export function segmentBlocks(blocks) {
+  const out = [];
+  for (const block of blocks || []) {
+    if (!block || ((block.type === 'text' || block.type === 'thinking') && !block.text?.trim())) continue;
+    if (block.type !== 'tool') { out.push(block); continue; }
+    if (block.name === 'update_plan') { out.push({ type: 'plan', block }); continue; }
+    const last = out.at(-1);
+    if (last?.type === 'tools') last.items.push(block);
+    else out.push({ type: 'tools', items: [block] });
+  }
+  return out;
+}

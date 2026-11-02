@@ -257,11 +257,9 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
         </div>
 
         <MarkdownView v-if="userDisplayText" :source="userDisplayText" />
-        <div class="user-bubble-footer">
-          <time class="user-bubble-time">{{ time }}</time>
-        </div>
       </div>
-      <div v-else class="assistant-body">
+      <div v-if="isUser" class="user-bubble-footer"><time class="user-bubble-time">{{ time }}</time></div>
+      <div v-if="!isUser" class="assistant-body">
         <div ref="contentRef" class="message-content"><BlockList :blocks="blocks" /></div>
         <footer class="assistant-footer">
           <div class="assistant-actions">

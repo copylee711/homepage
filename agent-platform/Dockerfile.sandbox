@@ -5,9 +5,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip python3-venv python3-dev build-essential pkg-config jq zip unzip less file \
     && rm -rf /var/lib/apt/lists/* \
     && npm cache clean --force
+RUN corepack enable --install-directory /usr/local/bin
 # Optional language images can extend this base with rustc/cargo, golang or a JDK.
 USER 1000:1000
 COPY agent-platform/sandbox-worker.py /sandbox-worker.py
+COPY agent-platform/background-worker.py /background-worker.py
 COPY agent-platform/toolchains-worker.py agent-platform/toolchains.json /
 WORKDIR /workspace
 ENTRYPOINT ["python3", "/sandbox-worker.py"]

@@ -232,16 +232,16 @@ export const useWorkspace = defineStore('workspace', {
         tab.saving = false;
       }
     },
-    async upload(name: string, content: string, overwrite: boolean) {
+    async upload(name: string, content: string, overwrite: boolean, encoding: 'utf8' | 'base64' = 'utf8', folder = this.path) {
       const clean = name.replace(/[\\/\u0000-\u001f\u007f]/g, '-');
-      const target = (this.path ? this.path + '/' : '') + clean;
+      const target = (folder ? folder + '/' : '') + clean;
       try {
-        await post('/api/files/upload', { path: target, content, overwrite });
+        await post('/api/files/upload', { path: target, content, encoding, overwrite });
       } catch (err: any) {
         if (!overwrite && err instanceof ApiError && err.status === 409) {
           const ok = await useUi().confirm({ title: '覆盖已存在文件', message: `文件“${clean}”已存在，是否覆盖？`, confirmText: '覆盖', danger: true });
           if (!ok) return false;
-          await post('/api/files/upload', { path: target, content, overwrite: true });
+          await post('/api/files/upload', { path: target, content, encoding, overwrite: true });
         } else {
           throw err;
         }

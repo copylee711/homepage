@@ -3,7 +3,7 @@ import { fail } from './shared.mjs';
 
 export const MAX_UPLOAD = 256 * 1024;
 export const MAX_PREVIEW = 64 * 1024;
-export const MAX_DOWNLOAD = 1024 * 1024;
+export const MAX_DOWNLOAD = 15 * 1024 * 1024;
 const snapshots = new Map();
 export function invalidateWorkspace(user) {
   for (const key of snapshots.keys()) if (key.startsWith(user + ':')) snapshots.delete(key);
@@ -45,14 +45,14 @@ export async function listWorkspace(user, path, fresh = false) {
 }
 export async function previewWorkspace(user, path, limit, fresh = false) {
   if (fresh) invalidateWorkspace(user);
-  const size = Math.min(MAX_DOWNLOAD, Math.max(1024, Number(limit) || MAX_PREVIEW));
+  const size = Math.min(1024 * 1024, Math.max(1024, Number(limit) || MAX_PREVIEW));
   workspacePath(path);
   const result = await snapshot(user, 'read:' + size + ':' + path, () => run(user, 'file-read', { path, limit: size }));
   return { ...result, name: fileName(path) };
 }
 export async function downloadWorkspace(user, path) {
   const result = await run(user, 'file-read', { path: workspacePath(path), limit: MAX_DOWNLOAD });
-  if (result.truncated || result.size > MAX_DOWNLOAD) fail(413, '文件超过 1 MiB 下载上限，未下载截断内容');
+  if (result.truncated || result.size > MAX_DOWNLOAD) fail(413, '文件超过 15 MiB 下载上限，未下载截断内容');
   return { ...result, name: fileName(path) };
 }
 export async function uploadWorkspace(user, path, content, overwrite = false, revision, encoding) {

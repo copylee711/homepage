@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import Icon from './Icon.vue';
 
-defineProps<{ text: string }>();
+const props = defineProps<{ text: string }>();
+const body = ref<HTMLElement | null>(null);
+const follow = ref(true);
+function onScroll() { const el = body.value; if (el) follow.value = el.scrollHeight - el.scrollTop - el.clientHeight < 24; }
+watch(() => props.text, async () => { if (!follow.value) return; await nextTick(); if (body.value && mode.value === 'preview') body.value.scrollTop = body.value.scrollHeight; }, { immediate: true });
 
 // Initial appearance starts in 'preview' (compact few-line peek).
 // First click collapses completely ('collapsed'); next click expands fully ('expanded');
@@ -25,7 +29,7 @@ function toggle() {
         <Icon class="thinking-chevron" name="chevron-right" :size="13" />
       </span>
     </button>
-    <div v-show="mode !== 'collapsed'" class="thinking-body">{{ text }}</div>
+    <div v-show="mode !== 'collapsed'" class="thinking-body" ref="body" @scroll.passive="onScroll">{{ text }}</div>
   </div>
 </template>
 
@@ -87,8 +91,8 @@ function toggle() {
 .thinking.is-preview .thinking-body {
   max-height: 5.5em;
   overflow-y: auto;
-  -webkit-mask-image: linear-gradient(to bottom, #000 66%, transparent);
-  mask-image: linear-gradient(to bottom, #000 66%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 20%);
+  mask-image: linear-gradient(to bottom, transparent, #000 20%);
 }
 /* Full expansion after re-opening */
 .thinking.is-expanded .thinking-body {

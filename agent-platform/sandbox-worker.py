@@ -1,5 +1,6 @@
 """Runs INSIDE an unprivileged, networkless, bounded disposable container."""
 import base64
+import fnmatch
 import json
 import hashlib
 import os
@@ -196,9 +197,13 @@ def bash(value):
     proc = subprocess.Popen(["/bin/bash", "-c", command], cwd=str(cwd),
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=True,
-                            env={"PATH": "/workspace/.venv/bin:/workspace/.tools/bin:/workspace/.tools/node_modules/.bin:/workspace/node_modules/.bin:/usr/local/bin:/usr/bin:/bin", "HOME": "/tmp",
+                              env={"PATH": str(cwd / '.venv/bin') + ':' + str(cwd / '.tools/bin') + ':' + str(cwd / 'node_modules/.bin') + ":/workspace/.tools/bin:/workspace/.tools/node_modules/.bin:/usr/local/bin:/usr/bin:/bin", "HOME": "/tmp",
+                                 "NODE_USE_ENV_PROXY": "1", "NO_PROXY": "localhost,127.0.0.1", "no_proxy": "localhost,127.0.0.1",
+                                 "COREPACK_HOME": str(cwd / '.cache/corepack'), "PNPM_HOME": str(cwd / '.tools/bin'), "npm_config_prefix": str(cwd / '.tools'),
                                  "LANG": "C.UTF-8", "TMPDIR": "/tmp", "npm_config_cache": "/tmp/npm-cache",
                                  "PIP_CACHE_DIR": "/tmp/pip-cache", "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+                                 "npm_config_update_notifier": "false", "npm_config_fetch_retries": "1", "npm_config_fetch_timeout": "20000",
+                                 **({'npm_config_https_proxy': os.environ['HTTPS_PROXY'], 'npm_config_proxy': os.environ['HTTP_PROXY']} if 'HTTPS_PROXY' in os.environ and 'HTTP_PROXY' in os.environ else {}),
                                  **{key: os.environ[key] for key in ['HTTP_PROXY', 'HTTPS_PROXY'] if key in os.environ},
                                  **{key.lower(): os.environ[key] for key in ['HTTP_PROXY', 'HTTPS_PROXY'] if key in os.environ}})
     output = bytearray()
@@ -226,6 +231,35 @@ def bash(value):
         poll.close()
 
 
+def search_files(value):
+    root, _ = inside(candidate(value.get('path') or '.'))
+    query = value.get('query', '')
+    pattern = value.get('glob', '*')
+    if not isinstance(query, str) or len(query) > 200 or not isinstance(pattern, str) or len(pattern) > 200: raise ValueError('搜索条件无效')
+    results, scanned = [], 0
+    for directory, dirs, files in os.walk(root, followlinks=False):
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in {'node_modules', '__pycache__'}]
+        for name in files:
+            if name.startswith('.') or not fnmatch.fnmatch(name, pattern): continue
+            target = Path(directory) / name
+            if target.is_symlink(): continue
+            scanned += 1
+            if scanned > 500: return {'matches': results, 'truncated': True, 'scanned': scanned-1}
+            try:
+                _, relative = inside(target)
+                if not query:
+                    results.append({'path': relative})
+                    if len(results) >= 100: return {'matches': results, 'truncated': True, 'scanned': scanned}
+                    continue
+                with target.open('rb') as file: data = file.read(65537)
+                if len(data) > 65536 or b'\x00' in data: continue
+                for line, text in enumerate(data.decode('utf8').splitlines(), 1):
+                    if query.casefold() in text.casefold(): results.append({'path': relative, 'line': line, 'text': text[:500]})
+                    if len(results) >= 100: return {'matches': results, 'truncated': True, 'scanned': scanned}
+            except (OSError, ValueError, UnicodeError): continue
+            if len(results) >= 100: return {'matches': results, 'truncated': True, 'scanned': scanned}
+    return {'matches': results[:100], 'truncated': len(results)>100, 'scanned': scanned}
+
 def main(value):
     op = value.get("op")
     if op in {"toolchain-list", "toolchain-change"}:
@@ -233,6 +267,7 @@ def main(value):
     # Browser-visible file APIs are root-restricted inside this container.
     if op == "list":
         return list_workspace(value.get("path", ""))
+    if op == 'search-files': return search_files(value)
     if op == "file-read":
         return read_file(value.get("path", ""), value)
     if op == "file-write":

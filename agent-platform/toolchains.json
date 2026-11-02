@@ -1,8 +1,76 @@
 [
-  {"id":"typescript","name":"TypeScript","manager":"npm","version":"5.9.3","bins":["tsc","tsserver"],"description":"TypeScript 编译与类型检查"},
-  {"id":"prettier","name":"Prettier","manager":"npm","version":"3.6.2","bins":["prettier"],"description":"代码与 Markdown 格式化"},
-  {"id":"eslint","name":"ESLint","manager":"npm","version":"9.39.1","bins":["eslint"],"description":"JavaScript / TypeScript 代码检查"},
-  {"id":"ruff","name":"Ruff","manager":"pip","version":"0.14.3","bins":["ruff"],"description":"Python 检查与格式化"},
-  {"id":"pytest","name":"pytest","manager":"pip","version":"8.4.2","bins":["pytest","py.test"],"description":"Python 测试运行器"},
-  {"id":"uv","name":"uv","manager":"pip","version":"0.9.5","bins":["uv","uvx"],"description":"Python 环境与依赖管理"}
+  {
+    "id": "pnpm",
+    "name": "pnpm",
+    "manager": "npm",
+    "version": "10.20.0",
+    "bins": [
+      "pnpm",
+      "pnpx"
+    ],
+    "description": "Node 项目包管理器（用户工具链，无需系统 root）"
+  },
+  {
+    "id": "typescript",
+    "name": "TypeScript",
+    "manager": "npm",
+    "version": "5.9.3",
+    "bins": [
+      "tsc",
+      "tsserver"
+    ],
+    "description": "TypeScript 编译与类型检查"
+  },
+  {
+    "id": "prettier",
+    "name": "Prettier",
+    "manager": "npm",
+    "version": "3.6.2",
+    "bins": [
+      "prettier"
+    ],
+    "description": "代码与 Markdown 格式化"
+  },
+  {
+    "id": "eslint",
+    "name": "ESLint",
+    "manager": "npm",
+    "version": "9.39.1",
+    "bins": [
+      "eslint"
+    ],
+    "description": "JavaScript / TypeScript 代码检查"
+  },
+  {
+    "id": "ruff",
+    "name": "Ruff",
+    "manager": "pip",
+    "version": "0.14.3",
+    "bins": [
+      "ruff"
+    ],
+    "description": "Python 检查与格式化"
+  },
+  {
+    "id": "pytest",
+    "name": "pytest",
+    "manager": "pip",
+    "version": "8.4.2",
+    "bins": [
+      "pytest",
+      "py.test"
+    ],
+    "description": "Python 测试运行器"
+  },
+  {
+    "id": "uv",
+    "name": "uv",
+    "manager": "pip",
+    "version": "0.9.5",
+    "bins": [
+      "uv",
+      "uvx"
+    ],
+    "description": "Python 环境与依赖管理"
+  }
 ]

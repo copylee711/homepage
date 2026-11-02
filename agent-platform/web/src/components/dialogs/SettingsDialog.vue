@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
+import CapabilitiesPanel from '../settings/CapabilitiesPanel.vue';
+import MemoryPanel from '../settings/MemoryPanel.vue';
+import BackgroundPanel from '../settings/BackgroundPanel.vue';
+import SearchPanel from '../settings/SearchPanel.vue';
 import BaseDialog from './BaseDialog.vue';
 import Icon from '../Icon.vue';
 import ProvidersPanel from '../settings/ProvidersPanel.vue';
@@ -21,15 +25,21 @@ watch(avatarUrl, () => { avatarError.value = false; });
 const navItems = computed(() => {
   const items: { id: SettingsTab; icon: string; label: string; show: boolean }[] = [
     { id: 'general', icon: 'settings', label: '通用', show: true },
+    { id: 'capabilities', icon: 'package', label: '能力、MCP 与 Skill', show: session.canExecute },
+    { id: 'memory', icon: 'edit', label: '人设与记忆', show: session.canExecute },
+    { id: 'background', icon: 'terminal', label: '后台任务', show: session.canExecute },
+    { id: 'search', icon: 'search', label: '联网搜索', show: session.canExecute },
     { id: 'providers', icon: 'sparkle', label: '模型与供应商', show: session.isAdmin },
     { id: 'grants', icon: 'users', label: '执行授权与配额', show: session.isAdmin },
-    { id: 'packages', icon: 'package', label: '扩展市场', show: session.isAdmin },
+    { id: 'packages', icon: 'package', label: '技能资源市场', show: session.isAdmin },
     { id: 'toolchains', icon: 'terminal', label: '工具链', show: session.canExecute },
     { id: 'archived', icon: 'archive', label: '已归档对话', show: true },
     { id: 'shortcuts', icon: 'keyboard', label: '快捷键', show: true },
   ];
   return items.filter(i => i.show);
 });
+
+async function changeTab(tab: SettingsTab) { if (ui.dialogGuard && !await ui.dialogGuard()) return; ui.settingsTab = tab; }
 
 const archived = computed(() => session.chats.filter(c => c.archived === true));
 const thinkingOptions: { value: ThinkingLevel; label: string }[] = [
@@ -81,7 +91,7 @@ async function remove(c: any) {
           type="button"
           class="settings-tab"
           :class="{ 'is-active': ui.settingsTab === item.id }"
-          @click="ui.settingsTab = item.id"
+          @click="changeTab(item.id)"
         >
           <Icon :name="item.icon" :size="16" />
           <span>{{ item.label }}</span>
@@ -168,6 +178,10 @@ async function remove(c: any) {
           </div>
         </div>
 
+        <CapabilitiesPanel v-else-if="ui.settingsTab === 'capabilities' && session.canExecute" />
+        <MemoryPanel v-else-if="ui.settingsTab === 'memory' && session.canExecute" />
+        <BackgroundPanel v-else-if="ui.settingsTab === 'background' && session.canExecute" />
+        <SearchPanel v-else-if="ui.settingsTab === 'search' && session.canExecute" />
         <ProvidersPanel v-else-if="ui.settingsTab === 'providers' && session.isAdmin" />
         <GrantsPanel v-else-if="ui.settingsTab === 'grants' && session.isAdmin" />
         <PackagesPanel v-else-if="ui.settingsTab === 'packages' && session.isAdmin" />
