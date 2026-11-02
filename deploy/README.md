@@ -73,6 +73,10 @@ Caddy 校验原始请求路径与密钥，拒绝缺失/错误密钥和路径变�
 
 在仓库根目录执行 `npm ci` 和 `npm run build`，将 `dist/` 的全部内容上传到 `/var/www/copylee`，包括 `.vite/manifest.json`。文章模板通过该清单复用前端公共样式。Caddy 路由与初次安装步骤见 [后端部署](backend/README.md)。
 
+发布时必须先上传 `dist/assets/`，成功后再同步其余文件（包括首页和 manifest）。第二阶段排除 `/assets/`，使用 `--delay-updates`，不要删除上一版本的哈希资源，确保尚未刷新的页面和已打开标签仍可加载旧资源。资源目录需单独按保留窗口规划清理，不能随每次发布执行 `--delete`。
+
+`/assets/*` 只有实际存在的文件返回一年 immutable 缓存；缺失文件必须返回 `404` 和 `Cache-Control: no-store`，避免 CDN 长期缓存发布窗口中的错误。发布后运行 `python3 scripts/check-deployed-assets.py https://copylee.cn`，检查首页实际引用的无查询参数资源地址、MIME 类型及缺失资源的缓存头。追加随机查询参数会绕过浏览器所用的缓存键，不能作为发布成功的依据。若 CDN 已缓存错误响应，修正源站后还需刷新对应目录缓存。
+
 百度等平台的站点验证文件保存在仓库的 `public/` 根目录，构建时会复制到 `dist/` 根目录。更新验证文件时应同步提交到 Git，避免仅上传服务器后被下一次 `rsync --delete` 部署删除。验证成功后保留文件。
 
 HTTPS Caddy 示例将 `www.copylee.cn` 永久重定向到 `https://copylee.cn`，保留请求路径与查询参数。站点验证使用正式地址 `https://copylee.cn`。修改仓库示例不会自动更新服务器的 `/etc/caddy/Caddyfile`；前端部署流程只同步静态产物。

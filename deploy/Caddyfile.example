@@ -66,8 +66,16 @@ copylee.cn {
     }
     handle /assets/* {
         root * /var/www/copylee
-        header Cache-Control "public, max-age=31536000, immutable"
-        file_server
+        # 仅真实存在的构建资源允许长期缓存；缺失资源不得被 CDN 缓存。
+        @assetExists file {path}
+        handle @assetExists {
+            header Cache-Control "public, max-age=31536000, immutable"
+            file_server
+        }
+        handle {
+            header Cache-Control no-store
+            respond 404
+        }
     }
     # 协作文档的编辑页需要 WebSocket，ESA 免费版不支持；团队工作区要上传大文件。统一跳到直连源站的云盘子域名。
     @docpage path /doc/* /d/* /t/*
@@ -140,8 +148,16 @@ cloud.copylee.cn {
     }
     handle /assets/* {
         root * /var/www/copylee
-        header Cache-Control "public, max-age=31536000, immutable"
-        file_server
+        # 仅真实存在的构建资源允许长期缓存；缺失资源不得被 CDN 缓存。
+        @assetExists file {path}
+        handle @assetExists {
+            header Cache-Control "public, max-age=31536000, immutable"
+            file_server
+        }
+        handle {
+            header Cache-Control no-store
+            respond 404
+        }
     }
     handle {
         root * /var/www/copylee

@@ -48,6 +48,14 @@ jobs:
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
-          rsync -az --delete \
+          # Upload hashed assets before publishing HTML/manifest. Keep previous
+          # assets so open tabs and cached HTML continue to work across deploys.
+          rsync -az \
+            -e "ssh -i ~/.ssh/deploy_key -p ${DEPLOY_PORT:-22}" \
+            dist/assets/ "$DEPLOY_USER@$DEPLOY_HOST:${DEPLOY_PATH:-/var/www/copylee}/assets/"
+          rsync -az --delete --delay-updates --exclude=/assets/ \
             -e "ssh -i ~/.ssh/deploy_key -p ${DEPLOY_PORT:-22}" \
             dist/ "$DEPLOY_USER@$DEPLOY_HOST:${DEPLOY_PATH:-/var/www/copylee}/"
+
+      - name: Verify public entry assets
+        run: python3 scripts/check-deployed-assets.py https://copylee.cn
