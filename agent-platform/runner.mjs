@@ -284,7 +284,9 @@ export const server = createServer(async (req, res) => {
     }
     if (!equal(req.headers['x-runner-secret'], secret)) fail(401, '服务认证失败');
     if (req.method !== 'POST') fail(405, '请求方法不支持');
-    const input = await body(req, req.url === '/files/upload' ? 21 * 1024 * 1024 : req.url === '/features/save' ? 256 * 1024 : req.url === '/search/settings/save' ? 512 * 1024 : 65536);
+    // Prompts carry inline base64 images, so they need the same room the
+    // gateway allows (up to 12 MiB per image) instead of the 64 KiB default.
+    const input = await body(req, req.url === '/files/upload' ? 21 * 1024 * 1024 : req.url === '/prompt' ? 20 * 1024 * 1024 : req.url === '/features/save' ? 256 * 1024 : req.url === '/search/settings/save' ? 512 * 1024 : 65536);
     if (!/^[a-f0-9]{64}$/.test(input.user || '')) fail(422, '用户标识无效');
     if (req.url === '/image') {
       if(input.path){const value=await downloadWorkspace(input.user,input.path);const data=Buffer.from(value.data,'base64');const mime=data.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))?'image/png':data[0]===255&&data[1]===216?'image/jpeg':data.subarray(0,3).toString()==='GIF'?'image/gif':data.subarray(0,4).toString()==='RIFF'&&data.subarray(8,12).toString()==='WEBP'?'image/webp':'';if(!mime||data.length>5*1024*1024)fail(415,'图片格式不支持或超过 5 MiB');return json(res,200,{data:value.data,mime});}
