@@ -16,7 +16,7 @@
 
 | 来源 | 鉴权 | 限制 |
 | --- | --- | --- |
-| PicList / Typora 等客户端，`POST /api/upload` | `Authorization: Bearer cpl_…` 令牌 | 用户配额，单张上限（最高 20 MiB） |
+| PicGo-Core / Typora 等客户端，`POST /api/upload` | `Authorization: Bearer cpl_…` 令牌 | 用户配额，单张上限（最高 20 MiB） |
 | `/account` 页「图床」标签 | 登录 Cookie + CSRF | 同上 |
 | 后台编辑器「上传图片」、后台「图床」标签 | 管理员会话（SSH 隧道） | 单张 20 MiB，不限总量 |
 
@@ -24,21 +24,38 @@
 - 令牌验证失败按 IP 计数：15 分钟内失败 20 次后暂停验证。
 - 关闭某用户的图床会同时撤销该用户全部令牌，已上传的图片保留；停用账户后，其令牌也立即失效。
 
-## PicList 配置
+## PicGo-Core 配置
 
-在 PicList 中选择「自定义 Web 图床」（advancedplist）：
+先安装 Node.js，再在终端依次执行：
+
+```bash
+npm install -g picgo
+picgo install web-uploader
+picgo set uploader web-uploader
+```
+
+最后一条命令直接进入 Web 上传插件配置，无需上下切换图床。按提示依次填写：
 
 | 项目 | 值 |
 | --- | --- |
+| Enter config name | `copylee`，可以自定义 |
 | API 地址 | `https://image.copylee.cn/api/upload` |
-| 请求方法 | `POST` |
-| 文件字段名 | `file` |
+| POST 参数名 | `file` |
+| 图片 URL JSON 路径 | `url` |
 | 请求头 | `{"Authorization": "Bearer 你的令牌"}` |
-| 返回 URL 路径 | `url` |
+| 自定义 Body | 留空，直接回车 |
+
+将“你的令牌”替换为账户页创建并保存的令牌，保留 `Bearer` 后的空格。配置完成后启用图床：
+
+```bash
+picgo use uploader web-uploader copylee
+```
+
+如果自定义了 config name，将命令中的 `copylee` 换成对应名称。
 
 上传接口也接受直接把图片作为请求体发送，不使用 multipart。上传成功后返回 `{"id", "url", "size", "width", "height", "created_at"}`。
 
-在 Typora 中，打开「偏好设置 → 图像 → 上传服务」，选择 PicList，再点「验证图片上传选项」测试。
+在 Typora 中，打开「偏好设置 → 图像 → 上传服务」，选择「自定义命令」，填写 `picgo upload`，再点「验证图片上传选项」测试。
 
 ## 导出与备份
 

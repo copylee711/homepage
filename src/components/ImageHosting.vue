@@ -108,7 +108,7 @@ onMounted(() => { void load().catch(err => { error.value = err instanceof Error 
           </div>
         </li>
       </ul>
-      <p v-else class="empty">还没有图片。上传第一张，或在 PicList 中配置下方的令牌。</p>
+      <p v-else class="empty">还没有图片。上传第一张，或按下方引导配置 PicGo-Core 上传。</p>
       <nav v-if="pages > 1" class="pager" aria-label="分页">
         <button type="button" :disabled="busy || page <= 1" @click="turn(page - 1)">上一页</button>
         <span>{{ page }} / {{ pages }}</span>
@@ -117,7 +117,7 @@ onMounted(() => { void load().catch(err => { error.value = err instanceof Error 
 
       <section class="card">
         <h3>上传令牌</h3>
-        <p>在 PicList、Typora 等客户端里使用。每台设备单独创建一个，丢失时只撤销那一个。</p>
+        <p>在 PicGo-Core、Typora 等客户端里使用。每台设备单独创建一个，丢失时只撤销那一个。</p>
         <form class="token-form" @submit.prevent="createToken">
           <input v-model="tokenName" maxlength="40" aria-label="令牌名称" placeholder="例如：笔记本 Typora">
           <button class="ghost" type="submit" :disabled="busy">创建令牌</button>
@@ -134,16 +134,24 @@ onMounted(() => { void load().catch(err => { error.value = err instanceof Error 
           </li>
         </ul>
         <details>
-          <summary>PicList 配置方法</summary>
-          <p>图床选择“自定义 Web 图床”（advancedplist），填写：</p>
+          <summary>PicGo-Core 配置方法</summary>
+          <p>1. 先安装 Node.js，再在终端依次执行，安装 PicGo-Core 和 Web 上传插件，并直接进入配置：</p>
+          <pre><code>npm install -g picgo
+picgo install web-uploader
+picgo set uploader web-uploader</code></pre>
+          <p>2. 按终端提示依次填写。config name 可以自定义，以下以 <code>copylee</code> 为例：</p>
           <dl>
+            <dt>Enter config name</dt><dd><code>copylee</code>（可自定义）</dd>
             <dt>API 地址</dt><dd><code>{{ uploadUrl }}</code></dd>
-            <dt>请求方法</dt><dd><code>POST</code></dd>
-            <dt>文件字段名</dt><dd><code>file</code></dd>
-            <dt>请求头</dt><dd><code>{"Authorization": "Bearer 你的令牌"}</code></dd>
-            <dt>返回 URL 路径</dt><dd><code>url</code></dd>
+            <dt>POST 参数名</dt><dd><code>file</code></dd>
+            <dt>图片 URL JSON 路径</dt><dd><code>url</code></dd>
+            <dt>自定义请求头</dt><dd><code>{"Authorization": "Bearer 你的令牌"}</code></dd>
+            <dt>自定义 Body</dt><dd>留空，直接回车</dd>
           </dl>
-          <p>Typora：偏好设置 → 图像 → 上传服务选 PicList，再点击“验证图片上传选项”。</p>
+          <p>将“你的令牌”替换为上方创建并保存的令牌，保留 <code>Bearer</code> 后的空格。</p>
+          <p>3. 配置完成后，启用该图床；如果自定义了 config name，请将命令中的 <code>copylee</code> 换成对应名称：</p>
+          <pre><code>picgo use uploader web-uploader copylee</code></pre>
+          <p>Typora：偏好设置 → 图像 → 上传服务选“自定义命令”，填写 <code>picgo upload</code>，再点击“验证图片上传选项”。</p>
         </details>
       </section>
 
@@ -213,10 +221,13 @@ button:disabled { opacity:.5; cursor:default; }
 .tokens button { padding:6px 12px; border:1px solid var(--line); border-radius:8px; background:none; color:var(--text-2); font-size:12px; }
 details { margin-top:16px; font-size:13px; }
 summary { cursor:pointer; color:var(--accent); }
-dl { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; margin:10px 0 0; }
+details pre { margin:10px 0; padding:12px; border-radius:var(--radius-sm); background:var(--bg-tint); white-space:pre-wrap; overflow-wrap:anywhere; }
+details code { font:12px var(--font-mono); color:var(--text); }
+dl { display:grid; grid-template-columns:auto minmax(0,1fr); gap:6px 14px; margin:10px 0 0; }
 dt { color:var(--muted); }
 dd { margin:0; overflow-wrap:anywhere; }
 dd code { font:12px var(--font-mono); }
 .export { margin-top:16px; text-decoration:none; }
 @media (max-width: 520px) { .grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .token-form { flex-direction:column; } .card { padding:18px; } }
+@media (max-width: 520px) { dl { grid-template-columns:minmax(0,1fr); gap:4px; } dd { margin-bottom:6px; } }
 </style>
