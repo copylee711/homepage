@@ -12,14 +12,22 @@ import threading
 import time
 import importlib.util
 
+policy_spec = importlib.util.spec_from_file_location("project_policy", Path(__file__).with_name("project-policy.py"))
+project_policy = importlib.util.module_from_spec(policy_spec)
+policy_spec.loader.exec_module(project_policy)
+
 web_spec = importlib.util.spec_from_file_location("web_access", Path(__file__).with_name("web-access.py"))
 web_access = importlib.util.module_from_spec(web_spec)
 web_spec.loader.exec_module(web_access)
+search_spec = importlib.util.spec_from_file_location("web_search", Path(__file__).with_name("web-search.py"))
+web_search = importlib.util.module_from_spec(search_spec); search_spec.loader.exec_module(web_search)
 package_spec = importlib.util.spec_from_file_location("package_reader", Path(__file__).with_name("package-reader.py"))
 package_reader = importlib.util.module_from_spec(package_spec)
 package_spec.loader.exec_module(package_reader)
 quota_spec = importlib.util.spec_from_file_location("sandbox_quotas", Path(__file__).with_name("sandbox-quotas.py"))
 quota_module = importlib.util.module_from_spec(quota_spec); quota_spec.loader.exec_module(quota_module)
+background_spec = importlib.util.spec_from_file_location('background_tasks', Path(__file__).with_name('background-tasks.py'))
+background_module = importlib.util.module_from_spec(background_spec); background_spec.loader.exec_module(background_module)
 web_slots = threading.BoundedSemaphore(4)
 
 ROOT = Path(os.environ.get("SANDBOX_ROOT", "/var/lib/copylee-sandboxes"))
@@ -79,14 +87,23 @@ def workspace(user):
 
 def run_tool(user, value, lease):
     if value.get('op') == 'quota-info': return quotas.status(user)
-    if value.get("op") == "web-fetch":
+    if value.get('op', '').startswith('background-'):
+        with guard:
+            if value['op'] == 'background-start': return backgrounds.start(user, value, leases[lease].get('policy'))
+            if value['op'] == 'background-status': return backgrounds.logs(user, value['id']) if value.get('id') else backgrounds.list(user)
+            if value['op'] == 'background-stop': return backgrounds.stop(user, value.get('id'))
+            raise ValueError('后台操作无效')
+    if value.get("op") in {"web-fetch", "web-search", "mcp-request", "image-fetch"}:
         if not web_slots.acquire(blocking=False):
             raise ValueError("联网请求繁忙，请稍后重试")
         try:
+            if value.get('op') == 'image-fetch': return web_access.fetch_public(value.get('url'),image=True,use_proxy=value.get('useProxy',True))
+            if value.get('op') == 'mcp-request': return web_search.mcp_request(value, web_access.fetch_public)
+            if value.get('op') == 'web-search': return web_search.search_public(value, web_access.fetch_public)
             return web_access.fetch_public(value.get("url"))
         finally:
             web_slots.release()
-    if value.get("op") not in {"read", "write", "mkdir", "access", "bash", "list", "file-read", "file-write", "file-manage", "toolchain-list", "toolchain-change"}:
+    if value.get("op") not in {"read", "write", "mkdir", "access", "bash", "list", "search-files", "file-read", "file-write", "file-manage", "toolchain-list", "toolchain-change"}:
         raise ValueError("工具不支持")
     lock = locks.setdefault(user, threading.Lock())
     browsing = value.get("op") in {"list", "file-read", "file-write", "file-manage", "toolchain-list", "toolchain-change"}
@@ -106,7 +123,7 @@ def run_tool(user, value, lease):
             if leases.get(lease, {}).get("expires", 0) <= time.monotonic():
                 raise ValueError("执行授权已失效")
             quota = quotas.get(user)
-            if sum(active_memory.values()) + quota['memory_mib'] > int(os.environ.get('SANDBOX_ACTIVE_MEMORY_MIB', '4096')):
+            if sum(active_memory.values()) + backgrounds.memory_used() + quota['memory_mib'] > int(os.environ.get('SANDBOX_ACTIVE_MEMORY_MIB', '4096')):
                 raise ValueError("沙箱运行内存预算已满，请等待其他任务结束")
             active_memory[user] = quota['memory_mib']
             value = {**value, '_timeout_limit': quota['timeout']}
@@ -118,7 +135,7 @@ def run_tool(user, value, lease):
                 "--memory", str(quota['memory_mib']) + 'm', "--memory-swap", str(quota['memory_mib']) + 'm', "--cpus", str(quota['cpus']), "--pids-limit", str(quota['pids']),
                 "--ulimit", "nofile=256:256", "--ulimit", f"fsize={quota['disk_mib'] * 1048576}:{quota['disk_mib'] * 1048576}",
                 "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777", "--shm-size", "8m",
-                "--mount", f"type=bind,src={mount},dst=/workspace",
+                *project_policy.mount_arguments(mount, leases[lease].get("policy")),
                 "--env", "HOME=/tmp", "--env", "PI_CODING_AGENT_DIR=/tmp/pi",
                 "--env", "HTTP_PROXY=http://192.168.85.2:3128", "--env", "HTTPS_PROXY=http://192.168.85.2:3128",
                 "--log-driver", "none", IMAGE], capture_output=True, timeout=15)
@@ -128,7 +145,7 @@ def run_tool(user, value, lease):
                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             output, _ = proc.communicate(json.dumps(value).encode(), timeout=quota['timeout'] + 15)
-            if len(output) > 1500000:
+            if len(output) > (21 * 1024 * 1024 if value.get('op') == 'file-read' else 1500000):
                 raise ValueError("工具输出超限")
             result = json.loads(output)
             if "error" in result:
@@ -147,6 +164,8 @@ def run_tool(user, value, lease):
         lock.release()
 
 
+backgrounds = background_module.BackgroundTasks(workspace, quotas, project_policy, IMAGE, NETWORK, active_memory)
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass  # Never log tokens, file data or commands.
@@ -156,7 +175,7 @@ class Handler(BaseHTTPRequestHandler):
             if ipaddress.ip_address(self.client_address[0]) not in ipaddress.ip_network("192.168.84.0/24"):
                 return self.reply(403, {"error": "来源无效"})
             size = int(self.headers.get("Content-Length", 0))
-            if not 0 < size <= 512 * 1024:
+            if not 0 < size <= 21 * 1024 * 1024:
                 return self.reply(413, {"error": "请求过大"})
             value = json.loads(self.rfile.read(size))
             token = self.headers.get("Authorization", "").removeprefix("Bearer ")
@@ -169,6 +188,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, run_tool(user, value, token))
             if not hmac.compare_digest(token, SECRET):
                 return self.reply(401, {"error": "服务认证失败"})
+            if self.path == '/background/preview':
+                return self.reply(200, backgrounds.preview(value.get('token'), value.get('path', '/')))
             if self.path == "/package":
                 if not web_slots.acquire(blocking=False):
                     raise ValueError("包下载繁忙")
@@ -179,7 +200,10 @@ class Handler(BaseHTTPRequestHandler):
             user = value.get("user", "")
             if not USER.fullmatch(user):
                 return self.reply(422, {"error": "用户无效"})
+            if self.path == '/background/stop-user':
+                backgrounds.stop_user(user); return self.reply(200, {'ok': True})
             if self.path in {"/quota/get", "/quota/set"}:
+                if self.path.endswith('/set') and any(t['state'] == 'running' for t in backgrounds.list(user)['tasks']): return self.reply(409, {'error': '请先停止该用户的后台任务'})
                 user_lock = locks.setdefault(user, threading.Lock())
                 if not user_lock.acquire(blocking=False):
                     return self.reply(409, {"error": "该用户正在运行工具，请先等待任务结束"})
@@ -190,7 +214,8 @@ class Handler(BaseHTTPRequestHandler):
             with guard:
                 if self.path == "/lease":
                     token = secrets.token_urlsafe(48)
-                    leases[token] = {"user": user, "expires": time.monotonic() + 20}
+                    leases[token] = {"user": user, "expires": time.monotonic() + 20,
+                                     "policy": project_policy.policy(value.get("policy"))}
                     return self.reply(200, {"token": token})
                 if self.path == "/renew":
                     lease = leases.get(value.get("token"))
@@ -228,6 +253,7 @@ def sweep():
     while True:
         time.sleep(1)
         with guard:
+            backgrounds.sweep()
             expired = {lease["user"] for lease in leases.values() if lease["expires"] <= time.monotonic()}
             for key, lease in list(leases.items()):
                 if lease["expires"] <= time.monotonic():
@@ -239,7 +265,7 @@ def sweep():
 
 if __name__ == "__main__":
     # Fail closed across control-plane restarts; kill only our labelled tool containers.
-    old = docker("ps", "-aq", "--filter", "label=copylee.sandbox=1").stdout.decode().split()
+    old = docker("ps", "-aq", "--filter", "label=copylee.sandbox=1").stdout.decode().split() + docker('ps', '-aq', '--filter', 'label=copylee.background=1').stdout.decode().split()
     if old:
         docker("rm", "-f", *old)
     threading.Thread(target=sweep, daemon=True).start()

@@ -23,7 +23,8 @@ Caddy 转发至 xa 时只保留两个 ai 专属 Cookie，剥离既有 Cloud 兼�
 - `compose.yaml`：服务、资源限制与回环端口；不挂载 Docker socket、宿主机目录或 SSH 密钥到 runner。
 - `Dockerfile.*`、`package-lock.json`：固定 Node 版本、Pi 1.4.0 及锁定 npm 依赖，安装禁用生命周期脚本。
 - `gateway.mjs`：SSO、权限、CSRF、流式代理；`runner.mjs`：Pi RPC、会话和工作目录。
-- `web/`：聊天控制台和管理员供应商设置。颜色从主仓库 `src/styles/tokens.css` 在构建时复制。
+- `project-policy.py`：服务端租约绑定项目挂载；`tool-approvals.mjs`：Pi 工具审批请求的一次性确认、超时与取消。
+- `web/`：Iris 控制台，Vue 3 + Vite 单页应用（`src/` 源码、`package.json`、`vite.config.mjs`）。`Dockerfile.gateway` 多阶段构建先 `npm ci && npm run build` 生成 `web/dist/`，网关据此提供静态资源；`web/dist`、`web/node_modules` 不进构建上下文。自建中性设计令牌，不再复制主站 `tokens.css`。
 - `.env.example`、`Caddyfile.example`、`*.service.example`：配置模板；必须按实际环境生成。
 - 服务器 `.env`：客户端密钥、内部 runner 密钥、OpenCode Go 密钥，root 0600，禁止提交。
 - `data/providers.json`、`data/agent/models.json`：管理员保存的供应商密钥，服务用户 0600；不回显给浏览器。
@@ -43,7 +44,7 @@ read/write/edit/bash。runner 不挂载任何用户工作区，模型不能通�
 配额保存在主机 root 专用 `quotas.json`；磁盘调整需要用户工具空闲，离线检查/resize2fs，缩容不足则拒绝，
 不删除数据强行缩容。每个用户独立 ext4 镜像，最多 16 个用户；新配额在下一次工具调用生效。
 容器不含模型密钥、服务密钥、执行租约、Docker socket、宿主机配置或其他用户挂载。
-每次调用后删除容器，后台/脱离进程终止；只有 /workspace 持久化。输出/单次文件读取最多 1 MiB，临时目录 64 MiB。
+普通工具调用结束后删除容器，普通 shell 的脱离进程终止；持久后台任务通过独立 background_start 管理。工作区文件持久化。文本预览与图片预览分别受独立大小限制，文件上传/下载最多 15 MiB，临时目录 64 MiB。
 
 工具经 `HTTP_PROXY/HTTPS_PROXY` 访问独立出口 `192.168.85.2:3128`，支持公网 HTTP 80 / HTTPS 443，
 包括 npm、pip、Git HTTPS 和 curl；SSH/Git 原生端口及直连不开放。出口每次解析并校验所有 IPv4 地址，
@@ -85,6 +86,7 @@ Docker daemon 必须运行 iptables 后端并提供 DOCKER-USER；不同防火�
 工作区读快照最多 2 秒，模型运行及写操作会失效；未命中的首次文件读取仍通过一次性容器。
 
 文件面板支持右键/Shift+F10/可见操作按钮、新建、移动重命名、删除空目录/文件、文本编辑。
+标题栏眼睛按钮按需显示 `.git`、`.env` 等隐藏文件，默认关闭并在浏览器记住；面包屑单独占一行。
 编辑上限 256 KiB，Ctrl/Cmd+S 保存，未保存退出确认；SHA-256 乐观锁拒绝覆盖其他操作的更新，
 原子替换避免空间不足留下半个文件。删除需确认，目录非空拒绝，不做隐式递归删除。
 
@@ -163,10 +165,22 @@ node --test agent-platform/tests/*.test.mjs
 cd backend && uv run pytest tests/test_agent_sso.py -q
 ```
 
+项目范围在输入框上方菜单管理，包含主项目、从属项目读写与整个 `/workspace`。
+添加从属项目统一使用选择弹窗。下方“需要审批 / 允许编辑 / 自动执行”独立控制工具是否逐次确认；
+默认需要审批，安全读取自动放行；允许编辑模式放行文件与记忆编辑，Bash 仍需审批。运行中可切换策略。审批由 Pi `tool_call` 在执行前发起，经 RPC 流送达浏览器，后端校验用户、
+会话和一次性请求 ID 后才能允许，120 秒超时或任务取消均拒绝执行。自动执行不会扩大项目范围。
+项目目录通过租约绑定到 host broker；只读和未授权目录的限制同时适用于 Bash。
+修改权限必须先等待任务停止，下一次任务重建 Pi 进程；旧根目录文件不会被自动搬迁。
+
+Linux 主机执行 `python3 agent-platform/tests/project-mounts-live.py` 可验收真实挂载策略
+（`TEST_SANDBOX_IMAGE` 指定候选镜像）。`tests/projects-runner-live.mjs` 与
+`tests/approvals-runner-live.mjs` 是可信 runner 内的显式验收脚本，使用独立测试租户；
+后者应在隔离临时会话存储的候选 runner 中运行，会调用真实模型。
+
 上线验证包括匿名跳转、管理员登录、普通用户拒绝执行、CSRF、过期与重复授权码、会话撤销、
 真实模型调用、工具执行、重启后会话与文件保留、停止任务、代理连通与密钥不回显。
 `/healthz` 仅用于容器检查；runner 无宿主机公开端口，`/auth/check` 在公网 Caddy 返回 404。
-浏览器刷新或流连接断开会请求停止当前任务；每次任务上限 10 分钟。不要把后台长任务当作已实现能力。
+浏览器刷新或流连接断开会请求停止当前任务；每次任务上限 10 分钟。长任务请显式使用 background_start；其生命周期和预览限制见下文。
 
 参考：[Pi RPC](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md)、
 [OpenCode 的 Pi 配置](https://opencode.ai/console/harnesses/pi)、
@@ -199,13 +213,26 @@ docker exec -i RUNNER_CONTAINER node --input-type=module < tests/sandbox-live.mj
 客户端支持会话搜索、日期分组、置顶、重命名、归档/恢复，以及 Markdown/JSON 导出。
 归档不删除 Pi JSONL，也不释放会话配额。新增元数据保存在 `data/chat-meta/<hash>.json`，备份时与
 `data/sessions/` 一起按敏感数据保存。模型回复按安全 Markdown 展示，HTML 不执行；消息、代码块
-可复制，思考和工具调用可展开。重试与继续是追加请求，不改写既有消息。
+可复制，思考和工具调用可展开。继续会追加指令；重试/回退会保存备份并按用户轮次安全截断，复杂历史会明确拒绝。
 
-右侧工作区提供目录浏览、UTF-8 文本预览、路径插入、下载和文本上传。预览上限 64 KiB，下载上限
-1 MiB，上传上限 256 KiB；大文件下载会被拒绝，不返回截断文件。同名上传默认拒绝，确认覆盖后
+右侧工作区提供目录浏览、UTF-8 文本预览、路径插入，以及任意类型的原始字节上传和下载（最多 15 MiB）。文本默认预览 64 KiB，图片预览最多 1 MiB，文本在线编辑最多 256 KiB；超限明确提示，不返回截断下载。同名上传默认拒绝，确认覆盖后
 才替换内容。所有文件操作均通过独立用户租约进入沙箱，路径和符号链接在容器内限制到 `/workspace`；
 runner 不挂载工作区。浏览时沙箱正在运行命令会提示稍后刷新，不会停止模型任务。
 
-静态文件在 `web/js/`、`web/fonts/` 与 `web/style.css` 中，网关使用明确路径规则提供服务；字体
-本地打包并附许可证，无 CDN 或新增运行时依赖。新代码需要同时重建 gateway、runner 和 sandbox
-镜像，并更新主机 broker 脚本；只替换页面无法启用文件 API。UI/权限行为见 `UX-CONTRACT.md`。
+控制台是 Vue 3 + Vite 构建到 `web/dist/` 的单页应用，网关对 `/assets/*` 哈希资源返回不可变缓存、
+其余路径回退到 `index.html`（客户端应用，无服务端路由）；KaTeX 与字体本地打包，无 CDN 或新增运行时
+依赖。改前端只需重建 gateway 镜像（多阶段会重新 `npm run build`）；文件/执行 API 仍需同时重建
+runner 和 sandbox 镜像并更新主机 broker 脚本。UI/权限行为见 `UX-CONTRACT.md`。
+
+
+## 浏览器原生能力（2026-11）
+
+- 三档工具执行策略、运行中切换、结构化 ask_user、任务计划及运行中补充指令。
+- 设置页提供账户人设、全局/项目记忆；数据位于 data/memories/，仅当前主项目记忆会加载。
+- 独立搜索：百度/Bing/DuckDuckGo、DeepSeek API 预设和自定义 HTTPS JSON 来源。密钥与配置存于 data/search-settings/，不发给模型。
+- “能力、MCP 与 Skill”内置三项默认技能，支持个人 Markdown 技能、远程 HTTPS MCP 的 JSON/SSE 工具，以及 Pi 原生上下文统计/压缩。配置与生成的只读技能资源位于 data/features/。
+- 后台任务可运行 Vite 等 HTTP 服务；两项/账户、四项/全局、每项一小时。日志可查看，任务可停止。文件保留；broker 重启会清理任务容器。
+- Vite 示例：background_start 的 command 为 `npm run dev -- --host 0.0.0.0 --port 5173 --strictPort --base "$IRIS_PREVIEW_BASE"`，port=5173、previewBase=true。预览走临时私密链接，支持 HTTP，暂不支持 WebSocket/HMR。
+- 部署时同步更新 runner/gateway/sandbox 镜像、主机 background-tasks.py、web-search.py、web-access.py 与 sandbox-broker.py，并应用 Caddyfile.example 中的 /preview/* 路由。该路由依赖 gateway 对能力令牌和 CSP sandbox 的校验；不能直接反代到用户容器。
+
+测试：`node --test tests/*.test.mjs`、`python3 tests/web-search.test.py`。真实模型/容器验收脚本为 `tests/interactions-runner-live.mjs`、`tests/memory-background-live.mjs`、`tests/capabilities-live.mjs`，仅在隔离的候选 runner 中按脚本说明执行，使用专用合成账户，不操作真实用户会话。MCP/搜索协议验收使用临时 HTTPS 测试端点，正式部署后移除测试路由。

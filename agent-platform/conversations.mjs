@@ -2,12 +2,43 @@ import { lstat, mkdir, open, readFile, readdir, rename, unlink, writeFile } from
 import { fail } from './shared.mjs';
 
 const THREAD = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+const PROJECT_ID = /^[a-zA-Z0-9_\-一-龥]{1,40}$/;
+const RESERVED_PROJECTS = new Set(['__proto__', 'constructor', 'prototype', 'lost+found', 'node_modules']);
 const MAX_TITLE = 80;
 const MAX_EXPORT = 4 * 1024 * 1024;
 const queues = new Map();
 
 export function validThread(value) {
   return typeof value === 'string' && THREAD.test(value);
+}
+export function validProjectId(value) {
+  return typeof value === 'string' && PROJECT_ID.test(value) && !RESERVED_PROJECTS.has(value);
+}
+export function normalizeProjectId(value) {
+  if (typeof value !== 'string') fail(422, '请填写项目空间标识');
+  const id = value.trim();
+  if (!validProjectId(id)) fail(422, '项目标识需为 1–40 个字符，仅支持字母、数字、短横线、下划线及中文');
+  return id;
+}
+export function normalizeProjectName(value, fallback = '新项目') {
+  if (typeof value !== 'string') return fallback;
+  const name = value.replace(/[\s\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 40);
+  return name || fallback;
+}
+export function sanitizePermission(value, currentProject = 'default') {
+  if (!value || typeof value !== 'object') {
+    return { scope: 'project_only', extraProjects: {}, execution: 'ask' };
+  }
+  const scope = ['project_only', 'scoped', 'full'].includes(value.scope) ? value.scope : 'project_only';
+  const extraProjects = {};
+  if (scope === 'scoped' && value.extraProjects && typeof value.extraProjects === 'object') {
+    for (const [pId, access] of Object.entries(value.extraProjects)) {
+      if (validProjectId(pId) && pId !== currentProject && (access === 'read' || access === 'write')) {
+        extraProjects[pId] = access;
+      }
+    }
+  }
+  return { scope, extraProjects, execution: ['auto', 'edit'].includes(value.execution) ? value.execution : 'ask' };
 }
 export function normalizeTitle(value) {
   if (typeof value !== 'string') fail(422, '请填写对话标题');
@@ -29,6 +60,43 @@ function contentText(content) {
 function blocksOf(content) {
   if (typeof content === 'string') return [{ type: 'text', text: content }];
   return Array.isArray(content) ? content.filter(part => part && typeof part.type === 'string') : [];
+}
+// Rewind supports a linear, uncompacted history only. Refuse complex Pi trees
+// rather than silently flattening branches or corrupting compaction references.
+export function historyPrefix(content, count) {
+  if (!Number.isInteger(count) || count < 0) fail(422, '保留消息数量无效');
+  const lines = content.split('\n').filter(line => line.trim());
+  let messages = 0, previous = null, cut = lines.length;
+  for (let i = 0; i < lines.length; i++) {
+    let item;
+    try { item = JSON.parse(lines[i]); } catch { fail(409, '历史格式异常，未修改对话'); }
+    if (['compaction', 'branch_summary', 'context_edit', 'custom_message'].includes(item.type)) fail(409, '此对话包含分支或压缩历史，暂不支持回退');
+    if (item.type !== 'session' && item.id) {
+      if ((item.parentId || null) !== previous) fail(409, '此对话包含分支历史，暂不支持回退');
+      previous = item.id;
+    }
+    if (item.type === 'message') {
+      if (messages === count && cut === lines.length) cut = i;
+      messages++;
+    }
+  }
+  if (count > messages) fail(409, '对话已变化，请刷新后重试');
+  return lines.slice(0, cut).join('\n') + '\n';
+}
+export function historyThroughUserTurns(content, count) {
+  if (!Number.isInteger(count) || count < 0) fail(422, '保留轮次数量无效');
+  historyPrefix(content, 0); // Validate linear/uncompacted tree before any mutation.
+  const lines = content.split('\n').filter(line => line.trim());
+  let turns = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const item = JSON.parse(lines[i]);
+    if (item.type === 'message' && item.message?.role === 'user') {
+      if (turns === count) return lines.slice(0, i).join('\n') + '\n';
+      turns++;
+    }
+  }
+  if (count > turns) fail(409, '对话已变化，请刷新后重试');
+  return content;
 }
 
 // Session files stay untouched; per-user metadata lives in a separate atomic file.
@@ -62,9 +130,29 @@ export class ChatStore {
     let value;
     try { value = JSON.parse(await readFile(this.metaFile(user), 'utf8')); }
     catch (error) {
-      if (error.code === 'ENOENT') return { version: 1, chats: {} };
+      if (error.code === 'ENOENT') {
+        return {
+          version: 2,
+          projects: { default: { id: 'default', name: '默认项目', createdAt: 0 } },
+          chats: {},
+        };
+      }
       if (error instanceof SyntaxError) fail(503, '对话元数据异常，请联系管理员检查');
       throw error;
+    }
+    const projects = {
+      default: { id: 'default', name: '默认项目', createdAt: 0 },
+    };
+    if (value?.projects && typeof value.projects === 'object') {
+      for (const [id, item] of Object.entries(value.projects)) {
+        if (!validProjectId(id) || !item || typeof item !== 'object') continue;
+        projects[id] = {
+          id,
+          name: typeof item.name === 'string' && item.name.trim() ? item.name.trim().slice(0, 40) : (id === 'default' ? '默认项目' : id),
+          createdAt: Number.isFinite(item.createdAt) ? item.createdAt : Date.now(),
+          description: typeof item.description === 'string' ? item.description.slice(0, 200) : '',
+        };
+      }
     }
     const chats = {};
     for (const [id, item] of Object.entries(value?.chats || {})) {
@@ -74,16 +162,125 @@ export class ChatStore {
       if (item.pinned === true) entry.pinned = true;
       if (item.archived === true) entry.archived = true;
       if (Number.isFinite(item.updatedAt)) entry.updatedAt = item.updatedAt;
+      const pId = typeof item.projectId === 'string' && validProjectId(item.projectId) && projects[item.projectId]
+        ? item.projectId
+        : 'default';
+      entry.projectId = pId;
+      entry.permission = sanitizePermission(item.permission, pId);
       if (Object.keys(entry).length) chats[id] = entry;
     }
-    return { version: 1, chats };
+    return { version: 2, projects, chats };
   }
   async saveMeta(user, meta) {
     await mkdir(this.metaRoot, { recursive: true, mode: 0o700 });
     const target = this.metaFile(user), temporary = target + '.tmp-' + process.pid + '-' + Date.now();
-    await writeFile(temporary, JSON.stringify({ version: 1, chats: meta.chats }), { mode: 0o600 });
+    await writeFile(temporary, JSON.stringify({ version: 2, projects: meta.projects, chats: meta.chats }), { mode: 0o600 });
     try { await rename(temporary, target); }
     catch (error) { await unlink(temporary).catch(() => {}); throw error; }
+  }
+  async listProjects(user) {
+    const meta = await this.loadMeta(user);
+    const counts = {};
+    for (const chat of Object.values(meta.chats)) {
+      const pid = chat.projectId || 'default';
+      counts[pid] = (counts[pid] || 0) + 1;
+    }
+    return Object.values(meta.projects).map(p => ({
+      ...p,
+      chatCount: counts[p.id] || 0,
+    })).sort((a, b) => (a.id === 'default' ? -1 : (b.id === 'default' ? 1 : a.createdAt - b.createdAt)));
+  }
+  initialize(user, thread, projectId = 'default', permission) {
+    if (!validThread(thread)) fail(422, '对话标识无效');
+    return this.serialize(user, async () => {
+      const meta = await this.loadMeta(user);
+      if (meta.chats[thread]) return;
+      if (Object.keys(meta.chats).length >= 100) fail(429, '对话元数据数量已达上限，请清理未使用的对话');
+      // Legacy histories keep their default project. New histories bind exactly once,
+      // before Pi starts, rather than depending on a not-yet-created JSONL file.
+      const exists = await this.assertOwned(user, thread).then(() => true, error => {
+        if (error.status === 404) return false;
+        throw error;
+      });
+      const pid = exists ? 'default' : normalizeProjectId(projectId);
+      if (!meta.projects[pid]) fail(404, '目标项目空间不存在');
+      meta.chats[thread] = { projectId: pid, permission: sanitizePermission(exists ? undefined : permission, pid) };
+      await this.saveMeta(user, meta);
+    });
+  }
+  async createProject(user, { id, name, description }) {
+    const projId = normalizeProjectId(id);
+    const projName = normalizeProjectName(name, projId);
+    return this.serialize(user, async () => {
+      const meta = await this.loadMeta(user);
+      if (meta.projects[projId]) fail(409, '项目空间已存在');
+      if (Object.keys(meta.projects).length >= 64) fail(429, '项目空间数量已达上限');
+      meta.projects[projId] = {
+        id: projId,
+        name: projName,
+        description: typeof description === 'string' ? description.slice(0, 200) : '',
+        createdAt: Date.now(),
+      };
+      await this.saveMeta(user, meta);
+      return { ...meta.projects[projId], chatCount: 0 };
+    });
+  }
+  async renameProject(user, id, name) {
+    const projId = normalizeProjectId(id);
+    const projName = normalizeProjectName(name, projId);
+    return this.serialize(user, async () => {
+      const meta = await this.loadMeta(user);
+      if (!meta.projects[projId]) fail(404, '项目空间不存在');
+      meta.projects[projId].name = projName;
+      await this.saveMeta(user, meta);
+      let count = 0;
+      for (const c of Object.values(meta.chats)) if (c.projectId === projId) count++;
+      return { ...meta.projects[projId], chatCount: count };
+    });
+  }
+  async deleteProject(user, id) {
+    const projId = normalizeProjectId(id);
+    if (projId === 'default') fail(422, '默认项目空间不可删除');
+    return this.serialize(user, async () => {
+      const meta = await this.loadMeta(user);
+      if (!meta.projects[projId]) fail(404, '项目空间不存在');
+      if (Object.values(meta.chats).some(chat => chat.projectId === projId)) fail(409, '项目仍有关联对话，请先删除这些对话');
+      delete meta.projects[projId];
+      for (const chat of Object.values(meta.chats)) {
+        if (chat.permission?.extraProjects) delete chat.permission.extraProjects[projId];
+      }
+      await this.saveMeta(user, meta);
+      return { ok: true };
+    });
+  }
+  setChatProject(user, thread, projectId) {
+    const pId = normalizeProjectId(projectId);
+    return this.serialize(user, async () => {
+      await this.assertOwned(user, thread);
+      const meta = await this.loadMeta(user);
+      if (!meta.projects[pId]) fail(404, '目标项目空间不存在');
+      const item = meta.chats[thread] || {};
+      if ((item.projectId || 'default') !== pId) {
+        fail(403, '会话主项目空间在开启后不可更改');
+      }
+      item.projectId = pId;
+      item.permission = sanitizePermission(item.permission, pId);
+      meta.chats[thread] = item;
+      await this.saveMeta(user, meta);
+      return { ...(meta.chats[thread] || {}), id: thread };
+    });
+  }
+  setChatPermission(user, thread, permission) {
+    return this.serialize(user, async () => {
+      await this.assertOwned(user, thread);
+      const meta = await this.loadMeta(user);
+      const item = meta.chats[thread] || {};
+      const currentProj = item.projectId || 'default';
+      item.permission = sanitizePermission(permission, currentProj);
+      meta.chats[thread] = item;
+      await this.saveMeta(user, meta);
+      return { ...(meta.chats[thread] || {}), id: thread };
+    });
   }
   async update(user, thread, change) {
     return this.serialize(user, async () => {
@@ -121,9 +318,55 @@ export class ChatStore {
       // Exact owned files only. Never recursively delete a user-controlled path.
       await unlink(this.file(user, thread));
       await unlink(this.file(user, thread) + '.cwd-backup').catch(error => { if (error.code !== 'ENOENT') throw error; });
+      await unlink(this.file(user, thread) + '.rewind-backup').catch(error => { if (error.code !== 'ENOENT') throw error; });
       delete meta.chats[thread];
       await this.saveMeta(user, meta);
       return { ok: true };
+    });
+  }
+  async fork(user, sourceThread, targetThread, title, keepMessages, keepUserTurns) {
+    if (!validThread(targetThread)) fail(422, '新对话标识无效');
+    return this.serialize(user, async () => {
+      await this.assertOwned(user, sourceThread);
+      const meta = await this.loadMeta(user);
+      const sourceFile = this.file(user, sourceThread);
+      const targetFile = this.file(user, targetThread);
+      const raw = await readFile(sourceFile, 'utf8');
+      const content = keepUserTurns !== undefined ? historyThroughUserTurns(raw, keepUserTurns) : keepMessages === undefined ? raw : historyPrefix(raw, keepMessages);
+      const lines = content.split('\n');
+      if (lines[0]) {
+        try {
+          const header = JSON.parse(lines[0]);
+          if (header.type === 'session') {
+            header.id = targetThread;
+            lines[0] = JSON.stringify(header);
+          }
+        } catch {}
+      }
+      await writeFile(targetFile, lines.join('\n'), { mode: 0o600, flag: 'wx' });
+      const newTitle = normalizeTitle(title || (meta.chats[sourceThread]?.title || '对话') + ' (分支)');
+      const srcChat = meta.chats[sourceThread] || {};
+      meta.chats[targetThread] = {
+        title: newTitle,
+        projectId: srcChat.projectId || 'default',
+        permission: srcChat.permission || { scope: 'project_only', extraProjects: {} },
+        updatedAt: Date.now(),
+      };
+      await this.saveMeta(user, meta);
+      return { ok: true, id: targetThread, title: newTitle, projectId: meta.chats[targetThread].projectId };
+    });
+  }
+  async truncate(user, thread, keepMessagesCount, keepUserTurns) {
+    return this.serialize(user, async () => {
+      await this.assertOwned(user, thread);
+      const sourceFile = this.file(user, thread);
+      const content = await readFile(sourceFile, 'utf8');
+      const prefix = keepUserTurns !== undefined ? historyThroughUserTurns(content, keepUserTurns) : historyPrefix(content, keepMessagesCount);
+      await writeFile(sourceFile + '.rewind-backup', content, { mode: 0o600 });
+      const temporary = sourceFile + '.tmp';
+      await writeFile(temporary, prefix, { mode: 0o600 });
+      await rename(temporary, sourceFile);
+      return { ok: true, keptMessages: keepMessagesCount };
     });
   }
   async list(user) {
@@ -153,8 +396,15 @@ export class ChatStore {
         } finally { await handle.close(); }
       } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
       const saved = meta.chats[id] || {};
-      result.push({ id, title: saved.title || title, pinned: saved.pinned === true,
-        archived: saved.archived === true, updated: info.mtimeMs });
+      result.push({
+        id,
+        title: saved.title || title,
+        pinned: saved.pinned === true,
+        archived: saved.archived === true,
+        updated: info.mtimeMs,
+        projectId: saved.projectId || 'default',
+        permission: saved.permission || { scope: 'project_only', extraProjects: {} },
+      });
     }
     // Keep pinned first, then most recently active; archived stays in the same stream.
     return result.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updated - a.updated).slice(0, 100);

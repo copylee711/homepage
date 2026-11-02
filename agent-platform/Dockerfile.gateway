@@ -1,7 +1,15 @@
+# Stage 1: build the Vite SPA (web/dist).
+FROM node:24.21.0-bookworm-slim AS web
+WORKDIR /web
+COPY agent-platform/web/package.json agent-platform/web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY agent-platform/web/ ./
+RUN npm run build
+
+# Stage 2: the gateway runtime, serving the built SPA.
 FROM node:24.21.0-bookworm-slim
 WORKDIR /app
-COPY agent-platform/gateway.mjs agent-platform/shared.mjs ./
-COPY agent-platform/web/ ./web/
-COPY src/styles/tokens.css ./web/tokens.css
+COPY agent-platform/gateway.mjs agent-platform/shared.mjs agent-platform/widget-document.mjs ./
+COPY --from=web /web/dist ./web/dist
 USER 1000:1000
 CMD ["node", "gateway.mjs"]

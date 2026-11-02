@@ -118,7 +118,7 @@ def introspect(body: Token, request: Request, session: Session = Depends(databas
     grant = session.get(AgentGrant, user.id)
     allowed = bool(request.app.state.settings.agent_user_execution_enabled
                    and grant and grant.expires_at > time.time())
-    return {"user": {"id": user.id, "name": user.name}, "admin": user.is_admin,
+    return {"user": {"id": user.id, "name": user.name, "avatar": user.avatar or ""}, "admin": user.is_admin,
             "can_execute": user.is_admin or allowed, "expires_at": row.expires_at,
             "grant_expires_at": grant.expires_at if allowed else None}
 

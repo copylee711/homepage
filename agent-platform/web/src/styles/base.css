@@ -1,0 +1,121 @@
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; font-size: 16px; }
+* { -webkit-tap-highlight-color: transparent; }
+button, a, [role="button"] { touch-action: manipulation; }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  overflow: hidden;
+  background: var(--bg); color: var(--text);
+  font-family: var(--font); font-size: 15px; line-height: 1.6;
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+}
+#app { height: 100dvh; }
+button, input, textarea, select { font: inherit; color: inherit; }
+button { border: 0; background: none; padding: 0; cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+a { color: var(--accent-ink); }
+svg { flex: none; display: block; }
+::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+
+/* Custom browser-free checkboxes & clean number inputs */
+input[type='checkbox'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  min-height: 16px !important;
+  padding: 0 !important;
+  margin: 0;
+  flex: none;
+  display: inline-grid;
+  place-content: center;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: background-color var(--fast), border-color var(--fast), box-shadow var(--fast);
+}
+input[type='checkbox']:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+input[type='checkbox']::before {
+  content: '';
+  width: 9px;
+  height: 5.5px;
+  border-left: 1.8px solid var(--surface);
+  border-bottom: 1.8px solid var(--surface);
+  transform: translateY(-0.8px) rotate(-45deg) scale(0);
+  transition: transform 120ms var(--ease);
+}
+input[type='checkbox']:checked {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+input[type='checkbox']:checked::before {
+  transform: translateY(-0.8px) rotate(-45deg) scale(1);
+}
+input[type='checkbox']:focus-visible {
+  outline: 0;
+  border-color: var(--line-focus);
+}
+
+input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+
+/* Smooth theme switch: View Transition circular reveal + CSS fallback */
+html.vt-theme::view-transition-old(root),
+html.vt-theme::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+html.vt-theme::view-transition-old(root) { z-index: 1; }
+html.vt-theme::view-transition-new(root) { z-index: 9999; }
+
+html.theme-transitioning,
+html.theme-transitioning body,
+html.theme-transitioning .sidebar,
+html.theme-transitioning .main,
+html.theme-transitioning .topbar,
+html.theme-transitioning .composer,
+html.theme-transitioning .workspace,
+html.theme-transitioning .dialog,
+html.theme-transitioning .settings-nav,
+html.theme-transitioning .user-bubble,
+html.theme-transitioning .thinking,
+html.theme-transitioning .iris-modal {
+  transition: background-color 280ms var(--ease), color 280ms var(--ease), border-color 280ms var(--ease), box-shadow 280ms var(--ease) !important;
+}
+
+/* Ultra-thin, buttonless unobtrusive scrollbars.
+   NOTE: Do NOT set scrollbar-width/scrollbar-color on WebKit/Blink, because Chromium 121+
+   disables ::-webkit-scrollbar and restores OS arrow buttons whenever scrollbar-width is set! */
+*::-webkit-scrollbar { width: 5px; height: 5px; }
+*::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-corner { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-hover);
+}
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+}
+
+:focus-visible { outline: 1px solid var(--line-focus); outline-offset: 2px; }
+input:focus-visible, textarea:focus-visible { outline: none; }
+.sr-only { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 19px; padding: 0 5px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-tint); color: var(--muted); font-family: var(--font); font-size: 10.5px; line-height: 1; white-space: nowrap; }
+
+.spinner { width: 15px; height: 15px; flex: none; border: 2px solid color-mix(in srgb, var(--accent) 24%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: iris-spin 0.72s linear infinite; }
+@keyframes iris-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
+@media (max-width: 860px) { input:not([type="checkbox"]), textarea, select { font-size: max(16px, 1em); } }

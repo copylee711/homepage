@@ -1,8 +1,8 @@
 # Agent workspace behavior
 
-Visual ownership is [DESIGN.md](../DESIGN.md); `web/style.css` consumes the canonical
-Homepage tokens. Both settings dialogs reuse native dialog focus/keyboard behavior,
-the same labels, form controls, button variants and inline live status feedback.
+Iris visual tokens are owned by `web/src/styles/tokens.css`; shared controls live in
+`web/src/components`. Dialogs use the shared focus helper and application-owned
+confirmation flow, with the same labels, buttons and inline status feedback.
 
 ## Authorization
 
@@ -76,16 +76,21 @@ Escape closes idle dialogs and focus returns to their trigger.
   and clears snapshots; workspace files remain. Active generation must stop first.
 - Menus support arrows/Home/End/Escape. Native dialogs keep focus; asynchronous mutations
   disable repeat submission, preserve entered values on error and announce outcomes.
-- Retry resends the last user task; continue appends an explicit instruction. Neither
-  silently replaces history. Tools and thinking are expandable, with real lifecycle states.
+- Retry/rewind explicitly return to a selected user turn in a linear, uncompacted history.
+  The server atomically replaces the suffix after writing an owned `.rewind-backup`.
+  Compacted/branched histories reject this operation; failure leaves the UI and server
+  history intact. Fork creates a new UUID without overwriting an existing conversation.
+  Continue appends an instruction. Tools and thinking expose real lifecycle states.
   Message/code copy operates only on the visible selected content.
 - Streaming follows the bottom while the reader stays nearby; scrolling up pauses follow
   and exposes “回到最新”. A premature stream close is an error rather than a completed task.
 - Workspace files are listed, previewed, uploaded and downloaded through the user's sandbox.
   Preview is UTF-8 text (first 64 KiB), including valid empty/truncated text. Stale responses
   cannot replace a more recently selected preview. Paths can be inserted into the composer.
-  Upload cap is 256 KiB; duplicate uploads require explicit overwrite confirmation. Downloads
-  over 1 MiB are rejected, never silently truncated. Browsing never cancels an active task;
+  Text editor uploads are limited to 256 KiB. Composer attachments accept binary/base64
+  files up to 15 MiB, use unique filenames under the selected project's `uploads/`, and
+  never silently overwrite another attachment. Downloads
+  over 15 MiB are rejected, never silently truncated. Browsing never cancels an active task;
   a busy sandbox reports that the reader should refresh later.
 - Model connection settings remain admin-only; an execution grant exposes no provider keys.
   Failure to refresh identity disables execution and offers reload/sign-in recovery.
@@ -93,3 +98,91 @@ Escape closes idle dialogs and focus returns to their trigger.
   and history are never written to localStorage. Opening/closing drawers, menus and messages
   is animated; repeated streaming deltas do not replay entry effects. Reduced motion disables
   nonessential transitions. Mobile panels remain within the viewport without page overflow.
+
+## Projects and workspace display
+
+- A new conversation binds its primary project and Agent access scope with the first
+  prompt. Subsequent prompts cannot change that binding. The owner can update access
+  while idle; cached Pi processes are restarted so the next turn receives the new lease.
+- Project-only leases mount only the primary directory. Scoped leases additionally
+  mount chosen projects read-only/read-write; Linux enforces this for Bash as well as
+  file tools. Full scope mounts the owner's entire workspace. Owner-operated file and
+  terminal panels retain access to the owner's workspace; these are separate from Agent scope.
+- Project scope is managed only in the upper project menu: primary project, subordinate
+  read/write grants and the explicit whole-workspace option. “添加从属项目” always opens
+  the shared selection dialog, including when there is only one candidate. The old
+  duplicate advanced project/permissions dialog is removed.
+- The lower execution menu selects “需要审批” (default), “允许编辑” or “自动执行”.
+  Explicitly read-only native tools (file read/list/search, web search/fetch, memory
+  read, background status), user questions and plan updates bypass approval. Edit
+  mode also permits file writes/edits and memory updates; Bash, background starts
+  and remote MCP tools still require approval. Auto mode permits tools within the
+  same OS-enforced project scope. Runtime mode changes apply to the next tool and
+  release pending operations that the new mode permits. Scope changes remain idle-only.
+  Pending approval IDs are bound to a live user/thread, are one-time, expire after
+  120 seconds and fail closed on cancellation. Unknown tools require approval.
+- Deleting a project requires removing associated conversations first and preserves files.
+  Existing root-level files remain in place and can be managed from the owner's file panel
+  or accessed by an explicitly full-scope Agent. They are not silently moved into `default`.
+- The eye button toggles dotfiles/directories such as `.git` and `.env`, off by default.
+  Only this harmless display preference is stored locally; hiding does not change access.
+- Workspace controls occupy a separate row above full-width, horizontally scrollable
+  breadcrumbs. The current directory scrolls into view and full paths are available by title.
+- Welcome entry fades without translating the outer scroll surface. Symmetric scrollbar
+  gutters keep the welcome content centered when overflow changes.
+- The terminal executes one bounded command per request (15 seconds); it is not an
+  interactive persistent shell. Agent/toolchain tasks must be idle before terminal or Git writes.
+
+## Streaming and conversation navigation
+
+- Each model message has its own content-index namespace. Final assistant message
+  snapshots reconcile missing deltas. Text/thinking/tool order is preserved in
+  live views and replay. Groups include adjacent tools only, across consecutive
+  assistant messages in the same user turn; intervening text splits groups.
+- Thinking preview follows the newest lines until the reader scrolls upward.
+  Parent conversation follow also pauses on manual scrolling. User timestamps
+  appear below their message bubbles.
+- The user-turn navigator exposes an accessible button per user message, a text
+  summary, current-turn state, keyboard arrows/Home/End and direct scrolling.
+  It is contained within the conversation pane, including on mobile.
+- Sidebar scrolling uses a short, faint rail with drag and keyboard support.
+  Forced-colors mode restores native scrollbar behavior. The original scroll
+  surface remains the keyboard and touch scroll target.
+- Unauthorized accounts see a centered access notice and account settings; no
+  unusable composer/model controls or misleading send-first-message instructions.
+- Workspace upload accepts any file type as exact base64-framed bytes, up to
+  15 MiB. Text editing remains UTF-8 only and 256 KiB. Other formats are downloadable;
+  supported image previews remain bounded to 1 MiB. Filenames do not restrict type.
+
+## Personal settings and tools
+
+- Persona/global/project memory lives outside user tool mounts. Only the active
+  primary project's memory is injected. Writes are atomic and revision-checked;
+  account and project isolation is authoritative on the server. Agent writes use
+  the same execution policy as other persistent changes. Memory supplements,
+  never replaces, higher-priority system and isolation instructions.
+- `ask_user` is independent of execution approval. No option is submitted merely
+  because it is marked recommended. Users can choose an option or type an answer.
+  Replies are one-time, user/thread-bound, and cancelled on task end.
+- Search settings are per account: source enable/order, preferred engine, proxy
+  toggle, language/count and custom HTTPS JSON request/mapping configuration.
+  Secret fields are masked, empty preserves saved values, endpoint change clears
+  previous secrets, and keys never enter model tools or public settings responses.
+  API redirects are refused; DNS and destination IP checks pin public connections.
+- Capability settings load built-in and personal Markdown skills explicitly,
+  expose native Pi context statistics/compaction, and adapt remote MCP tool discovery
+  and execution to the browser. Remote MCP credentials remain server-only; tools
+  integrate with the same approval flow. Arbitrary host executable plugins are
+  not loaded. Configuration saves require idle tasks and invalidate cached Pi instances.
+- Background tasks use distinct non-root containers with current project mounts,
+  memory/CPU/PID limits, bounded logs and no published host ports. Maximum two per
+  user, four globally and one hour each. Ordinary task cancellation preserves them;
+  explicit stop, scope revocation, expiry and broker restart terminate them. Scope
+  changes stop old containers before applying a new grant set.
+- Preview URLs are random, temporary task capabilities. They work without SSO
+  cookies for module loading, but every active document receives CSP `sandbox`
+  without `allow-same-origin`; preview code cannot read Iris storage or authenticated
+  API responses. Preview HTTP is bounded to 2 MiB per resource; WebSocket forwarding
+  is not supported and the UI says to refresh after code changes.
+- Settings with draft edits warn before navigation; cancellation preserves fields.
+  Secrets and personal text are never persisted in browser storage.

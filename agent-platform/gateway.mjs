@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { body, equal, fail, json, modelLabel, required } from './shared.mjs';
+import { widgetDocument, WIDGET_CSP } from './widget-document.mjs';
+const widgets = new Map();
 
 const publicURL = new URL(required('PUBLIC_URL')).origin;
 const homepage = new URL(required('HOMEPAGE_URL')).origin;
@@ -67,9 +69,23 @@ async function runner(path, user, payload, signal) {
   }
   return response;
 }
-const assets = new Map([['/', ['index.html', 'text/html']], ['/style.css', ['style.css', 'text/css']],
-  ['/tokens.css', ['tokens.css', 'text/css']], ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
-  ['/fonts/outfit-latin.woff2', ['fonts/outfit-latin.woff2', 'font/woff2']]]);
+// The console is a Vite SPA built into web/dist. Serve hashed assets with long
+// cache; everything else falls back to index.html (client-side app, no routing).
+const distRoot = new URL('./web/dist/', import.meta.url);
+const mimeByExt = {
+  '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
+  '.svg': 'image/svg+xml', '.json': 'application/json', '.woff2': 'font/woff2', '.woff': 'font/woff',
+  '.ttf': 'font/ttf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+  '.webp': 'image/webp', '.bmp': 'image/bmp', '.ico': 'image/x-icon', '.map': 'application/json',
+};
+function distAsset(pathname) {
+  // Only serve real files under dist; reject traversal. Unknown paths → SPA shell.
+  const clean = pathname.replace(/\?.*$/, '');
+  if (clean === '/' || !/^\/[A-Za-z0-9._\-/]+$/.test(clean) || clean.includes('..')) return null;
+  const ext = clean.slice(clean.lastIndexOf('.'));
+  if (!mimeByExt[ext]) return null;
+  return { rel: clean.replace(/^\//, ''), type: mimeByExt[ext], immutable: clean.startsWith('/assets/') };
+}
 const modelCache = { label: '', expires: 0 };
 async function modelName(user) {
   if (Date.now() < modelCache.expires) return modelCache.label;
@@ -95,10 +111,18 @@ function attachment(name) {
   const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
 }
-function sendFile(res, file) {
+function sendFile(res, file, inline = false) {
   const buffer = Buffer.from(file.data || '', 'base64');
-  res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': buffer.length,
-    'Content-Disposition': attachment(downloadName(file.name)) });
+  const ext = (file.name || '').slice((file.name || '').lastIndexOf('.')).toLowerCase();
+  const type = mimeByExt[ext] || 'application/octet-stream';
+  const headers = { 'Content-Type': type, 'Content-Length': buffer.length };
+  if (!inline) {
+    headers['Content-Disposition'] = attachment(downloadName(file.name));
+  } else {
+    headers['Content-Disposition'] = 'inline';
+    headers['Cache-Control'] = 'private, max-age=300';
+  }
+  res.writeHead(200, headers);
   res.end(buffer);
 }
 function sendExport(res, value) {
@@ -117,6 +141,29 @@ export const server = createServer(async (req, res) => {
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   try {
     const url = new URL(req.url, publicURL);
+      if (url.pathname.startsWith('/preview/')) {
+        if (req.method !== 'GET') fail(405, '预览仅支持 GET');
+        const match = url.pathname.match(/^\/preview\/([A-Za-z0-9_-]{43})(\/.*)?$/);
+        if (!match) fail(404, '预览链接无效');
+        const response = await runner('/background/preview', 'preview-capability', { token: match[1], path: (match[2] || '/') + url.search });
+        const value = await response.json();
+        let data = Buffer.from(value.data || '', 'base64');
+        if (data.length > 2 * 1024 * 1024) fail(413, '预览资源过大');
+        if ([301, 302, 303, 307, 308].includes(value.status)) {
+          const location = String(value.location || '');
+          if (!location.startsWith('/') || location.startsWith('//')) fail(502, '预览重定向已阻止');
+          const prefix = '/preview/' + match[1] + '/';
+          res.writeHead(302, { Location: location.startsWith(prefix) ? location : prefix.slice(0, -1) + location }); return res.end();
+        }
+        // Bearer preview links are short-lived and scoped to one task. A CSP
+        // sandbox gives active preview documents an opaque origin: they cannot
+        // read Iris cookies/storage or call authenticated Iris APIs as the user.
+        res.setHeader('Content-Security-Policy', "sandbox allow-scripts allow-forms; default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src * data: blob:; connect-src 'self' ws: wss:; object-src 'none'; frame-ancestors 'self'");
+        res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.writeHead(value.status >= 100 && value.status <= 599 ? value.status : 502, { 'Content-Type': value.contentType || 'application/octet-stream' });
+        return res.end(data);
+      }
     if (url.pathname === '/healthz' && req.method === 'GET') return json(res, 200, { ok: true });
     if (url.pathname === '/auth/login' && req.method === 'GET') {
       const state = randomBytes(32).toString('base64url'), verifier = randomBytes(32).toString('base64url');
@@ -143,8 +190,31 @@ export const server = createServer(async (req, res) => {
       }
     }
     const auth = await identity(req);
+    if (url.pathname === '/api/avatar' && req.method === 'GET') {
+      const avatarPath = typeof auth.user?.avatar === 'string' ? auth.user.avatar.trim() : '';
+      if (!avatarPath || !/^\/media\/avatars\/[A-Za-z0-9._-]+\.(webp|png|jpe?g|gif)$/i.test(avatarPath)) {
+        fail(404, '暂无头像');
+      }
+      try {
+        const target = new URL(avatarPath, homepage);
+        const response = await fetch(target, { signal: AbortSignal.timeout(6000) });
+        if (!response.ok) fail(404, '头像文件不存在');
+        const ctype = response.headers.get('content-type') || 'image/webp';
+        const buffer = Buffer.from(await response.arrayBuffer());
+        res.writeHead(200, {
+          'Content-Type': ctype,
+          'Content-Length': buffer.length,
+          'Cache-Control': 'private, max-age=3600',
+        });
+        return res.end(buffer);
+      } catch {
+        fail(404, '无法读取头像');
+      }
+    }
     if (url.pathname === '/api/me' && req.method === 'GET') {
-      return json(res, 200, { user: auth.user, admin: auth.admin, can_execute: auth.can_execute,
+      const user = auth.user ? { ...auth.user } : null;
+      if (user && user.avatar) user.avatar = '/api/avatar';
+      return json(res, 200, { user, admin: auth.admin, can_execute: auth.can_execute,
         grant_expires_at: auth.grant_expires_at, csrf: csrf(auth.token), model: await modelName(auth.user.id) });
     }
     if (url.pathname === '/auth/logout' && req.method === 'POST') {
@@ -177,6 +247,9 @@ export const server = createServer(async (req, res) => {
       if (url.pathname === '/api/packages' && req.method === 'GET') {
         const response = await runner('/packages', auth.user.id, { query: url.searchParams.get('q') || '' }); return json(res, 200, await response.json());
       }
+      if (url.pathname === '/api/projects' && req.method === 'GET') {
+        const response = await runner('/projects', auth.user.id, {}); return json(res, 200, await response.json());
+      }
       if (url.pathname === '/api/chats' && req.method === 'GET') {
         const response = await runner('/chats', auth.user.id, {}); return json(res, 200, await response.json());
       }
@@ -194,26 +267,89 @@ export const server = createServer(async (req, res) => {
       }
       if (url.pathname === '/api/files/download' && req.method === 'GET') {
         const response = await runner('/files/download', auth.user.id, { path: filePath(url) });
-        return sendFile(res, await response.json());
+        return sendFile(res, await response.json(), url.searchParams.get('inline') === '1');
       }
       if (url.pathname === '/api/providers' && req.method === 'GET') {
         const response = await runner('/providers', auth.user.id, {}); return json(res, 200, await response.json());
       }
+      if (url.pathname === '/api/greeting' && req.method === 'GET') {
+        const response = await runner('/greeting', auth.user.id, {}); return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/widget-document' && req.method === 'GET') {
+        const item=widgets.get(url.searchParams.get('id'));if(!item||item.user!==auth.user.id||item.expires<Date.now())fail(404,'组件已过期，请重新运行');
+        res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':WIDGET_CSP,'X-Frame-Options':'SAMEORIGIN'});return res.end(widgetDocument(item.html));
+      }
+      if (url.pathname === '/api/image' && req.method === 'GET') {
+        const response=await runner('/image',auth.user.id,{url:url.searchParams.get('url'),path:url.searchParams.get('path')},AbortSignal.timeout(45000));
+        const value=await response.json();if(!['image/png','image/jpeg','image/gif','image/webp','image/svg+xml'].includes(value.mime))fail(415,'图片格式不支持');
+        res.writeHead(200,{'Content-Type':value.mime,'Cache-Control':'private, max-age=300','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; sandbox"});return res.end(Buffer.from(value.data,'base64'));
+      }
+      if (url.pathname === '/api/search/settings' && req.method === 'GET') {
+        const response = await runner('/search/settings', auth.user.id, {}); return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/features' && req.method === 'GET') { const response = await runner('/features', auth.user.id, {}); return json(res, 200, await response.json()); }
+      if (url.pathname === '/api/context/stats' && req.method === 'GET') { const response = await runner('/context/stats', auth.user.id, { thread:url.searchParams.get('chat') }); return json(res, 200, await response.json()); }
+      if (url.pathname === '/api/memory' && req.method === 'GET') {
+        const response = await runner('/memory', auth.user.id, { project: url.searchParams.get('project') || 'default' }); return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/background' && req.method === 'GET') {
+        const response = await runner('/background/list', auth.user.id, { id: url.searchParams.get('id') || undefined }); return json(res, 200, await response.json());
+      }
       if (url.pathname === '/api/session' && req.method === 'GET') {
         const response = await runner('/session', auth.user.id, { thread: url.searchParams.get('chat') }); return json(res, 200, await response.json());
       }
-      if (req.method !== 'POST') fail(405, '请求方法不支持');
-      writeAccess(req, auth);
-      if (url.pathname === '/api/files/upload') {
-        const input = await body(req, 512 * 1024);
-        if (typeof input.path !== 'string' || !input.path || input.path.length > 1024 || /[\u0000\r\n]/.test(input.path)) fail(422, '工作区路径无效');
-        if (typeof input.content !== 'string') fail(422, '请选择文本文件');
-        if (Buffer.byteLength(input.content, 'utf8') > 256 * 1024) fail(413, '上传文件不能超过 256 KiB');
-        if (input.content.includes('\u0000')) fail(422, '暂不支持上传二进制文件');
-        const response = await runner('/files/upload', auth.user.id, { path: input.path, content: input.content, overwrite: input.overwrite === true, revision: input.revision });
+      if (url.pathname === '/api/git/status' && req.method === 'GET') {
+        const response = await runner('/git/status', auth.user.id, { project: url.searchParams.get('project') || 'default' });
         return json(res, 200, await response.json());
       }
-      const input = await body(req);
+      if (req.method !== 'POST') fail(405, '请求方法不支持');
+      writeAccess(req, auth);
+      if(url.pathname==='/api/widgets'){
+        const input=await body(req,128*1024);if(typeof input.html!=='string'||Buffer.byteLength(input.html)>64000)fail(422,'组件内容最多 64 KiB');
+        const id=createHmac('sha256',secret).update(auth.user.id+'\0'+input.html).digest('hex');
+        for(const [key,item]of widgets)if(item.expires<Date.now())widgets.delete(key);
+        widgets.delete(id);widgets.set(id,{user:auth.user.id,html:input.html,expires:Date.now()+3600000});
+        const own=[...widgets].filter(([,item])=>item.user===auth.user.id);while(own.length>16)widgets.delete(own.shift()[0]);
+        while(widgets.size>128)widgets.delete(widgets.keys().next().value);
+        return json(res,200,{url:'/api/widget-document?id='+id});
+      }
+      if (url.pathname === '/api/files/upload') {
+        const input = await body(req, 21 * 1024 * 1024);
+        if (typeof input.path !== 'string' || !input.path || input.path.length > 1024 || /[\u0000\r\n]/.test(input.path)) fail(422, '工作区路径无效');
+        if (typeof input.content !== 'string') fail(422, '请选择文件内容');
+        const isBase64 = input.encoding === 'base64';
+        if (isBase64) {
+          const byteLen = Math.floor(input.content.length * 0.75);
+          if (byteLen > 15 * 1024 * 1024) fail(413, '上传文件不能超过 15 MiB');
+        } else {
+          if (Buffer.byteLength(input.content, 'utf8') > 256 * 1024) fail(413, '上传文件不能超过 256 KiB');
+          if (input.content.includes('\u0000')) fail(422, '暂不支持上传二进制文件');
+        }
+        const response = await runner('/files/upload', auth.user.id, {
+          path: input.path,
+          content: input.content,
+          encoding: input.encoding,
+          overwrite: input.overwrite === true,
+          revision: input.revision,
+        });
+        return json(res, 200, await response.json());
+      }
+      const input = await body(req, url.pathname === '/api/features/save' ? 256 * 1024 : url.pathname === '/api/search/settings/save' ? 512 * 1024 : 65536);
+      if (['/api/features/save','/api/features/mcp/test','/api/context/compact'].includes(url.pathname)) { const response = await runner(url.pathname.replace('/api',''), auth.user.id, {config:input.config,id:input.id,thread:input.thread,instructions:input.instructions}, AbortSignal.timeout(190000));return json(res,200,await response.json()); }
+      if (url.pathname === '/api/memory/update') {
+        const response = await runner('/memory/update', auth.user.id, { project: input.project, scope: input.scope, action: input.action, content: input.content, revision: input.revision }); return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/background/stop') {
+        const response = await runner('/background/stop', auth.user.id, { id: input.id }); return json(res, 200, await response.json());
+      }
+      if (['/api/questions/answer', '/api/steer', '/api/search/settings/save', '/api/search/test'].includes(url.pathname)) {
+          const response = await runner(url.pathname.replace('/api', ''), auth.user.id, { thread: input.thread, id: input.id, answer: input.answer, message: input.message, config: input.config, query: input.query, category:input.category,source:input.source }, AbortSignal.timeout(55000));
+        return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/approvals/resolve') {
+        const response = await runner('/approvals/resolve', auth.user.id, { thread: input.thread, id: input.id, allow: input.allow });
+        return json(res, 200, await response.json());
+      }
       if (url.pathname === '/api/quotas/save') {
         const response = await runner('/quotas/save', auth.user.id, { target: input.user_id, quota: input.quota }, AbortSignal.timeout(135000));
         return json(res, 200, await response.json());
@@ -233,12 +369,23 @@ export const server = createServer(async (req, res) => {
         const response = await runner('/files/manage', auth.user.id, { action: input.action, path: input.path, destination: input.destination });
         return json(res, 200, await response.json());
       }
-      if (['/api/providers/test', '/api/providers/save'].includes(url.pathname)) {
+      if (['/api/providers/test', '/api/providers/models', '/api/providers/save'].includes(url.pathname)) {
         const response = await runner(url.pathname.replace('/api', ''), auth.user.id, { config: input.config });
         if (url.pathname === '/api/providers/save') modelCache.expires = 0;
         return json(res, 200, await response.json());
       }
-      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete'].includes(url.pathname)) {
+      if (url.pathname === '/api/providers/delete') {
+        const response = await runner('/providers/delete', auth.user.id, { id: input.id });
+        modelCache.expires = 0;
+        return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/providers/activate') {
+        const response = await runner('/providers/activate', auth.user.id, { id: input.id, model: input.model });
+        modelCache.expires = 0;
+        return json(res, 200, await response.json());
+      }
+
+      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/chats/fork', '/api/chats/truncate', '/api/chats/project', '/api/chats/permission', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/terminal/exec', '/api/git/status', '/api/git/checkout'].includes(url.pathname)) {
         const response = await runner(url.pathname.replace('/api', ''), auth.user.id, input);
         return json(res, 200, await response.json());
       }
@@ -247,6 +394,8 @@ export const server = createServer(async (req, res) => {
       }
       if (url.pathname === '/api/prompt') {
         if (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 20000) fail(422, '请输入 1–20000 个字符的任务');
+        const validThinking = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+        const thinking = typeof input.thinking === 'string' && validThinking.includes(input.thinking) ? input.thinking : undefined;
         const abort = new AbortController();
         res.once('close', () => abort.abort());
         let checking = false;
@@ -260,7 +409,7 @@ export const server = createServer(async (req, res) => {
           finally { checking = false; }
         }, 5000);
         try {
-          const response = await runner('/prompt', auth.user.id, { message: input.message, thread: input.thread }, abort.signal);
+          const response = await runner('/prompt', auth.user.id, { message: input.message, thread: input.thread, thinking, projectId: input.projectId, permission: input.permission }, abort.signal);
           res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Accel-Buffering': 'no' });
           await pipeline(Readable.fromWeb(response.body), res);
         } finally { clearInterval(timer); await runner('/cancel', auth.user.id, {}).catch(() => {}); }
@@ -268,15 +417,22 @@ export const server = createServer(async (req, res) => {
       }
       fail(404, '接口不存在');
     }
-    let asset = assets.get(url.pathname);
-    if (!asset && /^\/js\/[a-z0-9-]+\.js$/.test(url.pathname)) asset = [url.pathname.slice(1), 'text/javascript'];
-    if (!asset || req.method !== 'GET') fail(404, '页面不存在');
-    let data;
-    try { data = await readFile(new URL('./web/' + asset[0], import.meta.url)); }
-    catch (error) { if (error.code === 'ENOENT') fail(404, '页面不存在'); throw error; }
-    const type = asset[1];
-    res.writeHead(200, { 'Content-Type': type.startsWith('text/') ? type + '; charset=utf-8' : type });
-    res.end(data);
+    if (req.method !== 'GET') fail(404, '页面不存在');
+    const asset = distAsset(url.pathname);
+    if (asset) {
+      let data;
+      try { data = await readFile(new URL(asset.rel, distRoot)); }
+      catch (error) { if (error.code === 'ENOENT') fail(404, '页面不存在'); throw error; }
+      const headers = { 'Content-Type': asset.type.startsWith('text/') || asset.type === 'application/json' ? asset.type + '; charset=utf-8' : asset.type };
+      // Hashed build assets are immutable; the shell and other files stay no-store.
+      headers['Cache-Control'] = asset.immutable ? 'public, max-age=31536000, immutable' : 'no-store';
+      res.writeHead(200, headers);
+      return res.end(data);
+    }
+    // SPA fallback: any non-asset GET renders the app shell.
+    const shell = await readFile(new URL('index.html', distRoot));
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(shell);
   } catch (error) {
     if (res.headersSent) return res.destroy();
     if (error.status === 401 && !req.url.startsWith('/api/')) return redirect(res, '/auth/login');

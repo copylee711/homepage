@@ -1,5 +1,6 @@
 """Runs INSIDE an unprivileged, networkless, bounded disposable container."""
 import base64
+import fnmatch
 import json
 import hashlib
 import os
@@ -16,8 +17,9 @@ import importlib.util
 tool_spec = importlib.util.spec_from_file_location('toolchains_worker', Path(__file__).with_name('toolchains-worker.py'))
 toolchains_worker = importlib.util.module_from_spec(tool_spec); tool_spec.loader.exec_module(toolchains_worker)
 
-LIMIT = 1024 * 1024
+LIMIT = 15 * 1024 * 1024
 MAX_WRITE = 256 * 1024
+MAX_ATTACHMENT_WRITE = 15 * 1024 * 1024
 MAX_ENTRIES = 500
 ROOT = Path(os.environ.get("SANDBOX_WORKSPACE", "/workspace")).resolve()
 
@@ -50,6 +52,8 @@ def list_workspace(raw):
     entries, truncated = [], False
     with os.scandir(target) as scan:
         for entry in scan:
+            if target == ROOT and entry.name == "lost+found":
+                continue
             try:
                 info = entry.stat(follow_symlinks=False)
             except OSError:
@@ -93,15 +97,27 @@ def read_file(raw, value):
 
 def write_file(raw, value):
     content = value.get("content")
-    if not isinstance(content, str) or content.count("\x00"):
-        raise ValueError("仅支持写入文本文件")
-    data = content.encode("utf-8")
-    if len(data) > MAX_WRITE:
-        raise ValueError("文件超过 256 KiB 上限")
+    if not isinstance(content, str):
+        raise ValueError("文件内容无效")
+    encoding = value.get("encoding")
+    if encoding == "base64":
+        try:
+            data = base64.b64decode(content)
+        except Exception:
+            raise ValueError("Base64 数据格式错误")
+        if len(data) > MAX_ATTACHMENT_WRITE:
+            raise ValueError("附件超过 15 MiB 上限")
+    else:
+        if content.count("\x00"):
+            raise ValueError("仅支持写入文本文件")
+        data = content.encode("utf-8")
+        if len(data) > MAX_WRITE:
+            raise ValueError("文件超过 256 KiB 上限")
     path = candidate(raw)
-    # The parent must exist and resolve inside /workspace; the final component is
-    # opened with O_NOFOLLOW so a symlink cannot redirect the write elsewhere.
-    parent, _ = inside(path.parent)
+    parent, _ = inside(path.parent, must_exist=False)
+    if not parent.exists():
+        parent.mkdir(parents=True, exist_ok=True)
+    parent, _ = inside(parent, must_exist=True)
     name = path.name
     if not name or name in {".", ".."} or "/" in name or "\\" in name:
         raise ValueError("文件名无效")
@@ -175,12 +191,19 @@ def bash(value):
     command = value.get("command", "")
     if not isinstance(command, str) or len(command) > 20000:
         raise ValueError("命令无效")
-    proc = subprocess.Popen(["/bin/bash", "-c", command], cwd="/workspace",
+    cwd, _ = inside(candidate(value.get("cwd") or "."))
+    if not cwd.is_dir():
+        raise ValueError("命令工作目录不存在")
+    proc = subprocess.Popen(["/bin/bash", "-c", command], cwd=str(cwd),
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=True,
-                            env={"PATH": "/workspace/.venv/bin:/workspace/.tools/bin:/workspace/.tools/node_modules/.bin:/workspace/node_modules/.bin:/usr/local/bin:/usr/bin:/bin", "HOME": "/tmp",
+                              env={"PATH": str(cwd / '.venv/bin') + ':' + str(cwd / '.tools/bin') + ':' + str(cwd / 'node_modules/.bin') + ":/workspace/.tools/bin:/workspace/.tools/node_modules/.bin:/usr/local/bin:/usr/bin:/bin", "HOME": "/tmp",
+                                 "NODE_USE_ENV_PROXY": "1", "NO_PROXY": "localhost,127.0.0.1", "no_proxy": "localhost,127.0.0.1",
+                                 "COREPACK_HOME": str(cwd / '.cache/corepack'), "PNPM_HOME": str(cwd / '.tools/bin'), "npm_config_prefix": str(cwd / '.tools'),
                                  "LANG": "C.UTF-8", "TMPDIR": "/tmp", "npm_config_cache": "/tmp/npm-cache",
                                  "PIP_CACHE_DIR": "/tmp/pip-cache", "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+                                 "npm_config_update_notifier": "false", "npm_config_fetch_retries": "1", "npm_config_fetch_timeout": "20000",
+                                 **({'npm_config_https_proxy': os.environ['HTTPS_PROXY'], 'npm_config_proxy': os.environ['HTTP_PROXY']} if 'HTTPS_PROXY' in os.environ and 'HTTP_PROXY' in os.environ else {}),
                                  **{key: os.environ[key] for key in ['HTTP_PROXY', 'HTTPS_PROXY'] if key in os.environ},
                                  **{key.lower(): os.environ[key] for key in ['HTTP_PROXY', 'HTTPS_PROXY'] if key in os.environ}})
     output = bytearray()
@@ -208,6 +231,35 @@ def bash(value):
         poll.close()
 
 
+def search_files(value):
+    root, _ = inside(candidate(value.get('path') or '.'))
+    query = value.get('query', '')
+    pattern = value.get('glob', '*')
+    if not isinstance(query, str) or len(query) > 200 or not isinstance(pattern, str) or len(pattern) > 200: raise ValueError('搜索条件无效')
+    results, scanned = [], 0
+    for directory, dirs, files in os.walk(root, followlinks=False):
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in {'node_modules', '__pycache__'}]
+        for name in files:
+            if name.startswith('.') or not fnmatch.fnmatch(name, pattern): continue
+            target = Path(directory) / name
+            if target.is_symlink(): continue
+            scanned += 1
+            if scanned > 500: return {'matches': results, 'truncated': True, 'scanned': scanned-1}
+            try:
+                _, relative = inside(target)
+                if not query:
+                    results.append({'path': relative})
+                    if len(results) >= 100: return {'matches': results, 'truncated': True, 'scanned': scanned}
+                    continue
+                with target.open('rb') as file: data = file.read(65537)
+                if len(data) > 65536 or b'\x00' in data: continue
+                for line, text in enumerate(data.decode('utf8').splitlines(), 1):
+                    if query.casefold() in text.casefold(): results.append({'path': relative, 'line': line, 'text': text[:500]})
+                    if len(results) >= 100: return {'matches': results, 'truncated': True, 'scanned': scanned}
+            except (OSError, ValueError, UnicodeError): continue
+            if len(results) >= 100: return {'matches': results, 'truncated': True, 'scanned': scanned}
+    return {'matches': results[:100], 'truncated': len(results)>100, 'scanned': scanned}
+
 def main(value):
     op = value.get("op")
     if op in {"toolchain-list", "toolchain-change"}:
@@ -215,6 +267,7 @@ def main(value):
     # Browser-visible file APIs are root-restricted inside this container.
     if op == "list":
         return list_workspace(value.get("path", ""))
+    if op == 'search-files': return search_files(value)
     if op == "file-read":
         return read_file(value.get("path", ""), value)
     if op == "file-write":

@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 let admin = true, granted = false;
-let lastRunner;
+let lastRunner, lastPrompt;
 const runner = createServer(async (req, res) => {
   let raw = ''; for await (const chunk of req) raw += chunk;
   lastRunner = { path: req.url, value: JSON.parse(raw) };
+  if (req.url === '/prompt') lastPrompt = lastRunner.value;
   assert.equal(req.headers['x-runner-secret'], 'b'.repeat(64));
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify(req.url === '/model' ? { label: 'DeepSeek V4.1 Flash' } : { ok: true, entries: [] }));
@@ -14,10 +15,11 @@ const runner = createServer(async (req, res) => {
 await new Promise(resolve => runner.listen(0, '127.0.0.1', resolve));
 process.env.RUNNER_URL = `http://127.0.0.1:${runner.address().port}`;
 const homepage = createServer(async (req, res) => {
+  let incoming='';for await(const chunk of req)incoming+=chunk;const input=JSON.parse(incoming||'{}');
   assert.equal(req.headers['x-agent-client-secret'], 'a'.repeat(64));
   res.setHeader('Content-Type', 'application/json');
   if (req.url.endsWith('/exchange')) res.end(JSON.stringify({ token: 't'.repeat(64), expires_at: Date.now() / 1000 + 3600 }));
-  else res.end(JSON.stringify({ user: { id: 'user-1', name: 'Tester' }, can_execute: admin || granted, admin }));
+  else res.end(JSON.stringify({ user: { id: input.token==='u'.repeat(64)?'user-2':'user-1', name: 'Tester' }, can_execute: admin || granted, admin }));
 });
 await new Promise(resolve => homepage.listen(0, '127.0.0.1', resolve));
 process.env.HOMEPAGE_URL = `http://127.0.0.1:${homepage.address().port}`;
@@ -66,7 +68,7 @@ test('an execution grant never grants provider or user-management privileges', a
   for (const path of ['/api/providers', '/api/grants', '/api/packages', '/api/quotas?user_id=other']) {
     assert.equal((await fetch(base + path, { headers: { cookie } })).status, 403);
   }
-  for (const path of ['/api/providers/save', '/api/providers/test', '/api/grants/save', '/api/packages/change', '/api/quotas/save']) {
+  for (const path of ['/api/providers/save', '/api/providers/test', '/api/providers/models', '/api/providers/delete', '/api/providers/activate', '/api/grants/save', '/api/packages/change', '/api/quotas/save']) {
     assert.equal((await fetch(base + path, { method: 'POST', headers: { cookie,
       Origin: 'http://127.0.0.1', 'X-CSRF-Token': me.csrf }, body: JSON.stringify({ user_id: 'other', days: 30 }) })).status, 403);
   }
@@ -82,17 +84,47 @@ test('new file/chat endpoints enforce CSRF and derive tenant identity; local mod
   const headers = { cookie, Origin: 'http://127.0.0.1', 'X-CSRF-Token': me.csrf };
   assert.equal((await fetch(base + '/api/files', { headers })).status, 200);
   assert.equal(lastRunner.value.user, createHash('sha256').update('user-1').digest('hex'));
-  for (const path of ['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/files/upload', '/api/files/manage', '/api/toolchains/change', '/api/toolchains/cancel']) {
+  assert.equal((await fetch(base + '/api/git/status?project=app', { headers })).status, 200);
+  assert.equal(lastRunner.path, '/git/status');
+  assert.equal(lastRunner.value.project, 'app');
+  for (const path of ['/api/approvals/resolve', '/api/questions/answer', '/api/steer', '/api/search/settings/save', '/api/search/test', '/api/memory/update', '/api/background/stop', '/api/features/save', '/api/features/mcp/test', '/api/context/compact', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/chats/project', '/api/chats/permission', '/api/terminal/exec', '/api/git/checkout', '/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/files/upload', '/api/files/manage', '/api/toolchains/change', '/api/toolchains/cancel']) {
     const value = JSON.stringify({ user: 'forged', thread: '11111111-1111-4111-8111-111111111111', title: 'test', content: 'test', path: 'test.txt' });
     assert.equal((await fetch(base + path, { method: 'POST', headers: { cookie }, body: value })).status, 403);
     assert.equal((await fetch(base + path, { method: 'POST', headers, body: value })).status, 200);
     assert.notEqual(lastRunner.value.user, 'forged');
   }
-  assert.equal((await fetch(base + '/js/main.js', { headers })).status, 200);
-  assert.equal((await fetch(base + '/js/missing.js', { headers })).status, 404);
-  assert.equal((await fetch(base + '/js/main.js', { redirect: 'manual' })).status, 302);
+  // The console is a Vite SPA: unknown non-asset GETs render the app shell (200),
+  // a missing hashed asset is 404, and unauthenticated page loads still redirect.
+  assert.equal((await fetch(base + '/', { headers })).status, 200);
+  assert.equal((await fetch(base + '/assets/missing-abcdef.js', { headers })).status, 404);
+  assert.equal((await fetch(base + '/', { redirect: 'manual' })).status, 302);
+  const promptHigh = await fetch(base + '/api/prompt', { method: 'POST', headers, body: JSON.stringify({ thread: '11111111-1111-4111-8111-111111111111', message: 'hello', thinking: 'high' }) });
+  assert.equal(promptHigh.status, 200);
+  await promptHigh.text();
+  assert.equal(lastPrompt.thinking, 'high');
+  const promptBad = await fetch(base + '/api/prompt', { method: 'POST', headers, body: JSON.stringify({ thread: '11111111-1111-4111-8111-111111111111', message: 'hello', thinking: 'invalid-level' }) });
+  assert.equal(promptBad.status, 200);
+  await promptBad.text();
+  assert.equal(lastPrompt.thinking, undefined);
   granted = false;
   assert.equal((await fetch(base + '/api/files', { headers })).status, 403);
   assert.equal((await fetch(base + '/api/chats/export', { headers })).status, 403);
   admin = true;
+});
+test('preview capabilities are structurally validated and sandbox active content',async()=>{
+ assert.equal((await fetch(base+'/preview/not-a-token/')).status,404);
+ assert.equal((await fetch(base+'/preview/'+'a'.repeat(43)+'/',{method:'POST'})).status,405);
+ const response=await fetch(base+'/preview/'+'a'.repeat(43)+'/');
+ assert.equal(lastRunner.path,'/background/preview');
+ assert.match(response.headers.get('content-security-policy'),/sandbox allow-scripts allow-forms/);
+ assert.doesNotMatch(response.headers.get('content-security-policy'),/allow-same-origin/);
+ assert.equal(response.headers.get('access-control-allow-origin'),'*');
+});
+
+test('interactive widgets are CSRF-protected, owner-bound and execute only in an opaque no-network frame',async()=>{
+ admin=true;const cookie='copylee_ai='+'t'.repeat(64);const me=await(await fetch(base+'/api/me',{headers:{cookie}})).json();const headers={cookie,Origin:'http://127.0.0.1','X-CSRF-Token':me.csrf};
+ assert.equal((await fetch(base+'/api/widgets',{method:'POST',headers:{cookie},body:JSON.stringify({html:'<script>test()</script>'})})).status,403);
+ const created=await fetch(base+'/api/widgets',{method:'POST',headers,body:JSON.stringify({html:'<h2>Widget</h2><script>test()</script>'})});assert.equal(created.status,200);const {url}=await created.json();
+ const doc=await fetch(base+url,{headers:{cookie}});assert.equal(doc.status,200);assert.match(doc.headers.get('content-security-policy'),/sandbox allow-scripts/);assert.match(doc.headers.get('content-security-policy'),/connect-src 'none'/);assert.doesNotMatch(doc.headers.get('content-security-policy'),/allow-same-origin/);assert.equal(doc.headers.get('x-frame-options'),'SAMEORIGIN');assert.match(await doc.text(),/<h2>Widget/);
+ assert.equal((await fetch(base+url,{headers:{cookie:'copylee_ai='+'u'.repeat(64)}})).status,404);
 });

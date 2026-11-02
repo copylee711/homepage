@@ -4,6 +4,13 @@ ai.copylee.cn {
     header Cache-Control no-store
     header Referrer-Policy no-referrer
     header X-Robots-Tag noindex
+    # Gateway validates a random task capability and applies an opaque-origin
+    # CSP sandbox. Module assets must work without parent SSO cookies.
+    handle /preview/* {
+        reverse_proxy 127.0.0.1:18081 {
+            header_up -Cookie
+        }
+    }
     handle /auth/check {
         respond 404
     }
