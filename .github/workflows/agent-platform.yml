@@ -10,6 +10,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 24 }
+      # The gateway serves the built SPA; build it so shell/asset routes match production.
+      - run: npm ci --no-audit --no-fund
+        working-directory: agent-platform/web
+      - run: npm run build
+        working-directory: agent-platform/web
       - run: node --test agent-platform/tests/*.test.mjs
       - run: docker compose --env-file .env.example config --quiet
         working-directory: agent-platform

@@ -179,7 +179,7 @@ async function syncModelsJson(config) {
       models: ordered.map(id => ({ id, reasoning: item.reasoning === true, input: ['text'], contextWindow: 128000, maxTokens: 16384 })),
     }];
   }));
-  await mkdir(root + '/agent', { recursive: true, mode: 0o600 });
+  await mkdir(root + '/agent', { recursive: true, mode: 0o700 });
   await writeFile(root + '/agent/models.json.pending', JSON.stringify({ providers }), { mode: 0o600 });
   await rename(root + '/agent/models.json.pending', root + '/agent/models.json');
 }
