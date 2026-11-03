@@ -380,6 +380,8 @@ export const useSession = defineStore('session', {
       });
       this.lastUserText = rawText || message;
       this.stopping = false;
+      // Tab hide, pagehide and beforeunload must not abort this request.
+      // The gateway renews the sandbox lease; only stop() cancels the prompt.
       const controller = new AbortController();
       this.controller = controller;
       this.busy = true;

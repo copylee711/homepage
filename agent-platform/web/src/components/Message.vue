@@ -504,4 +504,10 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
 @media (max-width: 860px) {
   .assistant-actions { opacity: 0.85; }
 }
+@media (max-width: 640px) {
+  .message { gap: 0; }
+  .message-avatar { display: none; }
+  .message-meta { min-height: 18px; margin-bottom: 2px; }
+  .user-bubble { padding: 8px 12px 7px; }
+}
 </style>

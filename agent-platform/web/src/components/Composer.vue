@@ -491,26 +491,8 @@ watch(() => session.draftText, (val) => {
 
 <template>
   <footer class="composer-area" :class="{ 'is-welcome': session.isEmpty }">
-    <form novalidate
-      class="composer"
-      :class="{ 'is-disabled': !session.canExecute, 'is-dragover': dragOver }"
-      @submit.prevent="submit"
-      @dragover.prevent="dragOver = true"
-      @dragleave="dragOver = false"
-      @drop.prevent="onDrop"
-    >
-      <!-- Hidden file input for attachment upload -->
-      <input
-        ref="fileInput"
-        type="file"
-        multiple
-        class="composer-hidden-input"
-        aria-hidden="true"
-        tabindex="-1"
-        @change="onFilesSelected"
-      />
-
-      <!-- ZCode-style persistent protrusion tab bar -->
+    <div class="composer-stack">
+      <!-- Project / branch row in normal flow so it cannot cover the transcript. -->
       <div v-if="session.canExecute" class="composer-project-tab-bar">
         <button
           type="button"
@@ -549,6 +531,25 @@ watch(() => session.draftText, (val) => {
           <Icon name="plus" :size="13" />
         </button>
       </div>
+
+    <form novalidate
+      class="composer"
+      :class="{ 'is-disabled': !session.canExecute, 'is-dragover': dragOver }"
+      @submit.prevent="submit"
+      @dragover.prevent="dragOver = true"
+      @dragleave="dragOver = false"
+      @drop.prevent="onDrop"
+    >
+      <!-- Hidden file input for attachment upload -->
+      <input
+        ref="fileInput"
+        type="file"
+        multiple
+        class="composer-hidden-input"
+        aria-hidden="true"
+        tabindex="-1"
+        @change="onFilesSelected"
+      />
 
       <!-- GPT-style quoted text cards -->
       <div v-if="textQuotes.length" class="composer-quotes">
@@ -666,6 +667,7 @@ watch(() => session.draftText, (val) => {
         <button v-if="!session.busy || text.trim()" type="submit" class="send" :disabled="!canSend" :aria-label="session.busy ? '补充指令' : '发送任务'" :title="session.busy ? '补充指令' : '发送任务'"><Icon name="arrow-up" :size="17" /></button>
       </div>
     </form>
+    </div>
     <ModelMenu v-if="modelOpen && chipEl" :anchor="chipEl" @close="modelOpen = false" />
     <DropMenu v-if="projectMenu" :anchor="projectMenu.anchor" :items="projectMenu.items" label="项目空间选项" @close="projectMenu = null" />
     <DropMenu v-if="branchMenu" :anchor="branchMenu.anchor" :items="branchMenu.items" label="Git 分支" @close="branchMenu = null" />
@@ -674,15 +676,15 @@ watch(() => session.draftText, (val) => {
 </template>
 
 <style>
-.composer-area { flex: none; padding: 6px clamp(16px, 4vw, 40px) max(10px, env(safe-area-inset-bottom)); background: linear-gradient(to top, var(--bg) 70%, transparent); transition: padding-bottom 350ms var(--ease); }
-.composer-area.is-welcome { padding-bottom: clamp(60px, calc(50dvh - 145px), 320px); }
+.composer-area { flex: none; padding: 6px clamp(16px, 4vw, 40px) max(10px, env(safe-area-inset-bottom)); background: var(--bg); transition: padding-bottom 350ms var(--ease); }
+.composer-area.is-welcome { padding-bottom: clamp(48px, calc(50dvh - 168px), 300px); }
 @media (max-width: 860px) {
-  .composer-area.is-welcome { padding-bottom: max(20px, calc(50dvh - 142px)); }
+  .composer-area.is-welcome { padding-bottom: max(12px, calc(50dvh - 168px)); }
 }
+.composer-stack { width: min(760px, 100%); margin: 0 auto; display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
 .composer {
   position: relative;
-  max-width: 760px;
-  margin: 0 auto;
+  width: 100%;
   padding: 11px 13px 9px 17px;
   border: 1px solid var(--line-2);
   border-radius: 24px;
@@ -694,15 +696,14 @@ watch(() => session.draftText, (val) => {
 .composer.is-dragover { border-color: var(--accent); background: var(--accent-softer); box-shadow: 0 0 0 3px var(--accent-soft); }
 .composer-hidden-input { display: none; }
 
-/* ZCode-style project tab protrusion (only on new session page) */
+/* Project / branch controls sit in the composer stack, above the field. */
 .composer-project-tab-bar {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 12px;
+  position: relative;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 5px;
-  z-index: 3;
+  min-height: 26px;
   pointer-events: auto;
   animation: comp-tab-in 160ms var(--ease);
 }
@@ -890,10 +891,10 @@ watch(() => session.draftText, (val) => {
   pointer-events: none;
 }
 @media (max-width: 640px) {
-  .composer-project-tab-bar {
-    left: 8px;
-    bottom: calc(100% + 6px);
-  }
+  .composer-area { padding: 4px 8px max(6px, env(safe-area-inset-bottom)); }
+  .composer { padding: 8px 10px 7px 12px; border-radius: 20px; }
+  .composer textarea { font-size: 16px; }
+  .composer-project-tab-bar { min-height: 24px; gap: 4px; }
   .composer-project-tab-btn {
     max-width: 170px;
     height: 25px;

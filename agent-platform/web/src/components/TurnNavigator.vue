@@ -20,5 +20,5 @@ function choose(index:number){(document.activeElement as HTMLElement|null)?.blur
 .turn-nav-mark { flex:none;width:10px;height:2px;border-radius:2px;background:var(--line-strong); }
 .turn-nav-item[aria-current='location'] { color:var(--text);font-weight:600; }
 .turn-nav-item[aria-current='location'] .turn-nav-mark { width:18px;background:var(--accent); }
-@media(max-width:640px){.turn-navigator{right:1px;}.turn-nav-item{height:28px;}}
+@media(max-width:640px){.turn-navigator{right:1px;max-height:calc(100% - 96px);}.turn-nav-item{height:28px;}}
 </style>
