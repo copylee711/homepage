@@ -10,7 +10,7 @@ import { post } from '../services/api';
 const session = useSession();
 const ui = useUi();
 const title = computed(() => session.currentChat?.title || (session.canExecute ? '新任务' : 'Iris'));
-const subtitle = computed(() => session.busy ? '正在生成回复…' : session.currentChat?.archived ? '已归档' : !session.canExecute ? '暂无执行权限' : '');
+const subtitle = computed(() => session.busyHere ? '正在生成回复…' : session.currentChat?.archived ? '已归档' : !session.canExecute ? '暂无执行权限' : '');
 const chatMenu = ref<{ anchor: HTMLElement; items: MenuItem[] } | null>(null);
 
 const isEditing = ref(false);
@@ -95,7 +95,6 @@ function toggleWorkspace() {
       <p v-if="subtitle">{{ subtitle }}</p>
     </div>
     <div class="topbar-actions">
-      <button v-if="session.canExecute" class="icon-button" aria-label="后台任务" title="后台任务" @click="ui.openSettings('background')"><Icon name="activity" /></button>
       <button v-if="session.canExecute" class="icon-button" aria-label="联网搜索" title="联网搜索" @click="ui.openSettings('search')"><Icon name="globe" /></button>
       <button v-if="session.canExecute" class="icon-button" :disabled="!session.currentChat" aria-label="对话操作" title="对话操作" @click="openChatMenu"><Icon name="more-horizontal" /></button>
       <button class="icon-button theme-btn" :aria-label="ui.theme === 'dark' ? '切换到浅色' : '切换到深色'" :title="ui.theme === 'dark' ? '浅色' : '深色'" @click="ui.toggleTheme($event)">
@@ -108,7 +107,23 @@ function toggleWorkspace() {
 </template>
 
 <style>
-.topbar { min-width: 0; height: var(--header-h); display: flex; align-items: center; gap: 8px; padding: 0 16px; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(18px) saturate(1.1); -webkit-backdrop-filter: blur(18px) saturate(1.1); z-index: 5; }
+.topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--header-h);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  background: transparent;
+  z-index: 10;
+  pointer-events: none;
+}
+.topbar > * {
+  pointer-events: auto;
+}
 .chat-heading { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 2px; }
 .chat-heading-row { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
 

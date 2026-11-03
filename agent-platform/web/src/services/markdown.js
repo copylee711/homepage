@@ -17,7 +17,64 @@ export function isWsFilePath(raw) {
   const v = raw.trim();
   if (!v || v.length > 500 || /\s/.test(v)) return false;
   if (v.startsWith('/workspace/') || v.startsWith('workspace/')) return true;
-  return /^[a-zA-Z0-9_\-一-龥./]+\.(?:py|js|mjs|cjs|ts|tsx|jsx|vue|html|css|scss|json|md|txt|csv|tsv|png|jpe?g|gif|svg|webp|sh|bash|yml|yaml|sql|go|rs|c|cpp|h|toml|ini|env)$/i.test(v) && !v.includes('://');
+  return /^[a-zA-Z0-9_\-一-龥./]+\.(?:docx?|xlsx?|pptx?|pdf|zip|tar|gz|7z|rar|csv|tsv|py|js|mjs|cjs|ts|tsx|jsx|vue|html|css|scss|json|md|txt|png|jpe?g|gif|svg|webp|sh|bash|yml|yaml|sql|go|rs|c|cpp|h|toml|ini|env)$/i.test(v) && !v.includes('://');
+}
+
+export function isDeliverableExt(path) {
+  return /\.(docx?|xlsx?|pptx?|pdf|zip|tar|gz|7z|rar)$/i.test(String(path || '').trim());
+}
+
+function deliverableInfo(fileName) {
+  const ext = (fileName.split('.').pop() || '').toLowerCase();
+  switch (ext) {
+    case 'docx':
+    case 'doc':
+      return { type: 'Word 文档', color: '#2b579a', bg: 'rgba(43,87,154,0.12)', badge: 'DOCX' };
+    case 'xlsx':
+    case 'xls':
+    case 'csv':
+      return { type: 'Excel 表格', color: '#217346', bg: 'rgba(33,115,70,0.12)', badge: 'XLSX' };
+    case 'pptx':
+    case 'ppt':
+      return { type: 'PPT 演示文稿', color: '#d24726', bg: 'rgba(210,71,38,0.12)', badge: 'PPTX' };
+    case 'pdf':
+      return { type: 'PDF 文档', color: '#e23838', bg: 'rgba(226,56,56,0.12)', badge: 'PDF' };
+    case 'zip':
+    case 'tar':
+    case 'gz':
+    case '7z':
+    case 'rar':
+      return { type: '压缩文件包', color: '#7c3aed', bg: 'rgba(124,58,237,0.12)', badge: 'ZIP' };
+    default:
+      return { type: '交付文件', color: '#2563eb', bg: 'rgba(37,99,235,0.12)', badge: ext.toUpperCase() || 'FILE' };
+  }
+}
+
+export function deliverableCard(doc, filePath, label) {
+  const clean = filePath.trim();
+  const name = label || clean.split('/').pop() || clean;
+  const info = deliverableInfo(clean);
+  const card = node(doc, 'div', 'md-deliverable-card');
+  card.setAttribute('data-ws-file', clean);
+  card.setAttribute('role', 'button');
+  card.setAttribute('tabindex', '0');
+  card.setAttribute('title', `点击打开交付文件：${clean}`);
+
+  const iconWrap = node(doc, 'div', 'md-deliverable-icon');
+  iconWrap.style.setProperty('--card-color', info.color);
+  iconWrap.style.setProperty('--card-bg', info.bg);
+  iconWrap.innerHTML = `<span class="md-deliverable-badge">${info.badge}</span>`;
+
+  const infoWrap = node(doc, 'div', 'md-deliverable-info');
+  const title = node(doc, 'strong', 'md-deliverable-title', name);
+  const subtitle = node(doc, 'span', 'md-deliverable-sub', info.type + ' · 可在工作区查看或下载');
+  infoWrap.append(title, subtitle);
+
+  const action = node(doc, 'span', 'md-deliverable-action');
+  action.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>打开</span>';
+
+  card.append(iconWrap, infoWrap, action);
+  return card;
 }
 
 export function safeHref(raw) {
@@ -74,11 +131,12 @@ function image(doc, raw, label) {
 }
 
 let activeFootnotes = null;
+let activeStreaming = false;
 export function renderMarkdown(value, doc = globalThis.document, options = {}) {
   const fragment = doc.createDocumentFragment();
   const raw = String(value ?? '').replace(/\r\n?/g, '\n');
   const prevCitations=activeCitations;activeCitations=new Map((options.citations||(options.sources?collectSources(raw):[])).map(s=>[s.url,s]));
-  const prevFootnotes = activeFootnotes,prevProject=activeProject;activeProject=options.project||'default';
+  const prevFootnotes = activeFootnotes,prevProject=activeProject,prevStreaming=activeStreaming;activeProject=options.project||'default';activeStreaming=options.streaming===true;
   activeFootnotes = extractFootnoteMap(raw);
   const cleaned = activeFootnotes.size ? raw.replace(FOOTNOTE_DEF, '') : raw;
   const lines = cleaned.split('\n');
@@ -98,7 +156,7 @@ export function renderMarkdown(value, doc = globalThis.document, options = {}) {
     const sources = collectSources(String(value ?? ''));
     if (sources.length) fragment.append(sourcesList(sources, doc));
   }
-  activeFootnotes = prevFootnotes;activeProject=prevProject;activeCitations=prevCitations;
+  activeFootnotes = prevFootnotes;activeProject=prevProject;activeStreaming=prevStreaming;activeCitations=prevCitations;
   return fragment;
 }
 
@@ -152,6 +210,16 @@ function sourcesList(sources, doc) {
   return wrap;
 }
 
+// Unfinished iris-widget fences are still streaming in: show a quiet placeholder
+// instead of dumping the half-written HTML source into the transcript.
+function widgetPending(doc) {
+  const wrap = node(doc, 'section', 'md-widget md-widget-pending');
+  const head = node(doc, 'div', 'md-widget-head');
+  head.append(node(doc, 'strong', null, '正在创建组件…'));
+  wrap.append(head);
+  return wrap;
+}
+
 function renderBlocks(lines, parent, doc) {
   let index = 0;
   while (index < lines.length) {
@@ -166,7 +234,14 @@ function renderBlocks(lines, parent, doc) {
       }
       const closed=index < lines.length;
       if (closed) index += 1;
-      if (/^iris-widget(\s|$)/.test(language) && closed && body.join('\n').length<=64000) { parent.append(widget(doc,body.join('\n'), info.slice('iris-widget'.length).trim())); continue; }
+      if (/^iris-widget(\s|$)/.test(language)) {
+        if (!closed) {
+          if (activeStreaming) { parent.append(widgetPending(doc)); continue; }
+        } else if (body.join('\n').length <= 64000) {
+          parent.append(widget(doc, body.join('\n'), info.slice('iris-widget'.length).trim()));
+          continue;
+        }
+      }
       parent.append(codeBlock(doc, body.join('\n'), language));
       continue;
     }
@@ -270,6 +345,7 @@ function alignment(cell) {
 function renderTable(lines, doc) {
   const header = splitRow(lines[0]), separator = splitRow(lines[1]);
   const wrap = node(doc, 'div', 'md-table-wrap');
+  const scroller = node(doc, 'div', 'md-table-scroll');
   const table = doc.createElement('table');
   const thead = doc.createElement('thead'), headRow = doc.createElement('tr');
   header.forEach((cell, index) => {
@@ -293,16 +369,29 @@ function renderTable(lines, doc) {
     tbody.append(row);
   }
   table.append(thead, tbody);
-  const bar = node(doc, 'div', 'md-table-bar');
-  const toggle = node(doc, 'button', 'md-table-wrap-toggle', '换行');
-  toggle.type = 'button';
-  toggle.dataset.tableWrap = '';
-  toggle.setAttribute('aria-pressed', 'true');
-  toggle.setAttribute('aria-label', '单元格换行');
-  bar.append(toggle);
-  const scroller = node(doc, 'div', 'md-table-scroll');
   scroller.append(table);
-  wrap.append(bar, scroller);
+
+  // Subtle wrap toggle icon: only shown when the table actually overflows the viewport.
+  const btn = node(doc, 'button', 'md-table-wrap-btn');
+  btn.type = 'button';
+  btn.dataset.tableWrap = '';
+  btn.title = '切换换行/单行显示';
+  btn.setAttribute('aria-label', '切换表格换行');
+  btn.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M3 12h14a3 3 0 0 1 0 6h-4M16 15l-3 3 3 3"/></svg>';
+
+  const checkOverflow = () => {
+    if (!scroller.isConnected) return;
+    const overflows = scroller.scrollWidth > scroller.clientWidth + 2;
+    btn.style.display = overflows ? 'inline-flex' : 'none';
+  };
+  queueMicrotask(() => {
+    checkOverflow();
+    if (typeof ResizeObserver !== 'undefined' && scroller.isConnected) {
+      new ResizeObserver(checkOverflow).observe(scroller);
+    }
+  });
+
+  wrap.append(btn, scroller);
   return wrap;
 }
 
@@ -407,6 +496,16 @@ export function renderInline(value, parent, doc = globalThis.document, depth = 0
   let index = 0;
   while (index < value.length) {
     const character = value[index];
+    // LaTeX delimiters must be checked before Markdown backslash escapes, which
+    // would otherwise swallow \( as a literal paren.
+    if (value.startsWith('\\(', index)) {
+      const end = value.indexOf('\\)', index + 2);
+      if (end > index) { flush(); const span = node(doc, 'span', 'md-math-inline'); renderMathInto(span, value.slice(index + 2, end), false); parent.append(span); index = end + 2; continue; }
+    }
+    if (value.startsWith('\\[', index)) {
+      const end = value.indexOf('\\]', index + 2);
+      if (end > index) { flush(); const span = node(doc, 'span', 'md-math-inline'); renderMathInto(span, value.slice(index + 2, end), true); parent.append(span); index = end + 2; continue; }
+    }
     if (character === '\\' && index + 1 < value.length && /[\\`*_{}[\]()#+\-.!|~>]/.test(value[index + 1])) {
       buffer += value[index + 1]; index += 2; continue;
     }
@@ -431,7 +530,7 @@ export function renderInline(value, parent, doc = globalThis.document, depth = 0
         continue;
       }
     }
-    // Inline math $…$ / \(…\): opener followed by non-space, closer preceded by non-space, not a price.
+    // Inline math $…$: opener followed by non-space, closer preceded by non-space, not a price.
     if (character === '$' && value[index + 1] !== '$' && value[index + 1] !== undefined && !/\s/.test(value[index + 1])) {
       let end = -1;
       for (let i = index + 1; i < value.length; i += 1) {
@@ -445,10 +544,6 @@ export function renderInline(value, parent, doc = globalThis.document, depth = 0
         parent.append(span); index = end + 1; continue;
       }
     }
-    if (value.startsWith('\\(', index)) {
-      const end = value.indexOf('\\)', index + 2);
-      if (end > index) { flush(); const span = node(doc, 'span', 'md-math-inline'); renderMathInto(span, value.slice(index + 2, end), false); parent.append(span); index = end + 2; continue; }
-    }
     if (character === '!' && value[index + 1] === '[') {
       const found = linkAt(value, index, true);
       if (found) {
@@ -460,11 +555,28 @@ export function renderInline(value, parent, doc = globalThis.document, depth = 0
     if (character === '[') {
       const found = linkAt(value, index, false);
       if (found) {
-        flush();
         const citeMatch = found.label.trim().match(/^\[?\^?(\d{1,3})\]?$/);
-        const source=activeCitations?.get(safeHref(found.href));
-        if(source || (citeMatch && safeHref(found.href))){
-          parent.append(citationBadge(doc,source||{label:citeMatch[1],url:found.href,title:found.title||hostOf(found.href),host:hostOf(found.href)}));
+        const source = activeCitations?.get(safeHref(found.href));
+        if (source || (citeMatch && safeHref(found.href))) {
+          // Strip redundant surrounding parentheses: e.g. `( [10](...) )` or `（[10](...)）`
+          const leftParen = buffer.match(/[（(]\s*$/);
+          if (leftParen) {
+            buffer = buffer.slice(0, -leftParen[0].length);
+          }
+          flush();
+          parent.append(citationBadge(doc, source || { label: citeMatch[1], url: found.href, title: found.title || hostOf(found.href), host: hostOf(found.href) }));
+          let nextIndex = found.end;
+          if (leftParen) {
+            const after = value.slice(nextIndex).match(/^\s*[）)]/);
+            if (after) nextIndex += after[0].length;
+          }
+          index = nextIndex;
+          continue;
+        } else if (isDeliverableExt(found.href) || isDeliverableExt(found.label)) {
+          flush();
+          parent.append(deliverableCard(doc, found.href, found.label));
+          index = found.end;
+          continue;
         } else {
           const anchor = link(doc, found.href, '', 'md-link');
           if (found.title) anchor.setAttribute('title', found.title);
@@ -475,10 +587,20 @@ export function renderInline(value, parent, doc = globalThis.document, depth = 0
       }
       const fnMatch = value.slice(index).match(/^\[\^?(\d{1,3})\]/);
       if (fnMatch && activeFootnotes && activeFootnotes.has(fnMatch[1])) {
+        const leftParen = buffer.match(/[（(]\s*$/);
+        if (leftParen) {
+          buffer = buffer.slice(0, -leftParen[0].length);
+        }
         flush();
         const fn = activeFootnotes.get(fnMatch[1]);
-        parent.append(citationBadge(doc,activeCitations?.get(fn.url)||fn));
-        index += fnMatch[0].length; continue;
+        parent.append(citationBadge(doc, activeCitations?.get(fn.url) || fn));
+        let nextIndex = index + fnMatch[0].length;
+        if (leftParen) {
+          const after = value.slice(nextIndex).match(/^\s*[）)]/);
+          if (after) nextIndex += after[0].length;
+        }
+        index = nextIndex;
+        continue;
       }
     }
     if (character === '<') {

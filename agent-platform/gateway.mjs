@@ -1,3 +1,4 @@
+import { promptInput } from './prompt-input.mjs';
 import { createServer } from 'node:http';
 import { createHmac, createHash, randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -448,10 +449,10 @@ export const server = createServer(async (req, res) => {
         return;
       }
       if (url.pathname === '/api/prompt') {
-        if (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 20000) fail(422, '请输入 1–20000 个字符的任务');
+        const prompt=promptInput(input);
         const validThinking = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
         const thinking = typeof input.thinking === 'string' && validThinking.includes(input.thinking) ? input.thinking : undefined;
-        const images = Array.isArray(input.images) ? input.images.filter(img => img && typeof img.data === 'string' && typeof img.mimeType === 'string' && img.data.length <= 12 * 1024 * 1024) : undefined;
+        const images = prompt.images;
         const turn = cloudTurns.begin({ userId: auth.user.id, token: auth.token, thread: input.thread });
         let response;
         try {

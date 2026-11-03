@@ -36,12 +36,12 @@ export function normalizeSearch(value = {}, previous = {}) {
   });
   const engine=value.engine||'auto';if(engine!=='auto'&&!ids.has(engine))fail(422,'首选搜索来源不存在');
   const imageEngine=value.imageEngine||'auto';if(imageEngine!=='auto'&&!sources.some(s=>s.id===imageEngine&&s.category==='image'))fail(422,'图片来源不存在');
-  return {imageEngine,catalogVersion:2,enabled:value.enabled!==false,engine,language:value.language||'zh-CN',count:value.count||5,sources};
+  return {imageEngine,catalogVersion:3,enabled:value.enabled!==false,engine,language:value.language||'zh-CN',count:value.count||5,sources};
 }
 export function publicSearch(config) { return {...config,sources:config.sources.map(({apiKey,...source})=>({...source,hasKey:!!apiKey}))}; }
 export class SearchSettings {
   constructor(root='/data/search-settings'){this.root=root;this.queues=new Map();}
   file(user){if(!/^[a-f0-9]{64}$/.test(user))fail(422,'用户标识无效');return this.root+'/'+user+'.json';}
-  async get(user){try{const config=JSON.parse(await readFile(this.file(user),'utf8'));if(config.catalogVersion!==2){const ids=new Set(config.sources?.map(s=>s.id));config.sources=[...(config.sources||[]),...SEARCH_PRESETS.filter(s=>!ids.has(s.id)).map(s=>({...s,enabled:s.category==='image'&&s.enabled}))];}return normalizeSearch(config,config);}catch(e){if(e.code==='ENOENT')return normalizeSearch();throw e;}}
+  async get(user){try{const config=JSON.parse(await readFile(this.file(user),'utf8'));if(config.catalogVersion!==2&&config.catalogVersion!==3){const ids=new Set(config.sources?.map(s=>s.id));config.sources=[...(config.sources||[]),...SEARCH_PRESETS.filter(s=>!ids.has(s.id)).map(s=>({...s,enabled:s.category==='image'&&s.enabled}))];}if(config.catalogVersion!==3){const exa=config.sources?.find(s=>s.id==='exa-free');if(exa){exa.enabled=true;if((config.engine||'auto')==='auto')config.sources=[exa,...config.sources.filter(s=>s!==exa)];}}return normalizeSearch(config,config);}catch(e){if(e.code==='ENOENT')return normalizeSearch();throw e;}}
   async save(user,value){const previous=this.queues.get(user)||Promise.resolve();const work=previous.catch(()=>{}).then(async()=>{const next=normalizeSearch(value,await this.get(user)),file=this.file(user);await mkdir(this.root,{recursive:true,mode:0o700});const temp=file+'.'+randomUUID();await writeFile(temp,JSON.stringify(next),{mode:0o600});await rename(temp,file);return publicSearch(next);});this.queues.set(user,work);try{return await work;}finally{if(this.queues.get(user)===work)this.queues.delete(user);}}
 }

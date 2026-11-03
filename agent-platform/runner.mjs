@@ -1,3 +1,5 @@
+import { promptInput } from './prompt-input.mjs';
+import { WebSession } from './web-session.mjs';
 import { FeatureStore, publicFeatures, mcpToolName } from './features.mjs';
 import { McpConnections } from './mcp.mjs';
 import { MemoryStore, memoryContext } from './memory.mjs';
@@ -163,7 +165,7 @@ class Pi {
     if (permission?.execution && ['auto', 'edit', 'ask'].includes(permission.execution)) {
       this.execution = permission.execution;
     }
-    this.busy = true; this.stopping = false; this.lastRenew = Date.now();
+    this.busy = true; this.webSession = new WebSession(); this.stopping = false; this.lastRenew = Date.now();
     this.fanout = new TurnFanout(); this.persisted = 0; this.disk = Promise.resolve();
     this.turnFile = await resetTurnLog(this.user, this.thread);
     // The HTTP response is only a subscriber. Its close must not kill Pi.
@@ -323,15 +325,21 @@ export const server = createServer(async (req, res) => {
         }
         fail(404, 'MCP 工具未启用');
       }
-      if (req.url === '/runtime/context') return json(res, 200, { context: memoryContext(await memories.read(pi.user, pi.projectId)) });
+      if (req.url === '/runtime/context') {const item=(await chats.loadMeta(pi.user)).chats[pi.thread];return json(res,200,{context:memoryContext(await memories.read(pi.user,pi.projectId))+(item?.titleSource==='pending'?'\nThis is a new conversation: call set_chat_title early with a concise summary of the actual task, rather than copying user text.':'')});}
       if (req.url === '/runtime/memory/read') return json(res, 200, await memories.read(pi.user, pi.projectId));
       if (req.url === '/runtime/memory/update') return json(res, 200, await memories.update(pi.user, pi.projectId, await body(req)));
       if (req.url === '/runtime/policy') return json(res, 200, { execution: pi.execution });
+      if(req.url==='/runtime/chat/title'){
+        const input=await body(req);const result=await chats.autoTitle(pi.user,pi.thread,input.title);
+        if(!result.skipped&&pi.output)pi.output.write(JSON.stringify({type:'chat_title',thread:pi.thread,title:result.title})+'\n');
+        return json(res,200,result);
+      }
       if (req.url === '/runtime/search') {
         const input = await body(req), config = await searchSettings.get(pi.user);
         if (!config.enabled) fail(403, '联网搜索已在设置中关闭');
-        return json(res, 200, await sandboxTool(pi.lease, { op: 'web-search', ...config, engine:input.category==='image'?config.imageEngine:config.engine, category: input.category === 'image' ? 'image' : 'web', query: input.query, count: input.count ?? config.count }, 45000));
+        return json(res, 200, await pi.webSession.run('search',(input.category||'web')+':'+input.query,()=>sandboxTool(pi.lease, { op: 'web-search', ...config, engine:input.category==='image'?config.imageEngine:config.engine, category: input.category === 'image' ? 'image' : 'web', query: input.query, count: input.count ?? config.count }, 45000)));
       }
+      if(req.url==='/runtime/fetch'){const input=await body(req);return json(res,200,await pi.webSession.run('fetch',input.url,()=>sandboxTool(pi.lease,{op:'web-fetch',url:input.url},35000)));}
       fail(404, '接口不存在');
     }
     if (!equal(req.headers['x-runner-secret'], secret)) fail(401, '服务认证失败');
@@ -641,10 +649,10 @@ export const server = createServer(async (req, res) => {
       return;
     }
     if (req.url === '/prompt') {
-      if (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 20000) fail(422, '任务内容无效');
+      const prompt=promptInput(input);
       await chats.initialize(input.user, input.thread, input.projectId, input.permission);
       const pi = await instance(input.user, input.thread);
-      return await pi.prompt(res, input.message, input.thinking, input.images, input.permission);
+      return await pi.prompt(res, prompt.message, input.thinking, prompt.images, input.permission);
     }
     fail(404, '接口不存在');
   } catch (error) {

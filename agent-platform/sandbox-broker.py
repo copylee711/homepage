@@ -66,7 +66,7 @@ def cancel(user):
 
 
 def workspace(user):
-    """A fixed 256 MiB ext4 image per user bounds both bytes and inodes persistently."""
+    """A quota-sized ext4 image per user bounds both bytes and inodes persistently."""
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     image, mount = ROOT / (user + ".img"), ROOT / user
     with guard:
@@ -100,7 +100,7 @@ def run_tool(user, value, lease):
             if value.get('op') == 'image-fetch': return web_access.fetch_public(value.get('url'),image=True,use_proxy=value.get('useProxy',True))
             if value.get('op') == 'mcp-request': return web_search.mcp_request(value, web_access.fetch_public)
             if value.get('op') == 'web-search': return web_search.search_public(value, web_access.fetch_public)
-            return web_access.fetch_public(value.get("url"))
+            return web_access.fetch_resilient(value.get("url"))
         finally:
             web_slots.release()
     if value.get("op") not in {"read", "write", "mkdir", "access", "bash", "list", "search-files", "file-read", "file-write", "file-manage", "toolchain-list", "toolchain-change"}:
@@ -134,7 +134,7 @@ def run_tool(user, value, lease):
                 "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
                 "--memory", str(quota['memory_mib']) + 'm', "--memory-swap", str(quota['memory_mib']) + 'm', "--cpus", str(quota['cpus']), "--pids-limit", str(quota['pids']),
                 "--ulimit", "nofile=256:256", "--ulimit", f"fsize={quota['disk_mib'] * 1048576}:{quota['disk_mib'] * 1048576}",
-                "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777", "--shm-size", "8m",
+                "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,mode=1777", "--shm-size", "8m",
                 *project_policy.mount_arguments(mount, leases[lease].get("policy")),
                 "--env", "HOME=/tmp", "--env", "PI_CODING_AGENT_DIR=/tmp/pi",
                 "--env", "HTTP_PROXY=http://192.168.85.2:3128", "--env", "HTTPS_PROXY=http://192.168.85.2:3128",

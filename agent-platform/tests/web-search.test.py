@@ -65,4 +65,21 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(len(parser.images),1);self.assertEqual(parser.images[0]['url'],'https://mathworld.wolfram.com/images/ellipse.svg')
         svg=access.sanitize_svg(b'<svg xmlns="http://www.w3.org/2000/svg" onload="bad()"><script>bad()</script><foreignObject/><image href="https://private.example"/><path d="M0 0L1 1"/></svg>').decode()
         self.assertNotIn('script',svg);self.assertNotIn('foreignObject',svg);self.assertNotIn('onload',svg);self.assertNotIn('private.example',svg);self.assertIn('path',svg)
+    def test_irrelevant_dictionary_and_site_mismatch_do_not_count_as_success(self):
+        with self.assertRaises(ValueError):search.relevant_results('今日热点 新闻 2026', [{'url':'https://translate.google.cn/','title':'Google'}])
+        with self.assertRaises(ValueError):search.relevant_results('site:news.cn today', [{'url':'https://elsewhere.example/news','title':'News'}])
+        self.assertEqual(len(search.relevant_results('latest 是什么意思',[{'url':'https://www.iciba.com/word/latest','title':'latest meaning'}])),1)
+    def test_read_only_network_failover_preserves_post_non_replay(self):
+        from unittest.mock import patch
+        import os
+        spec=importlib.util.spec_from_file_location('access',Path(__file__).parents[1]/'web-access.py');access=importlib.util.module_from_spec(spec);spec.loader.exec_module(access)
+        calls=[]
+        def fetch(url,**kw):
+            calls.append(kw['use_proxy'])
+            if kw['use_proxy']:raise ValueError('route down')
+            return {'status':200,'text':'verified'}
+        with patch.dict(os.environ,{'SANDBOX_WEB_PROXY':'127.0.0.1:1234'}),patch.object(access,'fetch_public',fetch):
+            self.assertEqual(access.fetch_resilient('https://example.com')['text'],'verified');self.assertEqual(calls,[True,False]);calls.clear()
+            with self.assertRaises(ValueError):access.fetch_resilient('https://example.com',request={'method':'POST'})
+            self.assertEqual(calls,[True])
 if __name__=='__main__':unittest.main()

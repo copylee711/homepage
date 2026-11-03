@@ -54,6 +54,17 @@ function isImage(name: string) {
   return /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name || '');
 }
 
+function previewRef(r: any) {
+  if (!isImage(r.name)) return;
+  const url = r.previewUrl || (r.path ? '/api/files/download?path=' + encodeURIComponent(r.path) + '&inline=1' : '');
+  if (url) ui.openLightbox({ url, name: r.name });
+}
+
+function refTitle(r: any) {
+  if (isImage(r.name)) return '点击放大预览' + (r.inline || !r.path ? '' : ' · /workspace/' + r.path);
+  return r.inline ? r.name : '/workspace/' + r.path;
+}
+
 const REF_BLOCK_RE = /^【工作区引用文件】\n((?:- `?\/workspace\/[^\n]+`?\n?)+)\n*/;
 const QUOTE_BLOCK_RE = /(?:^|\n\n)【引用内容】\n((?:> [^\n]+\n?)+)/;
 
@@ -72,14 +83,34 @@ function refRecord(raw: any) {
 }
 const parsedUserRefs = computed(() => {
   if (Array.isArray(props.message?.refs) && props.message.refs.length) {
-    return props.message.refs.map(refRecord).filter((r: { path: string }) => r.path);
+    return props.message.refs.map((r: any) => {
+      const p = typeof r === 'string' ? r : r.path;
+      const clean = String(p || '').replace(/^\/workspace\/?/, '');
+      const inline = typeof r === 'object' && r.inline === true;
+      return {
+        path: clean,
+        name: (typeof r === 'object' && r.name) || clean.split('/').pop() || clean,
+        isDir: (typeof r === 'object' && r.type === 'dir') || clean.endsWith('/'),
+        dir: inline || !clean.includes('/') ? '' : clean.split('/').slice(0, -1).join('/'),
+        inline,
+        previewUrl: typeof r === 'object' ? r.previewUrl : undefined,
+      };
+    });
   }
   const match = userRawText.value.match(REF_BLOCK_RE);
   if (!match) return [];
   return match[1].split('\n').filter(Boolean).map((l: string) => {
     const rawPath = l.replace(/^-\s*`?/, '').replace(/`?\s*$/, '');
-    return refRecord(rawPath);
-  }).filter((r: { path: string }) => r.path);
+    const clean = rawPath.replace(/^\/workspace\/?/, '');
+    return {
+      path: clean,
+      name: clean.split('/').pop() || clean,
+      isDir: clean.endsWith('/'),
+      dir: clean.includes('/') ? clean.split('/').slice(0, -1).join('/') : '',
+      inline: false,
+      previewUrl: undefined,
+    };
+  });
 });
 const inlineImages = computed(() => {
   const content = props.message?.content;
@@ -318,9 +349,12 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
             v-for="r in fileAttachments"
             :key="r.path"
             class="user-bubble-chip"
-            :title="'/workspace/' + r.path"
+            :class="{ 'is-image': isImage(r.name) }"
+            :title="refTitle(r)"
+            @click="previewRef(r)"
           >
-            <Icon :name="r.isDir ? 'folder' : 'file'" :size="12" />
+            <img v-if="r.previewUrl" :src="r.previewUrl" alt="" class="user-chip-thumb" />
+            <Icon v-else :name="isImage(r.name) ? 'image' : (r.isDir ? 'folder' : 'file')" :size="12" />
             <span class="user-chip-name">{{ r.name }}</span>
             <span v-if="r.dir" class="user-chip-dir">{{ r.dir }}</span>
           </span>
@@ -478,6 +512,7 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
 .user-bubble-chip.is-image { cursor: pointer; }
 .user-bubble-chip.is-image:hover { background: color-mix(in srgb, var(--text) 14%, transparent); }
 .user-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-chip-thumb { width: 16px; height: 16px; flex: none; border-radius: 4px; object-fit: cover; }
 .user-chip-dir { color: var(--muted); font-size: 10px; opacity: 0.75; }
 
 /* Assistant footer: quiet action row plus a single muted meta line */

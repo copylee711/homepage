@@ -182,3 +182,18 @@ def fetch_public(raw, raw_html=False, use_proxy=True, request=None, image=False)
         finally:
             connection.close()
     raise ValueError("网页跳转次数过多")
+
+def fetch_resilient(raw, **options):
+    """Only GET reads fail over; never replay credentialed POST/paid API calls.
+    Every route still goes through DNS validation and IP-pinned TLS.
+    """
+    primary=options.pop('use_proxy',True)
+    try:
+        result=fetch_public(raw,use_proxy=primary,**options)
+        if result.get('status',200)>=400: raise ValueError('来源 HTTP '+str(result['status']))
+        return result
+    except (ValueError,OSError):
+        if options.get('request') or not os.environ.get('SANDBOX_WEB_PROXY'): raise
+        result=fetch_public(raw,use_proxy=not primary,**options)
+        if result.get('status',200)>=400: raise ValueError('来源 HTTP '+str(result['status']))
+        return result

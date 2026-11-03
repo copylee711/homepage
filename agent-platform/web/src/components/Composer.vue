@@ -56,15 +56,20 @@ watch(() => session.chatId, () => {
 const workspaceRefs = computed(() => session.workspaceRefs || []);
 const textQuotes = computed(() => session.textQuotes || []);
 
-const canSend = computed(() => !session.stopping && session.canExecute && (text.value.trim().length > 0 || workspaceRefs.value.length > 0 || textQuotes.value.length > 0));
+const canSend = computed(() => !session.stopping && !session.busyElsewhere && session.canExecute && (text.value.trim().length > 0 || workspaceRefs.value.length > 0 || textQuotes.value.length > 0));
 const placeholder = computed(() => {
   if (!session.canExecute) return '此账户尚未获得 Iris 执行权限';
-  if (session.busy) return '补充要求，发送后在下一个处理点接收…';
+  if (session.busyElsewhere) return '另一个会话正在生成回复，完成或停止后可继续发送…';
+  if (session.busyHere) return '补充要求，发送后在下一个处理点接收…';
   if (textQuotes.value.length > 0) return '描述针对引用内容的要求，或直接发送…';
   if (workspaceRefs.value.length > 0) return '描述针对引用文件的要求，或直接发送…';
   return '描述任务，或直接粘贴图片、拖入文件…';
 });
-const stateText = computed(() => session.busy ? (session.stopping ? '正在停止任务…' : 'Iris 正在处理任务…') : (session.canExecute ? '' : '尚未开通执行权限'));
+const stateText = computed(() => {
+  if (session.busyElsewhere) return '另一会话正在生成回复…';
+  if (session.busyHere) return session.stopping ? '正在停止任务…' : 'Iris 正在处理任务…';
+  return session.canExecute ? '' : '尚未开通执行权限';
+});
 const effortLabel = computed(() => ({ off: '', low: '低', medium: '中', high: '高', max: '极高' }[ui.thinkingLevel] || ''));
 
 const currentScope = computed(() => session.currentChatPermission.scope || 'project_only');
@@ -79,9 +84,13 @@ function autosize() {
 function onInput() { autosize(); }
 
 async function submit() {
+  if (session.busyElsewhere) {
+    ui.toast('另一个会话正在生成回复，完成或停止后再发送', { tone: 'warning' });
+    return;
+  }
   if (!canSend.value) return;
   const value = text.value;
-  if (session.busy) {
+  if (session.busyHere) {
     try { await session.steer(value); text.value = ''; await nextTick(); autosize(); }
     catch(e: any) { ui.toast(e.message || '补充指令失败', { tone: 'error' }); }
     return;
@@ -114,15 +123,44 @@ function isImage(name: string) {
   return /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name || '');
 }
 
+function chipPreviewUrl(r: any) {
+  // Inline pasted images live only in memory, so preview them straight from the
+  // data: URL; workspace files are served by the gateway.
+  if (r.base64 && r.mimeType) return `data:${r.mimeType};base64,${r.base64}`;
+  if (r.inline && r.previewUrl) return r.previewUrl;
+  if (r.path) return '/api/files/download?path=' + encodeURIComponent(r.path) + '&inline=1';
+  return r.previewUrl;
+}
+
 function onChipClick(r: any) {
   if (r.previewUrl || isImage(r.name) || r.type === 'image') {
     // Prefer the uploaded copy: the app CSP allows 'self' and data:, not blob:.
     ui.openLightbox({
-      url: '/api/files/download?path=' + encodeURIComponent(r.path) + '&inline=1',
+      url: chipPreviewUrl(r),
       name: r.name,
       size: r.size,
     });
   }
+}
+
+// Pasted images are sent to the model as inline content parts instead of being
+// copied into the workspace. Keep the whole payload under the gateway's prompt
+// limit (15 MiB), with room for base64 inflation and the prompt text.
+const INLINE_IMAGE_BUDGET = 10 * 1024 * 1024;
+const IMAGE_MIME_EXT: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+  'image/bmp': '.bmp',
+  'image/svg+xml': '.svg',
+};
+function imageExt(file: File) {
+  const declared = (file.type || '').toLowerCase();
+  if (IMAGE_MIME_EXT[declared]) return IMAGE_MIME_EXT[declared];
+  const match = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.exec(file.name || '');
+  return match ? '.' + match[1].toLowerCase().replace('jpeg', 'jpg') : '.png';
 }
 
 // Small inline thumbnail for the composer chip. A blob: URL is blocked by the
@@ -132,7 +170,7 @@ async function makeThumb(file: File): Promise<string | undefined> {
   if (!file.type.startsWith('image/')) return undefined;
   try {
     const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, 160 / Math.max(bitmap.width, bitmap.height));
+    const scale = Math.min(1, 512 / Math.max(bitmap.width, bitmap.height));
     const width = Math.max(1, Math.round(bitmap.width * scale));
     const height = Math.max(1, Math.round(bitmap.height * scale));
     const canvas = document.createElement('canvas');
@@ -154,15 +192,38 @@ function triggerUpload() {
 async function uploadFiles(files: File[]) {
   if (!files || !files.length || !session.canExecute) return;
   uploading.value = true;
-  let count = 0;
+  let uploaded = 0;
+  let inlineBytes = session.workspaceRefs.reduce((n, r) => n + (r.inline ? (r.size || 0) : 0), 0);
   for (const file of files) {
     if (file.size > 15 * 1024 * 1024) {
       ui.toast(`文件 ${file.name} 超过 15MB 上限`, { tone: 'error' });
       continue;
     }
     try {
-      const base64 = await fileToBase64(file);
       const isImg = isImage(file.name) || file.type.startsWith('image/');
+      if (isImg) {
+        // Model inputs do not need a workspace copy: keep the image in memory and
+        // ship it with the prompt, so nothing is left behind in the project.
+        if (inlineBytes + file.size > INLINE_IMAGE_BUDGET) {
+          ui.toast('图片总大小超过 10MB，请分批发送或改用文件上传', { tone: 'error' });
+          continue;
+        }
+        const ext = imageExt(file);
+        const base64 = await fileToBase64(file);
+        inlineBytes += file.size;
+        session.addWorkspaceRef({
+          path: `pasted-${crypto.randomUUID().slice(0, 8)}${ext}`,
+          name: isImage(file.name) ? file.name : `图片-${Date.now().toString(36)}${ext}`,
+          type: 'image',
+          size: file.size,
+          previewUrl: await makeThumb(file),
+          base64,
+          mimeType: file.type || 'image/png',
+          inline: true,
+        });
+        continue;
+      }
+      const base64 = await fileToBase64(file);
       let safeName = file.name.replace(/[^\w\.\-一-龥]/g, '_');
       if (safeName.startsWith('image.') || safeName === 'image.png') {
         safeName = `img_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}.png`;
@@ -179,20 +240,17 @@ async function uploadFiles(files: File[]) {
       session.addWorkspaceRef({
         path: targetPath,
         name: file.name,
-        type: isImg ? 'image' : 'file',
+        type: 'file',
         size: file.size,
-        previewUrl: isImg ? await makeThumb(file) : undefined,
-        base64: isImg ? base64 : undefined,
-        mimeType: isImg ? (file.type || 'image/png') : undefined,
       });
-      count++;
+      uploaded++;
     } catch (err: any) {
       ui.toast(`上传 ${file.name} 失败: ${err.message || '网络错误'}`, { tone: 'error' });
     }
   }
   uploading.value = false;
-  if (count > 0) {
-    ui.toast(count === 1 ? '附件已上传到工作区' : `已上传 ${count} 个附件到工作区`, { tone: 'success' });
+  if (uploaded > 0) {
+    ui.toast(uploaded === 1 ? '附件已上传到工作区' : `已上传 ${uploaded} 个附件到工作区`, { tone: 'success' });
   }
 }
 
@@ -582,7 +640,7 @@ watch(() => session.draftText, (val) => {
           :key="r.path"
           class="composer-chip"
           :class="{ 'is-image': isImage(r.name) || r.type === 'image' || r.previewUrl }"
-          :title="(isImage(r.name) || r.type === 'image' || r.previewUrl) ? '点击放大预览 · /workspace/' + r.path : '/workspace/' + r.path"
+          :title="r.inline ? '点击放大预览' : ((isImage(r.name) || r.type === 'image' || r.previewUrl) ? '点击放大预览 · /workspace/' + r.path : '/workspace/' + r.path)"
           @click="onChipClick(r)"
         >
           <span class="composer-chip-icon">
@@ -591,7 +649,7 @@ watch(() => session.draftText, (val) => {
           </span>
           <span class="composer-chip-name">{{ r.name }}</span>
           <span v-if="r.size" class="composer-chip-size">{{ formatBytes(r.size) }}</span>
-          <span v-else-if="pathDir(r.path)" class="composer-chip-dir">{{ pathDir(r.path) }}</span>
+          <span v-else-if="!r.inline && pathDir(r.path)" class="composer-chip-dir">{{ pathDir(r.path) }}</span>
           <button
             type="button"
             class="composer-chip-remove"
@@ -653,7 +711,7 @@ watch(() => session.draftText, (val) => {
           <Icon name="chevron-down" :size="12" />
         </button>
         <button
-          v-if="session.busy"
+          v-if="session.busyHere"
           type="button"
           class="stop"
           :class="{ 'is-stopping': session.stopping }"
@@ -664,7 +722,7 @@ watch(() => session.draftText, (val) => {
         >
           <span class="stop-square" aria-hidden="true"></span>
         </button>
-        <button v-if="!session.busy || text.trim()" type="submit" class="send" :disabled="!canSend" :aria-label="session.busy ? '补充指令' : '发送任务'" :title="session.busy ? '补充指令' : '发送任务'"><Icon name="arrow-up" :size="17" /></button>
+        <button v-if="!session.busyHere || text.trim()" type="submit" class="send" :disabled="!canSend" :aria-label="session.busyHere ? '补充指令' : '发送任务'" :title="session.busyHere ? '补充指令' : '发送任务'"><Icon name="arrow-up" :size="17" /></button>
       </div>
     </form>
     </div>
@@ -676,10 +734,14 @@ watch(() => session.draftText, (val) => {
 </template>
 
 <style>
-.composer-area { flex: none; padding: 6px clamp(16px, 4vw, 40px) max(10px, env(safe-area-inset-bottom)); background: transparent; transition: padding-bottom 350ms var(--ease); }
-.composer-area.is-welcome { padding-bottom: clamp(48px, calc(50dvh - 168px), 300px); }
+.composer-area { flex: none; padding: 6px clamp(16px, 4vw, 40px) max(10px, env(safe-area-inset-bottom)); background: transparent; transition: padding-bottom 240ms var(--ease); }
+.composer-area.is-welcome { padding-bottom: clamp(60px, calc(50dvh - 145px), 320px); }
+.composer-area.is-welcome:focus-within { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
 @media (max-width: 860px) {
-  .composer-area.is-welcome { padding-bottom: max(12px, calc(50dvh - 168px)); }
+  /* On mobile, completely remove the slow padding-bottom transition to eliminate keyboard jitter / violent bounce */
+  .composer-area { transition: none !important; }
+  .composer-area.is-welcome { padding-bottom: clamp(20px, 18vh, 100px); }
+  .composer-area.is-welcome:focus-within { padding-bottom: max(8px, env(safe-area-inset-bottom)) !important; }
 }
 .composer-stack { width: min(760px, 100%); margin: 0 auto; display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
 .composer {

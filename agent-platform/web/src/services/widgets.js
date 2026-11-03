@@ -44,12 +44,25 @@ export function widget(doc, html, label) {
   const wrap=doc.createElement('section');wrap.className='md-widget';wrap.dataset.widgetSource=html;
   const heading=doc.createElement('div');heading.className='md-widget-head';
   const title=doc.createElement('strong');title.textContent=widgetTitle(html, label);heading.append(title);
-  const refresh=doc.createElement('button');refresh.type='button';refresh.className='btn btn-quiet btn-sm';refresh.dataset.widgetAction='refresh';refresh.textContent='刷新';heading.append(refresh);
-  const frame=doc.createElement('iframe');frame.title=title.textContent;
-  // A short placeholder. A 480px floor becomes the document viewport, and a
-  // scrollHeight report of that viewport then locks in a tall empty card.
-  frame.style.height='120px';
-  bindWidgetFrame(frame);
+  // One action only: reload the widget. A pause toggle was noise the widget
+  // rarely needed, so it stays out of the card.
+  const button=doc.createElement('button');button.type='button';button.className='md-widget-refresh';button.dataset.widgetAction='restart';button.title='重新运行';button.setAttribute('aria-label','重新运行');
+  button.innerHTML='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>';
+  heading.append(button);
+  const frame=doc.createElement('iframe');frame.title=title.textContent;frame.setAttribute('sandbox','allow-scripts');frame.setAttribute('referrerpolicy','no-referrer');frame.setAttribute('scrolling','no');
+  frame.dataset.widgetFrame='';frame.style.height='360px';frame.style.overflow='hidden';
+  // The widget document posts its own height so the card can grow to fit the
+  // whole visual instead of trapping it behind an inner scrollbar.
+  const onHeight=(event)=>{
+    if(!frame.isConnected){window.removeEventListener('message',onHeight);return;}
+    if(event.source!==frame.contentWindow)return;
+    const data=event.data;
+    if(!data||data.type!=='iris-widget-height')return;
+    const height=Number(data.height);
+    if(!Number.isFinite(height)||height<40)return;
+    frame.style.height=Math.min(960,Math.ceil(height))+'px';
+  };
+  window.addEventListener('message',onHeight);
   wrap.append(heading,frame);
   queueMicrotask(()=>{if(frame.isConnected)void runWidget(frame,html);});
   return wrap;

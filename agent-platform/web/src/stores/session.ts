@@ -59,6 +59,8 @@ export interface WorkspaceRef {
   previewUrl?: string;
   base64?: string;
   mimeType?: string;
+  /** Pasted image that lives only in the prompt payload, never in the workspace. */
+  inline?: boolean;
 }
 
 export interface TextQuote {
@@ -96,18 +98,29 @@ export const useSession = defineStore('session', {
     chatError: '' as string,
     busy: false,
     stopping: false,
+    // The running stream may belong to another thread than the one on screen;
+    // liveThread says which chat `live` renders for, and liveMessages keeps that
+    // chat's transcript while the reader browses elsewhere.
+    liveThread: null as string | null,
+    liveMessages: [] as any[],
     lastUserText: '',
     // live streaming assistant view model (null when idle)
     live: null as any,
     controller: null as AbortController | null,
     snapshots: new Map<string, any>(),
+    pendingChatIds: [] as string[],
   }),
   getters: {
     canExecute: (s) => !!s.auth?.can_execute,
     isAdmin: (s) => !!s.auth?.admin,
     modelLabel: (s) => s.auth?.model || 'Iris 模型',
     currentChat: (s) => s.chats.find(c => c.id === s.chatId) || null,
-    isEmpty: (s) => s.messages.length === 0 && !s.live,
+    isEmpty: (s) => s.messages.length === 0 && !(s.live && s.liveThread === s.chatId),
+    // The live model belongs to one thread only; other chats keep rendering
+    // their own transcript while it streams in the background.
+    activeLive: (s): any => (s.live && s.liveThread === s.chatId ? s.live : null),
+    busyHere: (s): boolean => s.busy && s.liveThread === s.chatId,
+    busyElsewhere: (s): boolean => s.busy && !!s.liveThread && s.liveThread !== s.chatId,
     currentProjectId: (s): string => s.chats.find(c => c.id === s.chatId)?.projectId || s.newChatProjectId || s.lastProjectId || 'default',
     currentProject: (s): Project => {
       const pid = s.chats.find(c => c.id === s.chatId)?.projectId || s.newChatProjectId || s.lastProjectId || 'default';
@@ -124,12 +137,13 @@ export const useSession = defineStore('session', {
       const item = this.live?.questions?.find((q: any) => q.id === id);
       if (!item || item.state !== 'pending' || item.saving) return;
       item.saving = true; item.error = '';
-      try { await post('/api/questions/answer', { thread: this.chatId, id, answer }); item.state = 'answered'; item.answer = answer; }
+      try { await post('/api/questions/answer', { thread: this.liveThread || this.chatId, id, answer }); item.state = 'answered'; item.answer = answer; }
       catch(e: any) { item.error = e.message; if (e.status === 409) item.state = 'expired'; }
       finally { item.saving = false; }
     },
     async steer(message: string) {
-      await post('/api/steer', { thread: this.chatId, message });
+      const thread = this.liveThread || this.chatId;
+      await post('/api/steer', { thread, message });
       if (this.live) this.live.status = '补充指令已发送，模型将在下一个处理点接收';
       useUi().toast('已补充指令', { tone: 'success' });
     },
@@ -138,7 +152,7 @@ export const useSession = defineStore('session', {
       if (!approval || approval.state !== 'pending' || approval.saving) return;
       approval.saving = true; approval.error = '';
       try {
-        await post('/api/approvals/resolve', { thread: this.chatId, id, allow });
+        await post('/api/approvals/resolve', { thread: this.liveThread || this.chatId, id, allow });
         approval.state = allow ? 'allowed' : 'denied';
       } catch (error: any) {
         approval.error = error.message || '提交审批失败，请重试';
@@ -149,7 +163,7 @@ export const useSession = defineStore('session', {
       const changedUser = this.auth && (this.auth.user?.id !== value.user?.id || !value.can_execute);
       this.auth = value;
       setCsrf(value.csrf);
-      if (changedUser) { this.snapshots.clear(); this.messages = []; this.live = null; }
+      if (changedUser) { this.snapshots.clear(); this.messages = []; this.live = null; this.liveThread = null; this.liveMessages = []; }
     },
     async refreshIdentity() {
       try { this.applyIdentity(await get('/api/me')); return true; }
@@ -230,7 +244,7 @@ export const useSession = defineStore('session', {
     },
     async loadChats() {
       this.chatsLoading = true; this.chatsError = '';
-      try { this.chats = (await get('/api/chats')).chats || []; }
+      try { const incoming=(await get('/api/chats')).chats||[];const ids=new Set(incoming.map((c:Chat)=>c.id));const pending=this.chats.filter(c=>this.pendingChatIds.includes(c.id)&&!ids.has(c.id));this.chats=[...pending,...incoming];this.pendingChatIds=this.pendingChatIds.filter(id=>!ids.has(id)); }
       catch (error: any) { this.chatsError = error.message || '无法读取对话'; }
       finally { this.chatsLoading = false; }
     },
@@ -238,12 +252,10 @@ export const useSession = defineStore('session', {
       history.replaceState(null, '', id ? '/?chat=' + encodeURIComponent(id) : '/');
     },
     startNew(targetProjectId?: string) {
-      if (this.busy) return;
       this.chatId = uuid();
       this.messages = [];
       this.workspaceRefs = [];
       this.textQuotes = [];
-      this.live = null;
       this.lastUserText = '';
       const chosen = targetProjectId || this.currentChat?.projectId || this.lastProjectId || 'default';
       this.newChatProjectId = chosen;
@@ -252,7 +264,7 @@ export const useSession = defineStore('session', {
       try { localStorage.setItem('iris-last-project', chosen); } catch {}
       this.setChatUrl(this.chatId);
     },
-    addWorkspaceRef(item: { path: string; name?: string; type?: 'file' | 'dir' | 'symlink' | 'image'; size?: number; previewUrl?: string; base64?: string; mimeType?: string }) {
+    addWorkspaceRef(item: { path: string; name?: string; type?: 'file' | 'dir' | 'symlink' | 'image'; size?: number; previewUrl?: string; base64?: string; mimeType?: string; inline?: boolean }) {
       const clean = String(item.path || '').replace(/^\/workspace\/?/, '').replace(/^\/+/, '');
       if (!clean) return;
       const name = item.name || clean.split('/').pop() || clean;
@@ -265,6 +277,7 @@ export const useSession = defineStore('session', {
           previewUrl: item.previewUrl,
           base64: item.base64,
           mimeType: item.mimeType,
+          inline: item.inline === true || undefined,
         });
       }
     },
@@ -297,7 +310,6 @@ export const useSession = defineStore('session', {
       this.textQuotes = [];
     },
     async selectChat(id: string) {
-      if (this.busy) return;
       this.chatId = id;
       const found = this.chats.find(c => c.id === id);
       if (found?.projectId) {
@@ -308,17 +320,30 @@ export const useSession = defineStore('session', {
       this.setChatUrl(id);
       this.workspaceRefs = [];
       this.textQuotes = [];
-      this.live = null;
+      this.chatError = '';
+      // Returning to the thread that is still streaming: restore its in-flight
+      // transcript (the server copy lacks the current turn) and let the live
+      // view render on top.
+      if (this.live && this.liveThread === id) {
+        this.messages = this.liveMessages;
+        this.loadingChat = false;
+        this.lastUserText = lastUser(this.messages);
+        return;
+      }
       const cached = this.snapshots.get(id);
       if (cached) { this.messages = cached.messages || []; }
       else { this.messages = []; this.loadingChat = true; }
-      this.chatError = '';
       try {
         const value = await get('/api/session?chat=' + encodeURIComponent(id));
         if (this.chatId !== id) return;
         this.snapshots.set(id, value);
         this.messages = value.messages || [];
-        this.busy = value.busy === true;
+        // A stream running for another thread owns the global task flag; only
+        // trust this thread's own server state when nothing is streaming here.
+        if (!this.live) {
+          this.busy = value.busy === true;
+          this.liveThread = this.busy ? id : null;
+        }
         this.lastUserText = lastUser(this.messages);
       } catch (error: any) {
         if (this.chatId !== id) return;
@@ -336,23 +361,29 @@ export const useSession = defineStore('session', {
       this.snapshots.delete(thread);
 
       const sections: string[] = [];
-      if (attachedRefs.length > 0) {
-        sections.push('【工作区引用文件】\n' + attachedRefs.map(r => `- \`/workspace/${r.path}\``).join('\n'));
+      const workspaceRefs = attachedRefs.filter(r => !r.inline);
+      const inlineImages = attachedRefs.filter(r => r.inline);
+      if (workspaceRefs.length > 0) {
+        sections.push('【工作区引用文件】\n' + workspaceRefs.map(r => `- \`/workspace/${r.path}\``).join('\n'));
       }
       if (attachedQuotes.length > 0) {
         sections.push('【引用内容】\n' + attachedQuotes.map(q => q.text.split('\n').map(l => '> ' + l).join('\n')).join('\n\n'));
       }
-      const imageOnly = !rawText && !attachedQuotes.length && attachedRefs.length > 0
-        && attachedRefs.every(r => r.type === 'image' || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(r.name || ''));
       if (rawText) {
         sections.push(rawText);
-      } else if (!imageOnly) {
-        sections.push('请根据以上引用内容进行分析并回答。');
       }
 
       const message = sections.join('\n\n');
       this.workspaceRefs = [];
       this.textQuotes = [];
+
+      // Show the chat in the sidebar as soon as the first turn starts, instead
+      // of waiting for the server list refresh after the stream ends.
+      if (!this.chats.some(c => c.id === thread)) {
+        const seedTitle = '正在命名…';
+        this.pendingChatIds.push(thread);
+        this.chats.unshift({ id: thread, title: seedTitle || '新任务', updated: Date.now(), projectId: this.currentProjectId, permission: this.currentChatPermission });
+      }
 
       const images: Array<{ type: 'image'; data: string; mimeType: string }> = [];
       for (const r of attachedRefs) {
@@ -371,11 +402,14 @@ export const useSession = defineStore('session', {
       }
 
       const turnStartTime = Date.now();
-      this.messages.push({
+      // Keep a direct reference to the streaming chat's transcript: the reader
+      // may switch to another chat while this stream continues.
+      const streamMessages = this.messages;
+      streamMessages.push({
         role: 'user',
         timestamp: turnStartTime,
         content: message,
-        refs: attachedRefs.map(r => ({ path: r.path, name: r.name, type: r.type, size: r.size, previewUrl: r.previewUrl })),
+        refs: attachedRefs.map(r => ({ path: r.path, name: r.name, type: r.type, size: r.size, previewUrl: r.previewUrl, inline: r.inline })),
         quotes: attachedQuotes.map(q => ({ id: q.id, text: q.text, source: q.source })),
         _rawPrompt: rawText,
         _fresh: true,
@@ -387,6 +421,8 @@ export const useSession = defineStore('session', {
       const controller = new AbortController();
       this.controller = controller;
       this.busy = true;
+      this.liveThread = thread;
+      this.liveMessages = streamMessages;
       const live = reactive(reactiveLive());
       this.live = live;
       let received = false;
@@ -394,7 +430,7 @@ export const useSession = defineStore('session', {
         const result = await streamPrompt({
           thread, message, images: images.length ? images : undefined, thinking: useUi().thinkingLevel, projectId: this.currentProjectId,
           permission: this.currentChatPermission, signal: controller.signal,
-          onEvent: (event) => { received = true; handleEvent(event, live); },
+          onEvent: (event) => { received = true;if(event.type==='chat_title'&&event.thread===thread){const chat=this.chats.find(c=>c.id===thread);if(chat)chat.title=event.title;}handleEvent(event, live); },
         });
         if (!result.settled && !this.stopping) throw new ApiError('连接在任务完成前关闭，请刷新对话查看实际结果。', 0);
         live.finished = true;
@@ -404,14 +440,17 @@ export const useSession = defineStore('session', {
           if (this.stopping) { live.stopped = true; }
           else live.error = '与服务器的流式连接中断，请刷新对话后重试。';
         } else {
-          if (!received) { this.messages.pop(); }
+          if (!received) { streamMessages.pop(); }
           live.error = error.message || '任务启动失败，请重试。';
         }
       } finally {
         // fold the live view model into the transcript as a finalized message
         const durationMs = Math.max(0, Date.now() - turnStartTime);
-        this.messages.push({ role: 'assistant', timestamp: Date.now(), durationMs, content: live.blocks, _vm: live, _fresh: true });
+        streamMessages.push({ role: 'assistant', timestamp: Date.now(), durationMs, content: live.blocks, _vm: live, _fresh: true });
+        this.snapshots.set(thread, { messages: streamMessages, busy: false });
         this.live = null;
+        this.liveThread = null;
+        this.liveMessages = [];
         this.controller = null;
         this.busy = false;
         this.stopping = false;
@@ -422,7 +461,8 @@ export const useSession = defineStore('session', {
     async stop() {
       if (!this.busy || this.stopping) return;
       this.stopping = true;
-      try { await post('/api/abort', { thread: this.chatId }); } catch {}
+      const thread = this.liveThread || this.chatId;
+      try { if (thread) await post('/api/abort', { thread }); } catch {}
       this.controller?.abort();
     },
     async renameChat(id: string, title: string) {

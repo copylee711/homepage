@@ -18,7 +18,7 @@ RUN npm run build
 # Stage 2: the gateway runtime, serving the built SPA.
 FROM node:24.21.0-bookworm-slim
 WORKDIR /app
-COPY agent-platform/gateway.mjs agent-platform/shared.mjs agent-platform/widget-document.mjs agent-platform/cloud-turns.mjs agent-platform/turn-stream.mjs ./
+COPY agent-platform/gateway.mjs agent-platform/shared.mjs agent-platform/widget-document.mjs agent-platform/cloud-turns.mjs agent-platform/turn-stream.mjs agent-platform/prompt-input.mjs ./
 COPY --from=web /web/dist ./web/dist
 USER 1000:1000
 CMD ["node", "gateway.mjs"]
