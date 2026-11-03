@@ -38,7 +38,7 @@ export function widget(doc, html, label) {
   window.addEventListener('message',onHeight);
   wrap.append(heading,frame);
   queueMicrotask(()=>{if(frame.isConnected)void runWidget(frame,html);});
-  const details=doc.createElement('details'),summary=doc.createElement('summary'),pre=doc.createElement('pre');summary.textContent='查看组件代码';pre.textContent=html;details.append(summary,pre);wrap.append(details);return wrap;
+  return wrap;
 }
 export async function runWidget(frame,html) {
   try {

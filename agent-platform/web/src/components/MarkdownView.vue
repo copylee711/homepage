@@ -26,7 +26,7 @@ function render() {
 function onClick(event: MouseEvent) {
   const target = event.target as HTMLElement;
   const widgetAction=target.closest<HTMLElement>('[data-widget-action]');
-  if(widgetAction){const wrap=widgetAction.closest<HTMLElement>('[data-widget-source]');if(wrap){let frame=wrap.querySelector('iframe');wrap.querySelector('.status-error')?.remove();if(!frame){frame=document.createElement('iframe');frame.title='交互组件';frame.setAttribute('sandbox','allow-scripts');wrap.insertBefore(frame,wrap.querySelector('details'));}void runWidget(frame,wrap.dataset.widgetSource||'');}return;}
+  if(widgetAction){const wrap=widgetAction.closest<HTMLElement>('[data-widget-source]');if(wrap){let frame=wrap.querySelector('iframe');wrap.querySelector('.status-error')?.remove();if(!frame){frame=document.createElement('iframe');frame.title='交互组件';frame.setAttribute('sandbox','allow-scripts');wrap.append(frame);}void runWidget(frame,wrap.dataset.widgetSource||'');}return;}
   const image=target.closest<HTMLElement>('[data-image-preview]');
   if(image){event.preventDefault();useUi().openLightbox({url:image.dataset.imagePreview||'',name:image.querySelector('img')?.alt||'图片预览'});return;}
 
