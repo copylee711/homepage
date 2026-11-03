@@ -107,7 +107,24 @@ function toggleWorkspace() {
 </template>
 
 <style>
-.topbar { min-width: 0; height: var(--header-h); display: flex; align-items: center; gap: 8px; padding: 0 16px; background: transparent; z-index: 5; }
+.topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--header-h);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  background: transparent;
+  z-index: 10;
+  pointer-events: none;
+}
+.chat-heading,
+.topbar-actions {
+  pointer-events: auto;
+}
 .chat-heading { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 2px; }
 .chat-heading-row { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
 

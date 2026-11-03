@@ -126,7 +126,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
 .stage { position: relative; min-height: 0; flex: 1; display: flex; overflow: hidden; }
 .floating-panels {
   position: absolute;
-  top: 10px;
+  top: calc(var(--header-h) + 8px);
   right: clamp(16px, 4vw, 36px);
   z-index: 12;
   display: flex;
@@ -136,15 +136,15 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
 }
 @media (max-width: 640px) {
   .floating-panels {
-    top: 6px;
+    top: calc(var(--header-h) + 4px);
     right: 12px;
     gap: 6px;
   }
 }
 .conversation { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable both-edges; padding: 0 clamp(16px, 4vw, 40px); scroll-behavior: auto; overscroll-behavior: contain; }
 .conversation.is-unauthorized.is-empty { justify-content: center; }
-.conversation.is-empty { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
-.messages { width: 100%; max-width: 760px; margin: 0 auto; padding: 30px 0 44px; display: flex; flex-direction: column; gap: 30px; }
+.conversation.is-empty { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; padding-top: var(--header-h); }
+.messages { width: 100%; max-width: 760px; margin: 0 auto; padding: calc(var(--header-h) + 16px) 0 44px; display: flex; flex-direction: column; gap: 30px; }
 .is-jump-target .user-bubble { box-shadow:0 0 0 2px var(--line-strong); }
 @media(max-width:640px){.conversation{padding-right:30px;}}
 .conversation-state { padding: 40px 0; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: 12.5px; }

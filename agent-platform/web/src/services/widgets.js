@@ -33,7 +33,7 @@ export function widget(doc, html, label) {
     if(!data||data.type!=='iris-widget-height')return;
     const height=Number(data.height);
     if(!Number.isFinite(height)||height<40)return;
-    frame.style.height=Math.min(4000,Math.ceil(height))+'px';
+    frame.style.height=Math.min(960,Math.ceil(height))+'px';
   };
   window.addEventListener('message',onHeight);
   wrap.append(heading,frame);
