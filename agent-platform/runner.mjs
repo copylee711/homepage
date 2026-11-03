@@ -41,6 +41,33 @@ async function secretValues() {
   return [(process.env.OPENCODE_API_KEY || ''), ...(await loadProviders()).providers.map(item => item.apiKey || '')]
     .filter(key => key.length >= 8);
 }
+async function searchWeb(lease, config, input) {
+  const image = input.category === 'image';
+  const count = input.count ?? config.count;
+  const request = { op: 'web-search', ...config, query: input.query, count };
+  try {
+    return await sandboxTool(lease, { ...request, category: image ? 'image' : 'web', engine: image ? config.imageEngine : config.engine }, 45000);
+  } catch (error) {
+    if (!image || !config.sources.some(source => source.enabled && source.category === 'image')) throw error;
+    // Open-license image indexes are sparse for niche queries. Inspect a few
+    // already-ranked source pages through the same public-only broker.
+    const web = await sandboxTool(lease, { ...request, category: 'web', engine: config.engine, count: 3 }, 20000);
+    const pages = await Promise.allSettled(web.results.slice(0, 3).map(result =>
+      sandboxTool(lease, { op: 'web-fetch', url: result.url }, 20000)));
+    const images = new Map();
+    for (const page of pages) {
+      if (page.status !== 'fulfilled') continue;
+      for (const item of page.value.images || []) {
+        if (!item.alt?.trim() || images.has(item.url)) continue;
+        images.set(item.url, { ...item, title: item.alt, provider: 'source-page' });
+      }
+    }
+    if (!images.size) throw error;
+    const candidates = [...images.values()].slice(0, count);
+    return { engine: 'source-page', images: candidates, results: candidates,
+      notice: '这些是网页中的候选图。核对图片与主题的相关性，附原网页链接。授权情况未知。' };
+  }
+}
 class Pi {
   constructor(user, thread) {
     this.runtimeToken = randomUUID(); this.user = user; this.thread = thread; this.key = user + ':' + thread; this.pending = new Map(); this.busy = false; this.buffer = '';
@@ -330,14 +357,16 @@ export const server = createServer(async (req, res) => {
       if (req.url === '/runtime/memory/update') return json(res, 200, await memories.update(pi.user, pi.projectId, await body(req)));
       if (req.url === '/runtime/policy') return json(res, 200, { execution: pi.execution });
       if(req.url==='/runtime/chat/title'){
-        const input=await body(req);const result=await chats.autoTitle(pi.user,pi.thread,input.title);
-        if(!result.skipped&&pi.output)pi.output.write(JSON.stringify({type:'chat_title',thread:pi.thread,title:result.title})+'\n');
+        const input = await body(req);
+        const title = typeof input.title === 'string' ? pi.mask(input.title) : input.title;
+        const result = await chats.autoTitle(pi.user, pi.thread, title);
+        if (!result.skipped) pi.publish({ type: 'chat_title', thread: pi.thread, title: result.title });
         return json(res,200,result);
       }
       if (req.url === '/runtime/search') {
         const input = await body(req), config = await searchSettings.get(pi.user);
         if (!config.enabled) fail(403, '联网搜索已在设置中关闭');
-        return json(res, 200, await pi.webSession.run('search',(input.category||'web')+':'+input.query,()=>sandboxTool(pi.lease, { op: 'web-search', ...config, engine:input.category==='image'?config.imageEngine:config.engine, category: input.category === 'image' ? 'image' : 'web', query: input.query, count: input.count ?? config.count }, 45000)));
+        return json(res, 200, await pi.webSession.run(input.category === 'image' ? 'image' : 'search', input.query,() => searchWeb(pi.lease, config, input)));
       }
       if(req.url==='/runtime/fetch'){const input=await body(req);return json(res,200,await pi.webSession.run('fetch',input.url,()=>sandboxTool(pi.lease,{op:'web-fetch',url:input.url},35000)));}
       fail(404, '接口不存在');
@@ -414,7 +443,11 @@ export const server = createServer(async (req, res) => {
       const config = await searchSettings.get(input.user);
       if (!config.enabled) fail(403, '联网搜索已关闭');
       const lease = (await sandbox('/lease', input.user)).token;
-      return json(res, 200, await sandboxTool(lease, { op: 'web-search', ...config, engine:input.category==='image'?config.imageEngine:config.engine, category:input.category === 'image'?'image':'web', query: input.query, ...(input.source?{sources:config.sources.filter(s=>s.id===input.source).map(s=>({...s,enabled:true}))}:{}) }, 45000));
+      const renewal = setInterval(() => sandbox('/renew', input.user, lease).catch(() => {}), 5000);
+      try {
+        if (!input.source) return json(res, 200, await searchWeb(lease, config, input));
+        return json(res, 200, await sandboxTool(lease, { op: 'web-search', ...config, engine:input.category==='image'?config.imageEngine:config.engine, category:input.category === 'image'?'image':'web', query: input.query, ...(input.source?{sources:config.sources.filter(s=>s.id===input.source).map(s=>({...s,enabled:true}))}:{}) }, 45000));
+      } finally { clearInterval(renewal); }
     }
     if (req.url === '/providers') return json(res, 200, await publicProviders());
     if (req.url === '/greeting') {

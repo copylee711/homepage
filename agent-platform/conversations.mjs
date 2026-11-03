@@ -196,7 +196,15 @@ export class ChatStore {
     if (!validThread(thread)) fail(422, '对话标识无效');
     return this.serialize(user, async () => {
       const meta = await this.loadMeta(user);
-      if (meta.chats[thread]) return;
+      const existing = meta.chats[thread];
+      if (existing) {
+        if (!existing.titleSource && (!existing.title || /^正在命名(?:…|\.\.\.)$/.test(existing.title))) {
+          existing.titleSource = 'pending';
+          existing.title = '新任务';
+          await this.saveMeta(user, meta);
+        }
+        return;
+      }
       if (Object.keys(meta.chats).length >= 100) fail(429, '对话元数据数量已达上限，请清理未使用的对话');
       // Legacy histories keep their default project. New histories bind exactly once,
       // before Pi starts, rather than depending on a not-yet-created JSONL file.

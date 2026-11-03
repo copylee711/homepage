@@ -66,16 +66,15 @@ watch(
 );
 
 const runningCount = computed(() => list.value.filter(b => b?.state === 'running' || b?.state === 'pending').length);
-if (list.value.length > 1 && runningCount.value === 0) mode.value = 'collapsed';
-watch(runningCount, (running, previous) => {
-  if (list.value.length < 2) return;
+watch([isGroup, runningCount], ([group, running], previous) => {
+  if (!group) return;
   if (running > 0) {
     pinnedOpen.value = false;
-    if (mode.value === 'collapsed' && previous === 0) mode.value = 'preview';
+    if (mode.value === 'collapsed' && previous?.[1] === 0) mode.value = 'preview';
     return;
   }
   if (!pinnedOpen.value) mode.value = 'collapsed';
-});
+}, { immediate: true });
 const failedCount = computed(() => list.value.filter(b => b?.state === 'error').length);
 const totalDurationMs = computed(() => list.value.reduce((acc, b) => acc + (Number(b?.durationMs) || 0), 0));
 

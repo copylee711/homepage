@@ -14,7 +14,10 @@ const bodyIndex=computed(()=>props.nested?-1:props.blocks.findLastIndex(b=>b.typ
 const prelude=computed(()=>props.nested?[]:bodyIndex.value>0?props.blocks.slice(0,bodyIndex.value):bodyIndex.value<0?props.blocks:[]);
 const visibleBlocks=computed(()=>props.nested?props.blocks:bodyIndex.value<0?[]:props.blocks.slice(bodyIndex.value));
 const preludeOpen=ref(true);
-watch(bodyIndex,(index,previous)=>{if(index>0&&index!==previous)preludeOpen.value=false;},{immediate:true});
+const canCollapse = computed(() => bodyIndex.value >= 0 || !props.streaming);
+watch([bodyIndex, canCollapse], ([index, ready], previous) => {
+  if (ready && (index > 0 || !props.streaming) && (!previous?.[1] || index !== previous[0])) preludeOpen.value = false;
+}, { immediate: true });
 
 const segments = computed(() => segmentBlocks(visibleBlocks.value));
 const citations=computed(()=>{
@@ -26,8 +29,8 @@ const citations=computed(()=>{
 
 <template>
   <div class="blocks">
-    <details v-if="!nested" v-show="prelude.length" :open="preludeOpen" class="work-prelude" :class="{'has-body':bodyIndex>=0}" @toggle="preludeOpen=($event.target as HTMLDetailsElement).open"><summary>查看执行过程 · {{prelude.length}} 项</summary><BlockList :blocks="prelude" :streaming="streaming" :nested="true" :references="citations" /></details>
-    <template v-for="(seg, i) in segments" :key="i">
+    <details v-if="!nested" v-show="prelude.length" :open="preludeOpen" class="work-prelude" :class="{'has-body':canCollapse}" @toggle="preludeOpen=($event.target as HTMLDetailsElement).open"><summary>查看执行过程 · {{prelude.length}} 项</summary><BlockList :blocks="prelude" :streaming="streaming" :nested="true" :references="citations" /></details>
+    <template v-for="(seg, i) in segments" :key="seg.type === 'tools' ? seg.items[0]?.id || i : i">
       <MarkdownView v-if="seg.type === 'text'" :source="seg.text" :citations="citations" :streaming="streaming" />
       <ThinkingBlock v-else-if="seg.type === 'thinking'" :text="seg.text" />
       <PlanCard v-else-if="seg.type === 'plan'" :block="seg.block" />
