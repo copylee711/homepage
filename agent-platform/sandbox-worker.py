@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import selectors
 import signal
+import shutil
 import stat
 import subprocess
 import sys
@@ -170,7 +171,10 @@ def manage_file(value):
         if target.is_symlink() or target.is_file():
             target.unlink()
         elif target.is_dir():
-            target.rmdir()
+            if value.get("recursive") is True:
+                shutil.rmtree(target)
+            else:
+                target.rmdir()
         else:
             raise ValueError("文件或目录不存在")
     elif action == "move":

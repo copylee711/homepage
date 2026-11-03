@@ -280,7 +280,7 @@ export const useWorkspace = defineStore('workspace', {
       await this.load(this.path, true);
     },
     async deleteEntry(entryPath: string) {
-      await post('/api/files/manage', { action: 'delete', path: entryPath });
+      await post('/api/files/manage', { action: 'delete', path: entryPath, recursive: true });
       void this.closeTab(entryPath, true);
       this.snapshots.clear();
       await this.load(this.path, true);
@@ -290,7 +290,7 @@ export const useWorkspace = defineStore('workspace', {
       const failed: Array<{ path: string; error: string }> = [];
       for (const p of paths) {
         try {
-          await post('/api/files/manage', { action: 'delete', path: p });
+          await post('/api/files/manage', { action: 'delete', path: p, recursive: true });
           void this.closeTab(p, true);
           deleted.push(p);
         } catch (err: any) {

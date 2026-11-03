@@ -44,8 +44,9 @@ test('editor revisions prevent lost updates and file management cannot leave the
   assert.notEqual(run({ op: 'file-manage', action: 'delete', path: 'managed' }).status, 0);
   assert.notEqual(run({ op: 'file-manage', action: 'move', path: 'managed/edit.txt', destination: '../escape.txt' }).status, 0);
   assert.notEqual(run({ op: 'file-manage', action: 'delete', path: '.' }).status, 0);
-  assert.equal(run({ op: 'file-manage', action: 'delete', path: 'managed/edit.txt' }).status, 0);
-  assert.equal(run({ op: 'file-manage', action: 'delete', path: 'managed' }).status, 0);
+  assert.equal(run({ op: 'file-manage', action: 'delete', path: 'managed', recursive: true }).status, 0);
+  assert.notEqual(run({ op: 'file-read', path: 'managed/edit.txt' }).status, 0);
+  assert.notEqual(run({ op: 'file-manage', action: 'delete', path: '.', recursive: true }).status, 0);
 });
 
 test('lists only the user workspace and marks directories/files', { skip }, () => {
