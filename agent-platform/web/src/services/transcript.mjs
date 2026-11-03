@@ -1,3 +1,5 @@
+import { completedCount, planFromBlock, planSignature } from './plan-state.mjs';
+
 // Normalize an assistant message's content (Pi shape or live view-model) into
 // the block list BlockList.vue renders.
 export function normalizeBlocks(content, toolResults) {
@@ -39,7 +41,16 @@ export function segmentBlocks(blocks) {
   for (const block of blocks || []) {
     if (!block || ((block.type === 'text' || block.type === 'thinking') && !block.text?.trim())) continue;
     if (block.type !== 'tool') { out.push(block); continue; }
-    if (block.name === 'update_plan') { out.push({ type: 'plan', block }); continue; }
+    if (block.name === 'update_plan') {
+      const steps = planFromBlock(block);
+      const previous = [...out].reverse().find((item) => item.type === 'plan');
+      const previousSteps = previous ? planFromBlock(previous.block) : null;
+      // A replayed pending checklist must not paint a second 0/n card over the
+      // completed one the bubble already shows.
+      if (steps && previousSteps && planSignature(steps) === planSignature(previousSteps) && completedCount(steps) < completedCount(previousSteps)) continue;
+      out.push({ type: 'plan', block });
+      continue;
+    }
     const last = out.at(-1);
     if (last?.type === 'tools') last.items.push(block);
     else out.push({ type: 'tools', items: [block] });

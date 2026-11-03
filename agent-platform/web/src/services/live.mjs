@@ -1,3 +1,5 @@
+import { assignToolArgs, finishedPlan } from './plan-state.mjs';
+
 // A plain reactive-friendly object describing the streaming assistant turn.
 export function reactiveLive() {
   return { blocks: [], approvals: [], questions: [], status: '正在连接模型…', spinner: true, finished: false, error: '', stopped: false, tools: {} };
@@ -39,7 +41,13 @@ export function handleEvent(event, live) {
       if (part.type === 'text' || part.type === 'thinking') {
         const b = ensureBlock(index, part.type); b.type = part.type; b.text = part.type === 'text' ? part.text || '' : part.thinking || '';
       } else if (part.type === 'toolCall') {
-        const b = ensureBlock(index, 'tool'); b.type = 'tool'; b.id = part.id; b.name = part.name; b.args = JSON.stringify(part.arguments || {}, null, 2); b.state ||= 'pending';
+        // Reconcile by id so a late message snapshot cannot open a second,
+        // older copy of a plan that already finished.
+        const existing = part.id ? vm.blocks.find((x) => x.type === 'tool' && x.id === part.id) : null;
+        const b = existing || ensureBlock(index, 'tool');
+        b.type = 'tool'; b.id = part.id || b.id; b.name = part.name || b.name;
+        assignToolArgs(b, part.arguments || {});
+        if (!b.state) b.state = 'pending';
       }
     }
     return;
@@ -53,15 +61,41 @@ export function handleEvent(event, live) {
       case 'thinking_start': ensureBlock(u.contentIndex, 'thinking'); break;
       case 'thinking_delta': { const b = ensureBlock(u.contentIndex, 'thinking'); b.text += u.delta || ''; break; }
       case 'thinking_end': { const b = ensureBlock(u.contentIndex, 'thinking'); if (typeof u.content === 'string') b.text = u.content; break; }
-      case 'toolcall_start': { const b = ensureBlock(u.contentIndex, 'tool'); b.id = u.id || u.toolCall?.id; b.name = u.toolName || u.toolCall?.name || 'tool'; b.state = 'pending'; b.args = ''; if (b.name !== 'set_chat_title') vm.status = '正在准备工具…'; break; }
-      case 'toolcall_delta': { const b = ensureBlock(u.contentIndex, 'tool'); b.args = (b.args || '') + (u.delta || ''); break; }
-      case 'toolcall_end': { const b = ensureBlock(u.contentIndex, 'tool'); const tc = u.toolCall || {}; b.id = tc.id || b.id; b.name = tc.name || b.name; b.args = tc.arguments ? JSON.stringify(tc.arguments, null, 2) : b.args; b.state = 'pending'; break; }
+      case 'toolcall_start': {
+        const b = ensureBlock(u.contentIndex, 'tool');
+        if (!finishedPlan(b)) {
+          b.id = u.id || u.toolCall?.id || b.id;
+          b.name = u.toolName || u.toolCall?.name || b.name || 'tool';
+          b.state = 'pending';
+          b.args = '';
+        }
+        if (b.name !== 'set_chat_title') vm.status = '正在准备工具…';
+        break;
+      }
+      case 'toolcall_delta': {
+        const b = ensureBlock(u.contentIndex, 'tool');
+        if (finishedPlan(b)) break;
+        b.args = (b.args || '') + (u.delta || '');
+        break;
+      }
+      case 'toolcall_end': {
+        const b = ensureBlock(u.contentIndex, 'tool');
+        const tc = u.toolCall || {};
+        const keep = finishedPlan(b);
+        if (!keep) { b.id = tc.id || b.id; b.name = tc.name || b.name; }
+        if (tc.arguments) assignToolArgs(b, tc.arguments);
+        if (!keep) b.state = 'pending';
+        break;
+      }
     }
     return;
   }
   if (event.type === 'tool_execution_start') {
     const b = vm.blocks.find((x) => x.type === 'tool' && x.id === event.toolCallId) || ensureBlock(1e6 + vm.blocks.length, 'tool');
-    b.id = event.toolCallId; b.name = event.toolName || b.name; b.state = 'running'; if (event.args) b.args = JSON.stringify(event.args, null, 2);
+    const keep = finishedPlan(b);
+    b.id = event.toolCallId; b.name = event.toolName || b.name;
+    if (!keep) b.state = 'running';
+    if (event.args) assignToolArgs(b, event.args);
     b.started = Date.now();
     if (b.name !== 'set_chat_title') { vm.status = '正在执行工具 · ' + (event.toolName || ''); vm.spinner = true; }
     return;

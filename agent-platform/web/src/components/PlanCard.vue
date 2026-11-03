@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { planFromBlock } from '../services/plan-state.mjs';
 const props = defineProps<{ block: any }>();
-const steps = computed(() => { try { return JSON.parse(props.block.args || '{}').steps || []; } catch { return []; } });
+const steps = computed(() => planFromBlock(props.block) || []);
 </script>
 <template>
   <section class="plan-card" aria-label="任务计划">
