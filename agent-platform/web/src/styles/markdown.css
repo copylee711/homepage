@@ -24,6 +24,13 @@ h1.md-heading { font-size: 1.48em; } h2.md-heading { font-size: 1.28em; } h3.md-
 .md-quote { margin: 0 0 12px; padding: 3px 0 3px 14px; border-left: 2px solid var(--line-strong); color: var(--text-2); }
 .md-rule { margin: 18px 0; border: 0; border-top: 1px solid var(--line); }
 .md-table-wrap { max-width: 100%; margin: 0 0 13px; overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+@media (max-width: 640px) {
+  .md ul, .md ol { padding-left: 1.2em; }
+  .md-table-wrap { border-radius: 10px; }
+  .md-table-wrap th, .md-table-wrap td { padding: 7px 8px; }
+  .code-block { border-radius: 10px; }
+  .code-block pre { padding: 10px 12px; }
+}
 .md-table-wrap table { border-collapse: collapse; width: 100%; font-size: 13px; }
 .md-table-wrap th, .md-table-wrap td { padding: 8px 12px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); text-align: left; vertical-align: top; }
 .md-table-wrap th { background: color-mix(in srgb, var(--text) 3.5%, transparent); font-weight: 600; color: var(--text-2); white-space: nowrap; }
