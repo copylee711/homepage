@@ -46,7 +46,7 @@ onMounted(() => {
 <template>
   <div class="app" :style="shellStyle" :data-sidebar="ui.sidebarOpen ? 'open' : 'closed'" :data-workspace="workspaceVisible ? 'open' : 'closed'">
     <Sidebar class="app-sidebar" />
-    <main class="main-col">
+    <main class="main-col" :class="{ 'is-welcome': session.isEmpty && !session.loadingChat }">
       <TopBar />
       <Conversation />
       <Composer v-if="session.canExecute" />
@@ -104,6 +104,29 @@ onMounted(() => {
   flex-direction: column;
   overflow: hidden;
   background: var(--bg);
+}
+
+.main-col.is-welcome {
+  justify-content: center;
+  align-items: center;
+  padding-bottom: clamp(20px, 4vh, 56px);
+}
+.main-col.is-welcome .stage {
+  flex: none;
+  width: 100%;
+  max-width: 760px;
+  overflow: visible;
+}
+.main-col.is-welcome .conversation {
+  padding: 0;
+  overflow: visible;
+  scrollbar-gutter: auto;
+}
+.main-col.is-welcome .composer-area {
+  flex: none;
+  width: 100%;
+  max-width: 760px;
+  padding: 0 clamp(16px, 4vw, 40px);
 }
 
 .app-workspace {

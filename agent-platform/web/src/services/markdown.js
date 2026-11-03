@@ -192,7 +192,31 @@ function extractFootnoteMap(rawText) {
   }
   return map;
 }
-export function collectSources(text, metadata = []) {
+// A dedicated fence contributes to the source panel without emitting body links.
+export function splitSourceBlocks(text) {
+  const sources = [];
+  const body = [];
+  let fence;
+  for (const line of String(text ?? '').split('\n')) {
+    const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (match && match[1][0] === fence.marker[0] && match[1].length >= fence.marker.length && !match[2].trim()) {
+        if (!fence.sources) body.push(line);
+        fence = undefined;
+      } else if (fence.sources) {
+        const value = line.trim().replace(/^[-*]\s+/, '');
+        const link = linkAt(value, 0, false);
+        if (link && link.end === value.length && sources.length < 30) sources.push({ url: link.href, title: link.label });
+      } else body.push(line);
+    } else if (match) {
+      fence = { marker: match[1], sources: match[2].trim() === 'iris-sources' };
+      if (!fence.sources) body.push(line);
+    } else body.push(line);
+  }
+  return { text: body.join('\n'), sources };
+}
+
+export function collectSources(text, metadata = [], additional = []) {
   const byUrl=new Map(),used=new Set();let next=1;
   const str=String(text??'').replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[ \t]*$/gm,'').replace(/`[^`\n]*`/g,'');
   const footnotes=extractFootnoteMap(str),meta=new Map(metadata.map(item=>[safeHref(item.url),item]));
@@ -205,6 +229,12 @@ export function collectSources(text, metadata = []) {
     if(str[i]!=='[')continue;const found=linkAt(str,i,false);
     if(found){if(!/^(?:下载|download|打开工作区)/i.test(found.label))add(found.href,found.label.replace(/[\[\]^]/g,''),found.title);i=found.end-1;continue;}
     const match=str.slice(i).match(/^\[\^?(\d{1,3})\]/);if(match&&footnotes.has(match[1])){const item=footnotes.get(match[1]);add(item.url,item.label,item.title);}
+  }
+  for (const item of additional) {
+    const url = safeHref(item.url);
+    if (!url || !/^https?:/.test(url) || byUrl.has(url)) continue;
+    const extra = meta.get(url) || {};
+    byUrl.set(url, { ...extra, url, host: hostOf(url), title: item.title || extra.title || hostOf(url), label: '' });
   }
   return [...byUrl.values()];
 }

@@ -6,11 +6,15 @@ import { segmentBlocks } from '../services/transcript.mjs';
 import PlanCard from './PlanCard.vue';
 import ToolCard from './ToolCard.vue';
 import SourceList from './SourceList.vue';
-import { collectSources } from '../services/markdown.js';
+import { collectSources, splitSourceBlocks } from '../services/markdown.js';
 
 // Accepts normalized blocks: { type:'text'|'thinking'|'tool', text?, ...tool fields }
 const props = defineProps<{ blocks: any[]; streaming?: boolean; nested?:boolean; references?:any[] }>();
-const displayBlocks = computed(() => props.blocks.filter(block => block.type !== 'tool' || block.name !== 'set_chat_title'));
+const sourceBlocks = computed(() => props.blocks.map(block =>
+  block.type === 'text' ? splitSourceBlocks(block.text) : null));
+const displayBlocks = computed(() => props.blocks
+  .map((block, index) => sourceBlocks.value[index] ? { ...block, text: sourceBlocks.value[index].text } : block)
+  .filter(block => block.type !== 'tool' || block.name !== 'set_chat_title'));
 const bodyIndex=computed(()=>props.nested?-1:displayBlocks.value.findLastIndex(b=>b.type==='text'&&b.text?.trim()));
 const prelude=computed(()=>props.nested?[]:bodyIndex.value>0?displayBlocks.value.slice(0,bodyIndex.value):bodyIndex.value<0?displayBlocks.value:[]);
 const visibleBlocks=computed(()=>props.nested?displayBlocks.value:bodyIndex.value<0?[]:displayBlocks.value.slice(bodyIndex.value));
@@ -24,7 +28,7 @@ const segments = computed(() => segmentBlocks(visibleBlocks.value));
 const citations=computed(()=>{
   if(props.references)return props.references;
   const metadata=[];for(const block of props.blocks||[]){if(block.type==='tool'&&block.result){try{const result=JSON.parse(block.result);if(Array.isArray(result.results)&&!result.images)metadata.push(...result.results);}catch{}}}
-  return collectSources((props.blocks||[]).filter(b=>b.type==='text').map(b=>b.text||'').join('\n\n'),metadata);
+  return collectSources(sourceBlocks.value.map(block => block?.text || '').join('\n\n'), metadata, sourceBlocks.value.flatMap(block => block?.sources || []));
 });
 </script>
 

@@ -169,5 +169,6 @@ export default async function (pi) {
     '4. Responsiveness: full width `width: 100%; box-sizing: border-box;`, mobile friendly touch controls. Do not trap the visual in an inner scroll area; let the card grow to the full height of the content. ' +
     '5. Title: include a short `<title>` (about 6–20 characters, e.g. `<title>二维正态分布的截面</title>`) naming the visual; the card header displays it instead of a generic label. ' +
     'Ordinary html code fences are displayed as static code blocks. A concise mathematical explanation may still need a precise diagram; skip visuals only when they do not help the task or the user explicitly prefers text. For static figures you may create a workspace PNG and embed it via Markdown. Never invent an external image URL. ' +
+    'Use inline Markdown citation links for specific claims. For useful additional references, place a fenced iris-sources block in the final answer with one Markdown link per line, for example [Page title](https://example.com). Iris renders these links only in its reference panel. Avoid a separate prose or Markdown source list and omit duplicate URLs. Put important qualifications about a source in the relevant paragraph. ' +
     'The model service and credentials are outside this sandbox. ' + INSTALL_GUIDANCE }));
 }

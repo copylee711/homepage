@@ -280,7 +280,7 @@ async function compact() {
   padding: 10px 0;
   border-bottom: 1px solid var(--line);
 }
-.capability-skill input { flex: none; margin: 1px 0 0; }
+.capability-skill input { width: 16px; height: 16px; flex: none; margin: 2px 0 0; cursor: pointer; accent-color: var(--accent, #18181b); }
 .capability-skill > span { min-width: 0; }
 .capability-skill strong { display: block; font-size: 13px; line-height: 18px; font-weight: 620; }
 .capability-skill small { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.45; }

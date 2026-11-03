@@ -12,7 +12,7 @@ defineProps<{ sources: any[] }>();
     <ol>
       <li v-for="source in sources" :key="source.url">
         <a :href="source.url" target="_blank" rel="noopener noreferrer">
-          <span class="source-number">{{ source.label }}</span>
+          <span v-if="source.label" class="source-number">{{ source.label }}</span>
           <span class="source-info">
             <strong>{{ source.title || source.host }}</strong>
             <small>{{ source.host }}</small>
