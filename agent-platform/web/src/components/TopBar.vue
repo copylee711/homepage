@@ -144,6 +144,5 @@ function toggleWorkspace() {
 .only-mobile { display: none; }
 @media (max-width: 860px) {
   .only-mobile { display: inline-flex; }
-  .topbar { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
 </style>

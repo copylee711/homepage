@@ -379,8 +379,12 @@ export const useSession = defineStore('session', {
       if (attachedQuotes.length > 0) {
         sections.push('【引用内容】\n' + attachedQuotes.map(q => q.text.split('\n').map(l => '> ' + l).join('\n')).join('\n\n'));
       }
+      const imageOnly = !rawText && !attachedQuotes.length && attachedRefs.length > 0
+        && attachedRefs.every(r => r.type === 'image' || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(r.name || ''));
       if (rawText) {
         sections.push(rawText);
+      } else if (!imageOnly) {
+        sections.push('请根据以上引用内容进行分析并回答。');
       }
 
       const message = opts.replay ? rawText : sections.join('\n\n');

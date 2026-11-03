@@ -389,29 +389,15 @@ function renderTable(lines, doc) {
     tbody.append(row);
   }
   table.append(thead, tbody);
+  const bar = node(doc, 'div', 'md-table-bar');
+  const toggle = node(doc, 'button', 'md-table-wrap-toggle', '换行');
+  toggle.type = 'button';
+  toggle.dataset.tableWrap = '';
+  toggle.setAttribute('aria-pressed', 'true');
+  toggle.setAttribute('aria-label', '单元格换行');
+  bar.append(toggle);
   scroller.append(table);
-
-  // Subtle wrap toggle icon: only shown when the table actually overflows the viewport.
-  const btn = node(doc, 'button', 'md-table-wrap-btn');
-  btn.type = 'button';
-  btn.dataset.tableWrap = '';
-  btn.title = '切换换行/单行显示';
-  btn.setAttribute('aria-label', '切换表格换行');
-  btn.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M3 12h14a3 3 0 0 1 0 6h-4M16 15l-3 3 3 3"/></svg>';
-
-  const checkOverflow = () => {
-    if (!scroller.isConnected) return;
-    const overflows = scroller.scrollWidth > scroller.clientWidth + 2;
-    btn.style.display = overflows ? 'inline-flex' : 'none';
-  };
-  queueMicrotask(() => {
-    checkOverflow();
-    if (typeof ResizeObserver !== 'undefined' && scroller.isConnected) {
-      new ResizeObserver(checkOverflow).observe(scroller);
-    }
-  });
-
-  wrap.append(btn, scroller);
+  wrap.append(bar, scroller);
   return wrap;
 }
 

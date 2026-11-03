@@ -71,46 +71,28 @@ const QUOTE_BLOCK_RE = /(?:^|\n\n)【引用内容】\n((?:> [^\n]+\n?)+)/;
 function refRecord(raw: any) {
   const p = typeof raw === 'string' ? raw : raw?.path;
   const clean = String(p || '').replace(/^\/workspace\/?/, '');
+  const inline = typeof raw === 'object' && raw?.inline === true;
   const name = (typeof raw === 'object' && raw?.name) || clean.split('/').pop() || clean;
   return {
     path: clean,
     name,
     type: typeof raw === 'object' ? raw?.type : undefined,
     previewUrl: typeof raw === 'object' ? raw?.previewUrl : undefined,
-    isDir: (typeof raw === 'object' && raw?.type === 'dir') || clean.endsWith('/'),
-    dir: clean.includes('/') ? clean.split('/').slice(0, -1).join('/') : '',
+    inline,
+    isDir: (typeof raw === 'object' && raw?.type === 'dir') || (!inline && clean.endsWith('/')),
+    dir: inline || !clean.includes('/') ? '' : clean.split('/').slice(0, -1).join('/'),
   };
 }
 const parsedUserRefs = computed(() => {
   if (Array.isArray(props.message?.refs) && props.message.refs.length) {
-    return props.message.refs.map((r: any) => {
-      const p = typeof r === 'string' ? r : r.path;
-      const clean = String(p || '').replace(/^\/workspace\/?/, '');
-      const inline = typeof r === 'object' && r.inline === true;
-      return {
-        path: clean,
-        name: (typeof r === 'object' && r.name) || clean.split('/').pop() || clean,
-        isDir: (typeof r === 'object' && r.type === 'dir') || clean.endsWith('/'),
-        dir: inline || !clean.includes('/') ? '' : clean.split('/').slice(0, -1).join('/'),
-        inline,
-        previewUrl: typeof r === 'object' ? r.previewUrl : undefined,
-      };
-    });
+    return props.message.refs.map(refRecord).filter((r: { path: string; previewUrl?: string; inline?: boolean }) => r.path || r.previewUrl || r.inline);
   }
   const match = userRawText.value.match(REF_BLOCK_RE);
   if (!match) return [];
   return match[1].split('\n').filter(Boolean).map((l: string) => {
     const rawPath = l.replace(/^-\s*`?/, '').replace(/`?\s*$/, '');
-    const clean = rawPath.replace(/^\/workspace\/?/, '');
-    return {
-      path: clean,
-      name: clean.split('/').pop() || clean,
-      isDir: clean.endsWith('/'),
-      dir: clean.includes('/') ? clean.split('/').slice(0, -1).join('/') : '',
-      inline: false,
-      previewUrl: undefined,
-    };
-  });
+    return refRecord(rawPath);
+  }).filter((r: { path: string }) => r.path);
 });
 const inlineImages = computed(() => {
   const message = props.message;

@@ -23,22 +23,26 @@ h1.md-heading { font-size: 1.48em; } h2.md-heading { font-size: 1.28em; } h3.md-
 .md-task-item > .md-task { position: absolute; top: 0.4em; left: 0; width: 15px; height: 15px; margin: 0; }
 .md-quote { margin: 0 0 12px; padding: 3px 0 3px 14px; border-left: 2px solid var(--line-strong); color: var(--text-2); }
 .md-rule { margin: 18px 0; border: 0; border-top: 1px solid var(--line); }
-/* Tables — clean, borderless ChatGPT-like presentation */
-.md-table-wrap { position: relative; max-width: 100%; min-width: 0; margin: 12px 0 16px; }
+/* Tables — full grid, with a wrap toggle. Nowrap scrolls horizontally. */
+.md-table-wrap { max-width: 100%; min-width: 0; margin: 0 0 13px; border: 0; border-radius: 0; background: transparent; }
+.md-table-bar { display: flex; justify-content: flex-end; margin: 0 0 4px; }
+.md-table-wrap-toggle { height: 22px; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--faint); font-size: 11px; font-weight: 550; line-height: 1; }
+.md-table-wrap-toggle:hover { color: var(--text-2); background: color-mix(in srgb, var(--text) 5%, transparent); }
+.md-table-wrap-toggle[aria-pressed='true'] { color: var(--text-2); border-color: var(--line-strong); background: color-mix(in srgb, var(--text) 5%, var(--surface)); }
 .md-table-scroll { max-width: 100%; overflow-x: auto; }
-.md-table-wrap table { border-collapse: collapse; width: 100%; font-size: 13.5px; line-height: 1.55; text-align: left; }
-.md-table-wrap th, .md-table-wrap td { padding: 9px 13px; text-align: left; vertical-align: top; border-right: 0; border-left: 0; overflow-wrap: anywhere; }
-.md-table-wrap th { background: transparent; font-weight: 620; color: var(--text); border-bottom: 1px solid var(--line-strong); }
-.md-table-wrap td { border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); color: var(--text); }
-.md-table-wrap tr:last-child td { border-bottom: 0; }
-.md-table-wrap .align-center { text-align: center; } .md-table-wrap .align-right { text-align: right; }
-.md-table-wrap-btn { position: absolute; top: -10px; right: 0; display: none; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface); color: var(--muted); cursor: pointer; opacity: 0.55; transition: opacity var(--fast), color var(--fast), background-color var(--fast); z-index: 2; box-shadow: var(--shadow-sm); }
-.md-table-wrap-btn:hover { opacity: 1; color: var(--text); background: var(--surface-2); }
-.md-table-wrap-btn[aria-pressed='true'] { color: var(--accent-ink); border-color: var(--line-strong); opacity: 1; }
+.md-table-wrap table { border-collapse: collapse; width: 100%; font-size: 13.5px; line-height: 1.45; background: transparent; }
+.md-table-wrap th, .md-table-wrap td { padding: 6px 10px; border: 1px solid var(--line-strong); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.md-table-wrap th { background: color-mix(in srgb, var(--text) 6%, var(--surface)); font-weight: 650; color: var(--text); }
+.md-table-wrap td { background: transparent; color: var(--text); }
+.md-table-wrap.is-nowrap .md-table-scroll { overflow-x: auto; }
 .md-table-wrap.is-nowrap table { width: max-content; min-width: 100%; }
 .md-table-wrap.is-nowrap th, .md-table-wrap.is-nowrap td { white-space: nowrap; overflow-wrap: normal; }
+.md-table-wrap .align-center { text-align: center; } .md-table-wrap .align-right { text-align: right; }
 @media (max-width: 640px) {
-  .md-table-wrap th, .md-table-wrap td { padding: 7px 10px; font-size: 13px; }
+  .md ul, .md ol { padding-left: 1.2em; }
+  .md-table-wrap th, .md-table-wrap td { padding: 5px 8px; }
+  .code-block { border-radius: 10px; }
+  .code-block pre { padding: 10px 12px; }
 }
 
 /* Display math — pure unboxed centered typography */
