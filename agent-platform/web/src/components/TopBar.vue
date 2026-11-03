@@ -121,8 +121,7 @@ function toggleWorkspace() {
   z-index: 10;
   pointer-events: none;
 }
-.chat-heading,
-.topbar-actions {
+.topbar > * {
   pointer-events: auto;
 }
 .chat-heading { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 2px; }
