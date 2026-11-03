@@ -48,7 +48,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', onDown, true
 
 <style>
 .ctx-menu { position: fixed; z-index: 170; min-width: 180px; max-width: 260px; padding: 6px; border: 1px solid var(--line-2); border-radius: 13px; background: var(--surface); box-shadow: var(--shadow-lg); animation: ctx-in 120ms var(--ease); }
-@keyframes ctx-in { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes ctx-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 .ctx-item { width: 100%; min-height: 32px; display: flex; align-items: center; gap: 10px; padding: 6px 9px; border-radius: 8px; color: var(--text-2); text-align: left; font-size: 13px; }
 .ctx-item:hover:not(:disabled), .ctx-item:focus-visible { background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--text); outline: 0; }
 .ctx-item:disabled { opacity: 0.4; }

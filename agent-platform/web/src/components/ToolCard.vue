@@ -16,10 +16,14 @@ const isGroup = computed(() => list.value.length > 1);
 
 // 3-state machine for multi-tool groups (identical behavior to ThinkingBlock):
 //   'preview'   -> initial state (~4 rows scrollable window, auto-scrolls to newest)
-//   'collapsed' -> first click collapses to 0px
+//   'collapsed' -> collapsed to the summary line
 //   'expanded'  -> subsequent clicks toggle full list <-> collapsed
+// A group stays in preview while any child is still running or pending, then
+// collapses once every child has finished. Reopening that settled group pins it
+// open so the same settled snapshot does not collapse again immediately.
 type GroupMode = 'preview' | 'collapsed' | 'expanded';
 const mode = ref<GroupMode>('preview');
+const pinnedOpen = ref(false);
 const listEl = ref<HTMLElement | null>(null);
 const userScrolledUp = ref(false);
 const openRows = ref<Record<string, boolean>>({});
@@ -36,9 +40,13 @@ function toggleRow(b: any, idx: number) {
 }
 
 function toggleGroup() {
-  if (mode.value === 'preview') mode.value = 'collapsed';
-  else if (mode.value === 'collapsed') mode.value = 'expanded';
-  else mode.value = 'collapsed';
+  if (mode.value === 'collapsed') {
+    mode.value = 'expanded';
+    if (runningCount.value === 0) pinnedOpen.value = true;
+    return;
+  }
+  mode.value = 'collapsed';
+  pinnedOpen.value = false;
 }
 
 function onGroupScroll() {
@@ -58,6 +66,16 @@ watch(
 );
 
 const runningCount = computed(() => list.value.filter(b => b?.state === 'running' || b?.state === 'pending').length);
+if (list.value.length > 1 && runningCount.value === 0) mode.value = 'collapsed';
+watch(runningCount, (running, previous) => {
+  if (list.value.length < 2) return;
+  if (running > 0) {
+    pinnedOpen.value = false;
+    if (mode.value === 'collapsed' && previous === 0) mode.value = 'preview';
+    return;
+  }
+  if (!pinnedOpen.value) mode.value = 'collapsed';
+});
 const failedCount = computed(() => list.value.filter(b => b?.state === 'error').length);
 const totalDurationMs = computed(() => list.value.reduce((acc, b) => acc + (Number(b?.durationMs) || 0), 0));
 

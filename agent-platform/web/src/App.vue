@@ -116,8 +116,8 @@ onMounted(() => {
   border-left-color: transparent;
 }
 
-.scrim { position: fixed; inset: 0; z-index: 50; background: rgba(12, 13, 18, 0.48); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
-.mobile-drawer { position: fixed; top: 0; bottom: 0; z-index: 60; box-shadow: 0 18px 56px rgba(0, 0, 0, 0.42), var(--shadow-lg); animation: drawer-in var(--slow) var(--ease); overflow: hidden; }
+.scrim { position: fixed; inset: 0; z-index: 50; background: rgba(12, 13, 18, 0.48); }
+.mobile-drawer { position: fixed; top: 0; bottom: 0; z-index: 60; box-shadow: var(--shadow); animation: drawer-in var(--slow) var(--ease); overflow: hidden; }
 .mobile-drawer.left { left: 0; width: min(86vw, 320px); border-radius: 0 22px 22px 0; border-right: 1px solid var(--line); }
 .mobile-drawer.right { right: 0; width: min(92vw, 404px); border-radius: 22px 0 0 22px; border-left: 1px solid var(--line); }
 .mobile-drawer .sidebar, .mobile-drawer .workspace { border-radius: inherit; width: 100%; }

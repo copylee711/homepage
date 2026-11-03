@@ -676,7 +676,7 @@ watch(() => session.draftText, (val) => {
 </template>
 
 <style>
-.composer-area { flex: none; padding: 6px clamp(16px, 4vw, 40px) max(10px, env(safe-area-inset-bottom)); background: var(--bg); transition: padding-bottom 350ms var(--ease); }
+.composer-area { flex: none; padding: 6px clamp(16px, 4vw, 40px) max(10px, env(safe-area-inset-bottom)); background: transparent; transition: padding-bottom 350ms var(--ease); }
 .composer-area.is-welcome { padding-bottom: clamp(48px, calc(50dvh - 168px), 300px); }
 @media (max-width: 860px) {
   .composer-area.is-welcome { padding-bottom: max(12px, calc(50dvh - 168px)); }
@@ -704,6 +704,7 @@ watch(() => session.draftText, (val) => {
   flex-wrap: wrap;
   gap: 5px;
   min-height: 26px;
+  background: transparent;
   pointer-events: auto;
   animation: comp-tab-in 160ms var(--ease);
 }
@@ -891,7 +892,7 @@ watch(() => session.draftText, (val) => {
   pointer-events: none;
 }
 @media (max-width: 640px) {
-  .composer-area { padding: 4px 8px max(6px, env(safe-area-inset-bottom)); }
+  .composer-area { padding: 4px max(20px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); }
   .composer { padding: 8px 10px 7px 12px; border-radius: 20px; }
   .composer textarea { font-size: 16px; }
   .composer-project-tab-bar { min-height: 24px; gap: 4px; }

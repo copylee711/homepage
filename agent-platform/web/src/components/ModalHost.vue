@@ -154,4 +154,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey, true));
   gap: 8px;
   margin-top: 6px;
 }
+@media (max-width: 860px) {
+  .iris-modal-backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
 </style>

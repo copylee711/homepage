@@ -122,7 +122,7 @@ onBeforeUnmount(() => {
 
 <style>
 .menu { position: fixed; z-index: 160; min-width: 250px; padding: 6px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-lg); animation: menu-in 130ms var(--ease); }
-@keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
 .menu-divider { height: 1px; margin: 5px -6px; background: var(--line-2); }
 .menu-header { padding: 6px 9px 4px; font-size: 11px; font-weight: 650; color: var(--muted); letter-spacing: 0.02em; user-select: none; }
 .menu-item { width: 100%; min-height: 34px; display: flex; align-items: center; gap: 10px; padding: 7px 9px; border-radius: 9px; color: var(--text-2); text-align: left; font-size: 13px; transition: background-color var(--fast), color var(--fast); }

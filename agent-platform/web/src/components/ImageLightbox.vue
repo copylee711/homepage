@@ -194,4 +194,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey, true));
   object-fit: contain;
   display: block;
 }
+@media (max-width: 860px) {
+  .iris-lightbox-backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
 </style>

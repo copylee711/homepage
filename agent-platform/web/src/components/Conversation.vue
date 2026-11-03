@@ -218,7 +218,7 @@ onMounted(() => {
 .scroll-anchor { height: 1px; width: 100%; pointer-events: none; scroll-margin-bottom: var(--thread-end-gap, 12px); }
 .is-jump-target .user-bubble { box-shadow:0 0 0 2px var(--line-strong); }
 @media(max-width:640px){
-  .conversation { scrollbar-gutter: auto; padding-left: 12px; padding-right: 18px; }
+  .conversation { scrollbar-gutter: auto; padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(28px, env(safe-area-inset-right)); contain: paint; }
   .messages { gap: 22px; padding-top: 14px; }
 }
 .conversation-state { padding: 40px 0; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: 12.5px; }
@@ -231,8 +231,8 @@ onMounted(() => {
 .approval-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
 .status-error { color: var(--danger); }
 .working-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); animation: breathe 1.7s ease-in-out infinite; }
-@keyframes breathe { 0%, 100% { opacity: 1; box-shadow: 0 0 0 3px var(--accent-soft); } 50% { opacity: 0.5; box-shadow: 0 0 0 6px transparent; } }
-.jump-latest { position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: 8px; z-index: 5; width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-2); border-radius: 50%; background: var(--surface); color: var(--text-2); box-shadow: var(--shadow-lg); transition: border-color var(--fast), color var(--fast), transform var(--fast); }
-.jump-latest:hover { border-color: var(--line-strong); color: var(--text); transform: translateY(-1px); }
-@media(max-width:640px){ .jump-latest { right: 10px; bottom: 6px; } }
+@keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.82); } }
+.jump-latest { position: absolute; left: 50%; right: auto; bottom: 16px; z-index: 5; width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-2); border-radius: 50%; background: var(--surface); color: var(--text-2); box-shadow: var(--shadow); transform: translateX(-50%); transition: border-color var(--fast), color var(--fast), transform var(--fast); }
+.jump-latest:hover { border-color: var(--line-strong); color: var(--text); transform: translateX(-50%) translateY(-1px); }
+@media(max-width:640px){ .jump-latest { left: auto; right: max(28px, calc(env(safe-area-inset-right) + 18px)); bottom: 12px; transform: none; } .jump-latest:hover { transform: translateY(-1px); } }
 </style>

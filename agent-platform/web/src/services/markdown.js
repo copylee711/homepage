@@ -292,7 +292,17 @@ function renderTable(lines, doc) {
     });
     tbody.append(row);
   }
-  table.append(thead, tbody); wrap.append(table);
+  table.append(thead, tbody);
+  const bar = node(doc, 'div', 'md-table-bar');
+  const toggle = node(doc, 'button', 'md-table-wrap-toggle', '换行');
+  toggle.type = 'button';
+  toggle.dataset.tableWrap = '';
+  toggle.setAttribute('aria-pressed', 'true');
+  toggle.setAttribute('aria-label', '单元格换行');
+  bar.append(toggle);
+  const scroller = node(doc, 'div', 'md-table-scroll');
+  scroller.append(table);
+  wrap.append(bar, scroller);
   return wrap;
 }
 
