@@ -146,7 +146,9 @@ class Pi {
   mask(text) { for (const key of this.secrets || []) text = text.split(key).join('[REDACTED]'); return text; }
   publish(event) {
     if (!this.fanout || !event) return;
-    const line = this.mask(JSON.stringify(event)) + '\n';
+    const line = this.mask(JSON.stringify(event, (_key, value) =>
+      value?.type === 'image' && typeof value.data === 'string'
+        ? { type: 'text', text: '[图片已交给模型]' } : value)) + '\n';
     this.fanout.publish(line);
     this.persist(line);
   }

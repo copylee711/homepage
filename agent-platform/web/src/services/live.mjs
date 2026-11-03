@@ -53,7 +53,7 @@ export function handleEvent(event, live) {
       case 'thinking_start': ensureBlock(u.contentIndex, 'thinking'); break;
       case 'thinking_delta': { const b = ensureBlock(u.contentIndex, 'thinking'); b.text += u.delta || ''; break; }
       case 'thinking_end': { const b = ensureBlock(u.contentIndex, 'thinking'); if (typeof u.content === 'string') b.text = u.content; break; }
-      case 'toolcall_start': { const b = ensureBlock(u.contentIndex, 'tool'); b.id = u.id || u.toolCall?.id; b.name = u.toolName || u.toolCall?.name || 'tool'; b.state = 'pending'; b.args = ''; vm.status = '正在准备工具…'; break; }
+      case 'toolcall_start': { const b = ensureBlock(u.contentIndex, 'tool'); b.id = u.id || u.toolCall?.id; b.name = u.toolName || u.toolCall?.name || 'tool'; b.state = 'pending'; b.args = ''; if (b.name !== 'set_chat_title') vm.status = '正在准备工具…'; break; }
       case 'toolcall_delta': { const b = ensureBlock(u.contentIndex, 'tool'); b.args = (b.args || '') + (u.delta || ''); break; }
       case 'toolcall_end': { const b = ensureBlock(u.contentIndex, 'tool'); const tc = u.toolCall || {}; b.id = tc.id || b.id; b.name = tc.name || b.name; b.args = tc.arguments ? JSON.stringify(tc.arguments, null, 2) : b.args; b.state = 'pending'; break; }
     }
@@ -62,16 +62,23 @@ export function handleEvent(event, live) {
   if (event.type === 'tool_execution_start') {
     const b = vm.blocks.find((x) => x.type === 'tool' && x.id === event.toolCallId) || ensureBlock(1e6 + vm.blocks.length, 'tool');
     b.id = event.toolCallId; b.name = event.toolName || b.name; b.state = 'running'; if (event.args) b.args = JSON.stringify(event.args, null, 2);
-    b.started = Date.now(); vm.status = '正在执行工具 · ' + (event.toolName || ''); vm.spinner = true;
+    b.started = Date.now();
+    if (b.name !== 'set_chat_title') { vm.status = '正在执行工具 · ' + (event.toolName || ''); vm.spinner = true; }
     return;
   }
   if (event.type === 'tool_execution_end') {
     const b = vm.blocks.find((x) => x.type === 'tool' && x.id === event.toolCallId);
     if (b) { b.state = event.isError ? 'error' : 'success'; b.result = toolText(event.result); b.durationMs = event.durationMs || (b.started ? Date.now() - b.started : 0); }
-    vm.status = '正在整理结果…'; return;
+    if (b?.name !== 'set_chat_title') vm.status = '正在整理结果…'; return;
   }
   if (event.type === 'gateway_error') throw new Error(event.error || '任务中断，请重试');
-  if (event.type === 'agent_settled') { if (event.aborted) vm.stopped = true; vm.status = ''; vm.spinner = false; }
+  if (event.type === 'agent_settled') { if (event.aborted) vm.stopped = true; settleTools(vm, vm.stopped ? 'stopped' : 'interrupted'); vm.status = ''; vm.spinner = false; }
+}
+
+export function settleTools(vm, state) {
+  for (const block of vm.blocks) {
+    if (block.type === 'tool' && ['pending', 'running'].includes(block.state)) block.state = state;
+  }
 }
 
 function toolText(value) {

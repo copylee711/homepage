@@ -10,9 +10,10 @@ import { collectSources } from '../services/markdown.js';
 
 // Accepts normalized blocks: { type:'text'|'thinking'|'tool', text?, ...tool fields }
 const props = defineProps<{ blocks: any[]; streaming?: boolean; nested?:boolean; references?:any[] }>();
-const bodyIndex=computed(()=>props.nested?-1:props.blocks.findLastIndex(b=>b.type==='text'&&b.text?.trim()));
-const prelude=computed(()=>props.nested?[]:bodyIndex.value>0?props.blocks.slice(0,bodyIndex.value):bodyIndex.value<0?props.blocks:[]);
-const visibleBlocks=computed(()=>props.nested?props.blocks:bodyIndex.value<0?[]:props.blocks.slice(bodyIndex.value));
+const displayBlocks = computed(() => props.blocks.filter(block => block.type !== 'tool' || block.name !== 'set_chat_title'));
+const bodyIndex=computed(()=>props.nested?-1:displayBlocks.value.findLastIndex(b=>b.type==='text'&&b.text?.trim()));
+const prelude=computed(()=>props.nested?[]:bodyIndex.value>0?displayBlocks.value.slice(0,bodyIndex.value):bodyIndex.value<0?displayBlocks.value:[]);
+const visibleBlocks=computed(()=>props.nested?displayBlocks.value:bodyIndex.value<0?[]:displayBlocks.value.slice(bodyIndex.value));
 const preludeOpen=ref(true);
 const canCollapse = computed(() => bodyIndex.value >= 0 || !props.streaming);
 watch([bodyIndex, canCollapse], ([index, ready], previous) => {

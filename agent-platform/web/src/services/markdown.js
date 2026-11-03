@@ -126,7 +126,27 @@ function image(doc, raw, label) {
   const src=imageUrl(raw);if(!src)return node(doc,'span','md-blocked-link',label||'图片地址不可用');
   const anchor=node(doc,'a','md-image',null);anchor.href=src;anchor.target='_blank';anchor.rel='noopener noreferrer';anchor.dataset.imagePreview=src;anchor.setAttribute('aria-label','放大图片：'+(label||'图片'));
   const img=node(doc,'img',null,null);img.alt=label||'图片';img.loading='lazy';img.decoding='async';img.referrerPolicy='no-referrer';img.src=src;
-  img.addEventListener('error',()=>{anchor.classList.add('is-failed');anchor.replaceChildren(node(doc,'span',null,'图片加载失败 · '+(label||'点击重试查看')));},{once:true});
+  let retries = 0;
+  img.addEventListener('error', () => {
+    if (retries < 2) {
+      const attempt = ++retries;
+      setTimeout(() => { if (anchor.isConnected) img.src = src + '&retry=' + attempt; }, attempt * 1200 + Math.random() * 600);
+      return;
+    }
+    anchor.classList.add('is-failed');
+    anchor.removeAttribute('data-image-preview');
+    anchor.setAttribute('aria-label', '重新加载图片：' + (label || '图片'));
+    anchor.replaceChildren(node(doc, 'span', null, '图片加载失败 · 点击重试'));
+  });
+  anchor.addEventListener('click', event => {
+    if (!anchor.classList.contains('is-failed')) return;
+    event.preventDefault();
+    retries = 0;
+    anchor.classList.remove('is-failed');
+    anchor.dataset.imagePreview = src;
+    anchor.replaceChildren(img);
+    img.src = src + '&retry=' + Date.now();
+  });
   anchor.append(img);return anchor;
 }
 

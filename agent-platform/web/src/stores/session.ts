@@ -1,9 +1,12 @@
-import { reactiveLive, handleEvent } from '../services/live.mjs';
+import { reactiveLive, handleEvent, settleTools } from '../services/live.mjs';
 import { defineStore } from 'pinia';
 import { reactive } from 'vue';
 import { get, post, setCsrf, ApiError } from '../services/api';
+import { textContent } from '../services/format';
 import { streamPrompt } from '../services/stream';
 import { useUi } from './ui';
+
+type ImagePart = { type: 'image'; data: string; mimeType: string };
 
 export type PermissionScope = 'project_only' | 'scoped' | 'full';
 
@@ -350,11 +353,11 @@ export const useSession = defineStore('session', {
         this.chatError = error.message || '无法读取对话。';
       } finally { this.loadingChat = false; }
     },
-    async send(text: string, opts: { retry?: boolean; continuation?: boolean } = {}) {
-      const rawText = String(text || '').trim();
-      const attachedRefs = [...this.workspaceRefs];
-      const attachedQuotes = [...this.textQuotes];
-      if (!rawText && !attachedRefs.length && !attachedQuotes.length) return;
+    async send(text: string, opts: { retry?: boolean; continuation?: boolean; replay?: { images: ImagePart[]; refs: WorkspaceRef[]; quotes: TextQuote[] } } = {}) {
+      const rawText = typeof text === 'string' ? (opts.replay ? text : text.trim()) : '';
+      const attachedRefs = opts.replay?.refs ?? [...this.workspaceRefs];
+      const attachedQuotes = opts.replay?.quotes ?? [...this.textQuotes];
+      if (!rawText && !attachedRefs.length && !attachedQuotes.length && !opts.replay?.images.length) return;
       if (!this.canExecute || this.busy) return;
       if (!this.chatId) this.startNew();
       const thread = this.chatId!;
@@ -373,9 +376,8 @@ export const useSession = defineStore('session', {
         sections.push(rawText);
       }
 
-      const message = sections.join('\n\n');
-      this.workspaceRefs = [];
-      this.textQuotes = [];
+      const message = opts.replay ? rawText : sections.join('\n\n');
+      if (!opts.replay) { this.workspaceRefs = []; this.textQuotes = []; }
 
       // Show the chat in the sidebar as soon as the first turn starts, instead
       // of waiting for the server list refresh after the stream ends.
@@ -385,8 +387,8 @@ export const useSession = defineStore('session', {
         this.chats.unshift({ id: thread, title: seedTitle || '新任务', updated: Date.now(), projectId: this.currentProjectId, permission: this.currentChatPermission });
       }
 
-      const images: Array<{ type: 'image'; data: string; mimeType: string }> = [];
-      for (const r of attachedRefs) {
+      const images: ImagePart[] = opts.replay?.images ?? [];
+      for (const r of opts.replay ? [] : attachedRefs) {
         if (r.type === 'image' || /\.(png|jpe?g|gif|webp|bmp)$/i.test(r.name)) {
           if (r.base64) {
             images.push({ type: 'image', data: r.base64, mimeType: r.mimeType || 'image/png' });
@@ -412,6 +414,7 @@ export const useSession = defineStore('session', {
         refs: attachedRefs.map(r => ({ path: r.path, name: r.name, type: r.type, size: r.size, previewUrl: r.previewUrl, inline: r.inline })),
         quotes: attachedQuotes.map(q => ({ id: q.id, text: q.text, source: q.source })),
         _rawPrompt: rawText,
+        _promptImages: images,
         _fresh: true,
       });
       this.lastUserText = rawText || message;
@@ -436,14 +439,16 @@ export const useSession = defineStore('session', {
         live.finished = true;
         live.status = '';
       } catch (error: any) {
-        if (error.name === 'AbortError') {
-          if (this.stopping) { live.stopped = true; }
-          else live.error = '与服务器的流式连接中断，请刷新对话后重试。';
+        if (this.stopping && (error.name === 'AbortError' || error.message === '任务已停止')) {
+          live.stopped = true;
+        } else if (error.name === 'AbortError') {
+          live.error = '与服务器的流式连接中断，请刷新对话后重试。';
         } else {
           if (!received) { streamMessages.pop(); }
           live.error = error.message || '任务启动失败，请重试。';
         }
       } finally {
+        settleTools(live, live.stopped ? 'stopped' : 'interrupted');
         // fold the live view model into the transcript as a finalized message
         const durationMs = Math.max(0, Date.now() - turnStartTime);
         streamMessages.push({ role: 'assistant', timestamp: Date.now(), durationMs, content: live.blocks, _vm: live, _fresh: true });
@@ -462,8 +467,14 @@ export const useSession = defineStore('session', {
       if (!this.busy || this.stopping) return;
       this.stopping = true;
       const thread = this.liveThread || this.chatId;
-      try { if (thread) await post('/api/abort', { thread }); } catch {}
-      this.controller?.abort();
+      const controller = this.controller;
+      try { if (thread) await post('/api/abort', { thread }); }
+      catch (error: any) {
+        this.stopping = false;
+        useUi().toast(error.message || '停止任务失败，请重试', { tone: 'error' });
+        return;
+      }
+      controller?.abort();
     },
     async renameChat(id: string, title: string) {
       const t = String(title || '').replace(/\s+/g, ' ').trim();
@@ -483,13 +494,20 @@ export const useSession = defineStore('session', {
       }
       if (userIdx < 0) return;
       const userMsg = this.messages[userIdx];
-      const rawPrompt = userMsg._rawPrompt || userMsg.content;
+      const rawPrompt = textContent(userMsg.content);
+      const parts = Array.isArray(userMsg.content) ? userMsg.content : [];
+      const images: ImagePart[] = (userMsg._promptImages ?? parts).filter((part: any) =>
+        part?.type === 'image' && typeof part.data === 'string' && typeof part.mimeType === 'string');
+      if (!rawPrompt.trim() && !images.length) {
+        useUi().toast('原消息没有可重新发送的内容，历史已保留', { tone: 'error' });
+        return;
+      }
       if (this.chatId) {
         try { await post('/api/chats/truncate', { thread: this.chatId, keepUserTurns: this.messages.slice(0, userIdx).filter(m => m.role === 'user').length }); }
         catch (error: any) { useUi().toast(error.message || '重试失败，历史已保留', { tone: 'error' }); return; }
       }
       this.messages = this.messages.slice(0, userIdx);
-      await this.send(rawPrompt);
+      await this.send(rawPrompt, { replay: { images, refs: userMsg.refs || [], quotes: userMsg.quotes || [] } });
     },
     async rewindFromMessage(msg: any) {
       if (this.busy) return;
@@ -502,7 +520,7 @@ export const useSession = defineStore('session', {
         }
       }
       const userMsg = this.messages[userIdx];
-      const rawPrompt = userMsg?._rawPrompt || userMsg?.content || '';
+      const rawPrompt = userMsg?._rawPrompt ?? textContent(userMsg?.content);
       if (this.chatId) {
         try { await post('/api/chats/truncate', { thread: this.chatId, keepUserTurns: this.messages.slice(0, userIdx).filter(m => m.role === 'user').length }); }
         catch (error: any) { useUi().toast(error.message || '回退失败，历史已保留', { tone: 'error' }); return; }

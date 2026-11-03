@@ -23,22 +23,51 @@ export async function streamPrompt({ thread, message, images, thinking, projectI
     throw new ApiError(typeof data.error === 'string' ? data.error : '任务启动失败，请重试', response.status, data);
   }
   if (!response.body) throw new ApiError('浏览器无法读取流式响应', 0);
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder('utf-8');
+  let reader = response.body.getReader();
+  let decoder = new TextDecoder('utf-8');
   let buffer = '';
   let settled = false;
+  let cursor = 0;
+  let reconnects = 0;
   const batch = eventBatch(onEvent);
   const dispatch = (line: string) => {
     if (!line.trim()) return;
     let event: any;
     try { event = JSON.parse(line); } catch { return; }
+    if (event?.type === 'turn_gap') throw new ApiError('部分实时记录已过期，请刷新对话查看结果。', 0);
+    cursor++;
     if (event?.type === 'agent_settled') settled = true;
     batch.push(event);
   };
   try {
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try { chunk = await reader.read(); }
+      catch (error: any) {
+        if (signal.aborted || error?.name === 'AbortError') throw error;
+        chunk = { done: true, value: undefined };
+      }
+      const { done, value } = chunk;
+      if (done) {
+        if (settled || signal.aborted || reconnects++ >= 3) break;
+        reader.releaseLock();
+        buffer = '';
+        decoder = new TextDecoder();
+        let resumed: Response;
+        try {
+          resumed = await fetch('/api/turns/subscribe', {
+            method: 'POST', credentials: 'same-origin', signal,
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrf() },
+            body: JSON.stringify({ thread, cursor }),
+          });
+        } catch (error: any) {
+          if (signal.aborted || error?.name === 'AbortError') throw error;
+          throw new ApiError('连接暂时中断，请刷新对话查看云端任务。', 0);
+        }
+        if (!resumed.ok || !resumed.body) break;
+        reader = resumed.body.getReader();
+        continue;
+      }
       buffer += decoder.decode(value, { stream: true });
       let newline: number;
       while ((newline = buffer.indexOf('\n')) >= 0) {

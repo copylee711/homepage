@@ -50,11 +50,11 @@ test('install and build commands are the ones that should leave the foreground b
   assert.match(INSTALL_GUIDANCE, /purpose "install"/);
 });
 
-test('the sandbox extension refuses foreground installs and can pause until background work finishes', async () => {
+test('the sandbox extension moves installs to the background and can pause until background work finishes', async () => {
   const source = await readFile(new URL('../sandbox-extension.ts', import.meta.url), 'utf8');
   assert.match(source, /prefersBackgroundInstall/);
   assert.match(source, /name: 'background_wait'/);
   assert.match(source, /taskPurpose\(params\.command, params\.purpose\)/);
   assert.match(source, /INSTALL_GUIDANCE/);
-  assert.match(source, /exitCode: 126/);
+  assert.match(source, /call\('background-start', \{ command, cwd, purpose: 'install' \}, signal\)/);
 });

@@ -4,7 +4,7 @@ import { createReadToolDefinition, createWriteToolDefinition, createEditToolDefi
 import { Type } from 'typebox';
 import { packageReader } from './package-resources.mjs';
 import { requiresApproval } from './execution-policy.mjs';
-import { prefersBackgroundInstall, taskPurpose, INSTALL_GUIDANCE, INSTALL_REDIRECT } from './install-background.mjs';
+import { prefersBackgroundInstall, taskPurpose, INSTALL_GUIDANCE } from './install-background.mjs';
 import { turnGuidance } from './agent-guidance.mjs';
 
 export default async function (pi) {
@@ -143,8 +143,9 @@ export default async function (pi) {
   pi.registerTool(createBashToolDefinition(cwd, { exposeSessionEnvironment: false, operations: {
     exec: async (command, _cwd, { onData, signal, timeout }) => {
       if (prefersBackgroundInstall(command)) {
-        onData(Buffer.from(INSTALL_REDIRECT));
-        return { exitCode: 126 };
+        const task = await call('background-start', { command, cwd, purpose: 'install' }, signal);
+        onData(Buffer.from(JSON.stringify(task) + '\n命令已提交后台，尚未完成。先继续其他工作，没有可并行步骤时调用 background_wait，完成后检查退出码和日志。'));
+        return { exitCode: 0 };
       }
       const result = await call('bash', { command, timeout, cwd }, signal);
       onData(Buffer.from(result.output)); return { exitCode: result.exitCode };

@@ -75,6 +75,7 @@ watch([isGroup, runningCount], ([group, running], previous) => {
   }
   if (!pinnedOpen.value) mode.value = 'collapsed';
 }, { immediate: true });
+const stoppedCount = computed(() => list.value.filter(b => b.state === 'stopped' || b.state === 'interrupted').length);
 const failedCount = computed(() => list.value.filter(b => b?.state === 'error').length);
 const totalDurationMs = computed(() => list.value.reduce((acc, b) => acc + (Number(b?.durationMs) || 0), 0));
 
@@ -203,7 +204,7 @@ const claudeSummary = computed(() => {
   const remaining = Math.max(0, total - Math.max(1, displayedCount));
   const headText = headParts.slice(0, 2).join('，') + (remaining > 0 ? '…' : '');
   const moreText = remaining > 0 ? `还有 ${remaining} 项操作` : '';
-  const failedText = failedCount.value > 0 ? `(${failedCount.value} 项失败)` : '';
+  const failedText = failedCount.value > 0 ? `(${failedCount.value} 项失败)` : stoppedCount.value ? `(${stoppedCount.value} 项中断)` : '';
 
   return { headText, moreText, failedText, diffAdd, diffDel };
 });
@@ -252,6 +253,7 @@ function openArgFile(v: string) {
       </span>
       <span class="tc-summary" :title="summarize(list[0])">{{ summarize(list[0]) }}</span>
       <span v-if="list[0].state === 'error'" class="tc-failed">失败</span>
+          <span v-else-if="list[0].state === 'stopped' || list[0].state === 'interrupted'" class="tc-time">{{ list[0].state === 'stopped' ? '已停止' : '已中断' }}</span>
       <span v-if="list[0].durationMs" class="tc-dur">{{ formatDuration(list[0].durationMs) }}</span>
       <span class="tc-chevron"><Icon name="chevron-right" :size="12" /></span>
     </button>
@@ -322,6 +324,7 @@ function openArgFile(v: string) {
             <span class="tg-row-target">{{ actionParts(b).target }}</span>
           </span>
           <span v-if="b.state === 'error'" class="tc-failed">失败</span>
+          <span v-else-if="b.state === 'stopped' || b.state === 'interrupted'" class="tc-time">{{ b.state === 'stopped' ? '已停止' : '已中断' }}</span>
           <span v-else-if="b.durationMs" class="tc-dur">{{ formatDuration(b.durationMs) }}</span>
           <span class="tc-chevron"><Icon name="chevron-right" :size="12" /></span>
         </button>
