@@ -21,7 +21,9 @@ else:
     value = json.loads(sys.argv[1]); cwd = Path(value['cwd']).resolve(strict=True)
     if not cwd.is_relative_to('/workspace') or not cwd.is_dir(): raise ValueError('后台任务目录无效')
     os.environ['PATH'] = str(cwd / '.venv/bin') + ':' + str(cwd / '.tools/bin') + ':' + str(cwd / 'node_modules/.bin') + ':/workspace/.tools/bin:/workspace/.tools/node_modules/.bin:' + os.environ.get('PATH', '')
-    os.environ.update({'NODE_USE_ENV_PROXY':'1','NO_PROXY':'localhost,127.0.0.1','no_proxy':'localhost,127.0.0.1','COREPACK_HOME':str(cwd / '.cache/corepack'),'PNPM_HOME':str(cwd / '.tools/bin'),'npm_config_prefix':str(cwd / '.tools'),'npm_config_https_proxy':os.environ.get('HTTPS_PROXY',''),'npm_config_proxy':os.environ.get('HTTP_PROXY',''),'npm_config_update_notifier':'false'})
+    os.environ.update({'NODE_USE_ENV_PROXY':'1','http_proxy':os.environ.get('HTTP_PROXY',''),'https_proxy':os.environ.get('HTTPS_PROXY',''),'NO_PROXY':'localhost,127.0.0.1','no_proxy':'localhost,127.0.0.1','COREPACK_HOME':str(cwd / '.cache/corepack'),'PNPM_HOME':str(cwd / '.tools/bin'),'npm_config_prefix':str(cwd / '.tools'),'npm_config_https_proxy':os.environ.get('HTTPS_PROXY',''),'npm_config_proxy':os.environ.get('HTTP_PROXY',''),'npm_config_update_notifier':'false'})
+    scratch=cwd / '.cache/tmp';scratch.mkdir(parents=True,exist_ok=True)
+    os.environ.update({'TMPDIR':str(scratch),'npm_config_cache':str(cwd / '.cache/npm'),'PIP_CACHE_DIR':str(cwd / '.cache/pip')})
     proc = subprocess.Popen(['/bin/sh', '-lc', value['command']], cwd=cwd, start_new_session=True)
     def stop(*_):
         try: os.killpg(proc.pid, signal.SIGTERM)

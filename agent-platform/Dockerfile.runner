@@ -6,15 +6,15 @@ COPY agent-platform/package*.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 ENV PATH="/opt/pi/node_modules/.bin:$PATH" PI_CODING_AGENT_DIR=/data/agent HOME=/data
 WORKDIR /app
-COPY agent-platform/runner.mjs agent-platform/shared.mjs ./
+COPY agent-platform/runner.mjs agent-platform/shared.mjs agent-platform/prompt-input.mjs ./
 COPY agent-platform/providers.mjs agent-platform/provider-test.mjs agent-platform/provider-models.mjs ./
 COPY agent-platform/sandbox-client.mjs agent-platform/session-limits.mjs agent-platform/session-cwd.mjs ./
 COPY agent-platform/conversations.mjs agent-platform/workspace.mjs ./
 COPY agent-platform/session-snapshot.mjs ./
 COPY agent-platform/tool-approvals.mjs ./
 COPY agent-platform/execution-policy.mjs agent-platform/search.mjs agent-platform/memory.mjs ./
-COPY agent-platform/features.mjs agent-platform/mcp.mjs agent-platform/stream-wire.mjs ./
-COPY agent-platform/execution-policy.mjs /opt/pi/execution-policy.mjs
+COPY agent-platform/features.mjs agent-platform/mcp.mjs agent-platform/stream-wire.mjs agent-platform/web-session.mjs ./
+COPY agent-platform/execution-policy.mjs agent-platform/agent-guidance.mjs /opt/pi/
 COPY agent-platform/packages.mjs ./
 COPY agent-platform/toolchains.mjs agent-platform/toolchains.json agent-platform/search-presets.json ./
 COPY agent-platform/sandbox-extension.ts /opt/pi/sandbox-extension.ts

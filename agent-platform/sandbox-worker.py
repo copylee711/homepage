@@ -194,14 +194,16 @@ def bash(value):
     cwd, _ = inside(candidate(value.get("cwd") or "."))
     if not cwd.is_dir():
         raise ValueError("命令工作目录不存在")
+    scratch = cwd / '.cache' / 'tmp'
+    scratch.mkdir(parents=True, exist_ok=True)
     proc = subprocess.Popen(["/bin/bash", "-c", command], cwd=str(cwd),
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=True,
                               env={"PATH": str(cwd / '.venv/bin') + ':' + str(cwd / '.tools/bin') + ':' + str(cwd / 'node_modules/.bin') + ":/workspace/.tools/bin:/workspace/.tools/node_modules/.bin:/usr/local/bin:/usr/bin:/bin", "HOME": "/tmp",
-                                 "NODE_USE_ENV_PROXY": "1", "NO_PROXY": "localhost,127.0.0.1", "no_proxy": "localhost,127.0.0.1",
+                                 "NODE_USE_ENV_PROXY": "1", "http_proxy": os.environ.get("HTTP_PROXY", ""), "https_proxy": os.environ.get("HTTPS_PROXY", ""), "NO_PROXY": "localhost,127.0.0.1", "no_proxy": "localhost,127.0.0.1",
                                  "COREPACK_HOME": str(cwd / '.cache/corepack'), "PNPM_HOME": str(cwd / '.tools/bin'), "npm_config_prefix": str(cwd / '.tools'),
-                                 "LANG": "C.UTF-8", "TMPDIR": "/tmp", "npm_config_cache": "/tmp/npm-cache",
-                                 "PIP_CACHE_DIR": "/tmp/pip-cache", "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+                                 "LANG": "C.UTF-8", "TMPDIR": str(scratch), "npm_config_cache": str(cwd / ".cache/npm"),
+                                 "PIP_CACHE_DIR": str(cwd / ".cache/pip"), "PIP_DISABLE_PIP_VERSION_CHECK": "1",
                                  "npm_config_update_notifier": "false", "npm_config_fetch_retries": "1", "npm_config_fetch_timeout": "20000",
                                  **({'npm_config_https_proxy': os.environ['HTTPS_PROXY'], 'npm_config_proxy': os.environ['HTTP_PROXY']} if 'HTTPS_PROXY' in os.environ and 'HTTP_PROXY' in os.environ else {}),
                                  **{key: os.environ[key] for key in ['HTTP_PROXY', 'HTTPS_PROXY'] if key in os.environ},

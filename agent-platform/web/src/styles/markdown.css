@@ -23,13 +23,23 @@ h1.md-heading { font-size: 1.48em; } h2.md-heading { font-size: 1.28em; } h3.md-
 .md-task-item > .md-task { position: absolute; top: 0.4em; left: 0; width: 15px; height: 15px; margin: 0; }
 .md-quote { margin: 0 0 12px; padding: 3px 0 3px 14px; border-left: 2px solid var(--line-strong); color: var(--text-2); }
 .md-rule { margin: 18px 0; border: 0; border-top: 1px solid var(--line); }
-.md-table-wrap { max-width: 100%; margin: 0 0 13px; overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
-.md-table-wrap table { border-collapse: collapse; width: 100%; font-size: 13px; }
-.md-table-wrap th, .md-table-wrap td { padding: 8px 12px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); text-align: left; vertical-align: top; }
-.md-table-wrap th { background: color-mix(in srgb, var(--text) 3.5%, transparent); font-weight: 600; color: var(--text-2); white-space: nowrap; }
+/* Tables — clean, borderless ChatGPT-like presentation */
+.md-table-wrap { position: relative; max-width: 100%; min-width: 0; margin: 12px 0 16px; }
+.md-table-scroll { max-width: 100%; overflow-x: auto; }
+.md-table-wrap table { border-collapse: collapse; width: 100%; font-size: 13.5px; line-height: 1.55; text-align: left; }
+.md-table-wrap th, .md-table-wrap td { padding: 9px 13px; text-align: left; vertical-align: top; border-right: 0; border-left: 0; overflow-wrap: anywhere; }
+.md-table-wrap th { background: transparent; font-weight: 620; color: var(--text); border-bottom: 1px solid var(--line-strong); }
+.md-table-wrap td { border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); color: var(--text); }
 .md-table-wrap tr:last-child td { border-bottom: 0; }
-.md-table-wrap th:last-child, .md-table-wrap td:last-child { border-right: 0; }
 .md-table-wrap .align-center { text-align: center; } .md-table-wrap .align-right { text-align: right; }
+.md-table-wrap-btn { position: absolute; top: -10px; right: 0; display: none; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface); color: var(--muted); cursor: pointer; opacity: 0.55; transition: opacity var(--fast), color var(--fast), background-color var(--fast); z-index: 2; box-shadow: var(--shadow-sm); }
+.md-table-wrap-btn:hover { opacity: 1; color: var(--text); background: var(--surface-2); }
+.md-table-wrap-btn[aria-pressed='true'] { color: var(--accent-ink); border-color: var(--line-strong); opacity: 1; }
+.md-table-wrap.is-nowrap table { width: max-content; min-width: 100%; }
+.md-table-wrap.is-nowrap th, .md-table-wrap.is-nowrap td { white-space: nowrap; overflow-wrap: normal; }
+@media (max-width: 640px) {
+  .md-table-wrap th, .md-table-wrap td { padding: 7px 10px; font-size: 13px; }
+}
 
 /* Display math — pure unboxed centered typography */
 .md-math-block { margin: 16px 0; padding: 4px 0; overflow-x: auto; overflow-y: hidden; text-align: center; background: transparent; border: 0; }
@@ -82,4 +92,83 @@ h1.md-heading { font-size: 1.48em; } h2.md-heading { font-size: 1.28em; } h3.md-
 @keyframes stream-blink {
   0%, 100% { opacity: 0.85; }
   50% { opacity: 0.12; }
+}
+
+/* Deliverable File Card — ChatGPT-style prominent file artifact presentation */
+.md-deliverable-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 480px;
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color var(--fast), background-color var(--fast), box-shadow var(--fast), transform var(--fast);
+}
+.md-deliverable-card:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+  box-shadow: var(--shadow);
+  transform: translateY(-0.5px);
+}
+.md-deliverable-icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--card-bg, rgba(37, 99, 235, 0.12));
+  color: var(--card-color, #2563eb);
+}
+.md-deliverable-badge {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+}
+.md-deliverable-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.md-deliverable-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 620;
+  color: var(--text);
+}
+.md-deliverable-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+}
+.md-deliverable-action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 550;
+  transition: background-color var(--fast), color var(--fast);
+}
+.md-deliverable-card:hover .md-deliverable-action {
+  background: var(--ink);
+  color: var(--surface);
 }

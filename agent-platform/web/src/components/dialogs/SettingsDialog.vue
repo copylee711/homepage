@@ -2,7 +2,6 @@
 import { ref, computed, watch } from 'vue';
 import CapabilitiesPanel from '../settings/CapabilitiesPanel.vue';
 import MemoryPanel from '../settings/MemoryPanel.vue';
-import BackgroundPanel from '../settings/BackgroundPanel.vue';
 import SearchPanel from '../settings/SearchPanel.vue';
 import BaseDialog from './BaseDialog.vue';
 import Icon from '../Icon.vue';
@@ -27,7 +26,6 @@ const navItems = computed(() => {
     { id: 'general', icon: 'settings', label: '通用', show: true },
     { id: 'capabilities', icon: 'package', label: '能力、MCP 与 Skill', show: session.canExecute },
     { id: 'memory', icon: 'edit', label: '人设与记忆', show: session.canExecute },
-    { id: 'background', icon: 'activity', label: '后台任务', show: session.canExecute },
     { id: 'search', icon: 'search', label: '联网搜索', show: session.canExecute },
     { id: 'providers', icon: 'sparkle', label: '模型与供应商', show: session.isAdmin },
     { id: 'grants', icon: 'users', label: '执行授权与配额', show: session.isAdmin },
@@ -180,7 +178,6 @@ async function remove(c: any) {
 
         <CapabilitiesPanel v-else-if="ui.settingsTab === 'capabilities' && session.canExecute" />
         <MemoryPanel v-else-if="ui.settingsTab === 'memory' && session.canExecute" />
-        <BackgroundPanel v-else-if="ui.settingsTab === 'background' && session.canExecute" />
         <SearchPanel v-else-if="ui.settingsTab === 'search' && session.canExecute" />
         <ProvidersPanel v-else-if="ui.settingsTab === 'providers' && session.isAdmin" />
         <GrantsPanel v-else-if="ui.settingsTab === 'grants' && session.isAdmin" />

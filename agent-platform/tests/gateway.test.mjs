@@ -128,3 +128,8 @@ test('interactive widgets are CSRF-protected, owner-bound and execute only in an
  const doc=await fetch(base+url,{headers:{cookie}});assert.equal(doc.status,200);assert.match(doc.headers.get('content-security-policy'),/sandbox allow-scripts/);assert.match(doc.headers.get('content-security-policy'),/connect-src 'none'/);assert.doesNotMatch(doc.headers.get('content-security-policy'),/allow-same-origin/);assert.equal(doc.headers.get('x-frame-options'),'SAMEORIGIN');assert.match(await doc.text(),/<h2>Widget/);
  assert.equal((await fetch(base+url,{headers:{cookie:'copylee_ai='+'u'.repeat(64)}})).status,404);
 });
+
+test('image-only HTTP prompts reach runner unchanged without an invented request',async()=>{
+ admin=true;const cookie='copylee_ai='+'t'.repeat(64),me=await(await fetch(base+'/api/me',{headers:{cookie}})).json();
+ const r=await fetch(base+'/api/prompt',{method:'POST',headers:{cookie,Origin:'http://127.0.0.1','X-CSRF-Token':me.csrf},body:JSON.stringify({thread:'11111111-1111-4111-8111-111111111111',message:'',images:[{type:'image',data:'AA==',mimeType:'image/png'}]})});assert.equal(r.status,200);await r.text();assert.equal(lastPrompt.message,'');assert.equal(lastPrompt.images.length,1);
+});

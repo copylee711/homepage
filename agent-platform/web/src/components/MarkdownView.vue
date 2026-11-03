@@ -43,6 +43,15 @@ function onClick(event: MouseEvent) {
     }
   }
 
+  const wrapToggle = target.closest<HTMLElement>('[data-table-wrap]');
+  if (wrapToggle) {
+    const box = wrapToggle.closest('.md-table-wrap');
+    const on = wrapToggle.getAttribute('aria-pressed') === 'true';
+    wrapToggle.setAttribute('aria-pressed', on ? 'false' : 'true');
+    box?.classList.toggle('is-nowrap', !on);
+    return;
+  }
+
   const btn = target.closest('[data-copy-code]') as HTMLElement | null;
   if (!btn) return;
   const code = btn.closest('.code-block')?.querySelector('pre code') as HTMLElement | null;

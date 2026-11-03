@@ -274,9 +274,8 @@ function openArgFile(v: string) {
           <span v-if="claudeSummary.diffAdd" class="tg-diff-add">+{{ claudeSummary.diffAdd }}</span>
           <span v-if="claudeSummary.diffDel" class="tg-diff-del">-{{ claudeSummary.diffDel }}</span>
         </span>
-        <span class="tg-view-action">
-          <span>{{ mode === 'collapsed' ? '查看操作' : '收起' }}</span>
-          <Icon name="chevron-right" :size="12" />
+        <span class="tg-view-action" :title="mode === 'collapsed' ? '展开操作明细' : '收起操作明细'">
+          <Icon name="chevron-right" :size="13" />
         </span>
       </div>
     </button>
@@ -514,10 +513,10 @@ function openArgFile(v: string) {
 .tg-view-action {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
   color: var(--muted);
-  text-decoration: underline;
-  text-underline-offset: 3px;
   transition: color var(--fast);
 }
 .tg-head:hover .tg-view-action {

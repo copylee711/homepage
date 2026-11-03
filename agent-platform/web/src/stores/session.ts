@@ -108,6 +108,7 @@ export const useSession = defineStore('session', {
     live: null as any,
     controller: null as AbortController | null,
     snapshots: new Map<string, any>(),
+    pendingChatIds: [] as string[],
   }),
   getters: {
     canExecute: (s) => !!s.auth?.can_execute,
@@ -243,7 +244,7 @@ export const useSession = defineStore('session', {
     },
     async loadChats() {
       this.chatsLoading = true; this.chatsError = '';
-      try { this.chats = (await get('/api/chats')).chats || []; }
+      try { const incoming=(await get('/api/chats')).chats||[];const ids=new Set(incoming.map((c:Chat)=>c.id));const pending=this.chats.filter(c=>this.pendingChatIds.includes(c.id)&&!ids.has(c.id));this.chats=[...pending,...incoming];this.pendingChatIds=this.pendingChatIds.filter(id=>!ids.has(id)); }
       catch (error: any) { this.chatsError = error.message || '无法读取对话'; }
       finally { this.chatsLoading = false; }
     },
@@ -370,10 +371,6 @@ export const useSession = defineStore('session', {
       }
       if (rawText) {
         sections.push(rawText);
-      } else if (inlineImages.length > 0) {
-        sections.push(attachedQuotes.length > 0 ? '请结合以上引用内容，分析我发送的图片。' : '请查看并分析我发送的图片。');
-      } else {
-        sections.push('请根据以上引用内容进行分析并回答。');
       }
 
       const message = sections.join('\n\n');
@@ -383,10 +380,8 @@ export const useSession = defineStore('session', {
       // Show the chat in the sidebar as soon as the first turn starts, instead
       // of waiting for the server list refresh after the stream ends.
       if (!this.chats.some(c => c.id === thread)) {
-        const seedTitle = rawText ? rawText.replace(/\s+/g, ' ').slice(0, 40)
-          : inlineImages.length ? '图片分析'
-          : attachedQuotes.length ? attachedQuotes[0].text.replace(/\s+/g, ' ').slice(0, 40)
-          : '新任务';
+        const seedTitle = '正在命名…';
+        this.pendingChatIds.push(thread);
         this.chats.unshift({ id: thread, title: seedTitle || '新任务', updated: Date.now(), projectId: this.currentProjectId, permission: this.currentChatPermission });
       }
 
@@ -433,7 +428,7 @@ export const useSession = defineStore('session', {
         const result = await streamPrompt({
           thread, message, images: images.length ? images : undefined, thinking: useUi().thinkingLevel, projectId: this.currentProjectId,
           permission: this.currentChatPermission, signal: controller.signal,
-          onEvent: (event) => { received = true; handleEvent(event, live); },
+          onEvent: (event) => { received = true;if(event.type==='chat_title'&&event.thread===thread){const chat=this.chats.find(c=>c.id===thread);if(chat)chat.title=event.title;}handleEvent(event, live); },
         });
         if (!result.settled && !this.stopping) throw new ApiError('连接在任务完成前关闭，请刷新对话查看实际结果。', 0);
         live.finished = true;

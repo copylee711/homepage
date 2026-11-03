@@ -11,16 +11,21 @@ import http.client
 
 spec = importlib.util.spec_from_file_location('web_access', Path(__file__).with_name('web-access.py'))
 web = importlib.util.module_from_spec(spec); spec.loader.exec_module(web)
-slots = threading.BoundedSemaphore(16)
+slots = threading.BoundedSemaphore(32)
 MAX_TRANSFER = 1024 * 1024 * 1024
 
 def connect(address, port):
     upstream = os.environ.get('EGRESS_UPSTREAM_PROXY', '')
     if upstream:
         host, proxy_port = upstream.rsplit(':', 1)
-        tunnel = http.client.HTTPConnection(host, int(proxy_port), timeout=12)
-        tunnel.set_tunnel(address, port); tunnel.connect()
-        return tunnel.sock
+        try:
+            tunnel = http.client.HTTPConnection(host, int(proxy_port), timeout=8)
+            tunnel.set_tunnel(address, port); tunnel.connect()
+            return tunnel.sock
+        except (OSError,http.client.HTTPException):
+            # address was already validated and pinned by resolve_url. A broken
+            # upstream must not cut off all public package registries.
+            tunnel.close()
     return socket.create_connection((address, port), timeout=12)
 
 class Handler(BaseHTTPRequestHandler):

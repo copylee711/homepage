@@ -159,6 +159,8 @@ export class ChatStore {
       if (!validThread(id) || !item || typeof item !== 'object') continue;
       const entry = {};
       if (typeof item.title === 'string' && item.title.trim()) entry.title = item.title.trim().slice(0, MAX_TITLE);
+      if (['pending','agent','user'].includes(item.titleSource)) entry.titleSource=item.titleSource;
+      if (Number.isFinite(item.createdAt)) entry.createdAt=item.createdAt;
       if (item.pinned === true) entry.pinned = true;
       if (item.archived === true) entry.archived = true;
       if (Number.isFinite(item.updatedAt)) entry.updatedAt = item.updatedAt;
@@ -204,7 +206,7 @@ export class ChatStore {
       });
       const pid = exists ? 'default' : normalizeProjectId(projectId);
       if (!meta.projects[pid]) fail(404, '目标项目空间不存在');
-      meta.chats[thread] = { projectId: pid, permission: sanitizePermission(exists ? undefined : permission, pid) };
+      meta.chats[thread] = { projectId: pid, permission: sanitizePermission(exists ? undefined : permission, pid),...(!exists?{title:'新任务',titleSource:'pending',createdAt:Date.now()}:{} ) };
       await this.saveMeta(user, meta);
     });
   }
@@ -295,7 +297,10 @@ export class ChatStore {
   }
   rename(user, thread, value) {
     const title = normalizeTitle(value);
-    return this.update(user, thread, item => ({ ...item, title }));
+    return this.update(user, thread, item => ({ ...item, title,titleSource:'user' }));
+  }
+  async autoTitle(user,thread,value){
+    const title=normalizeTitle(value);return this.serialize(user,async()=>{const meta=await this.loadMeta(user);const item=meta.chats[thread];if(!item)fail(404,'对话不存在');if(item.titleSource!=='pending')return {ok:true,skipped:true,title:item.title};item.title=title;item.titleSource='agent';await this.saveMeta(user,meta);return {ok:true,title};});
   }
   setPinned(user, thread, pinned) {
     if (typeof pinned !== 'boolean') fail(422, '置顶状态无效');
@@ -313,10 +318,10 @@ export class ChatStore {
   }
   async delete(user, thread) {
     return this.serialize(user, async () => {
-      await this.assertOwned(user, thread);
       const meta = await this.loadMeta(user);
+      const exists=await this.assertOwned(user,thread).then(()=>true,error=>{if(error.status===404&&meta.chats[thread]?.createdAt)return false;throw error;});
       // Exact owned files only. Never recursively delete a user-controlled path.
-      await unlink(this.file(user, thread));
+      if(exists)await unlink(this.file(user, thread));
       await unlink(this.file(user, thread) + '.cwd-backup').catch(error => { if (error.code !== 'ENOENT') throw error; });
       await unlink(this.file(user, thread) + '.rewind-backup').catch(error => { if (error.code !== 'ENOENT') throw error; });
       delete meta.chats[thread];
@@ -407,6 +412,8 @@ export class ChatStore {
       });
     }
     // Keep pinned first, then most recently active; archived stays in the same stream.
+    const present=new Set(result.map(item=>item.id));
+    for(const [id,item]of Object.entries(meta.chats||{}))if(!present.has(id)&&item.createdAt&&['pending','agent'].includes(item.titleSource))result.push({id,title:item.title||'新任务',updated:item.createdAt||item.updatedAt,projectId:item.projectId||'default',permission:item.permission,pinned:item.pinned===true,archived:item.archived===true});
     return result.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updated - a.updated).slice(0, 100);
   }
   async export(user, thread, format, secrets = []) {

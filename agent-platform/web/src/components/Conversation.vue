@@ -7,6 +7,8 @@ import UserQuestion from './UserQuestion.vue';
 import { buildTranscript } from '../services/transcript.mjs';
 import WelcomeHero from './WelcomeHero.vue';
 import TurnNavigator from './TurnNavigator.vue';
+import FloatingPlanPanel from './FloatingPlanPanel.vue';
+import FloatingBackgroundPanel from './FloatingBackgroundPanel.vue';
 import { textContent } from '../services/format';
 import { useSession } from '../stores/session';
 
@@ -74,6 +76,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
 
 <template>
   <div class="stage">
+    <div class="floating-panels">
+      <FloatingPlanPanel />
+      <FloatingBackgroundPanel />
+    </div>
     <div class="conversation" :class="{ 'is-empty': session.isEmpty && !session.loadingChat, 'is-unauthorized': session.booted && !session.canExecute }" ref="scroller" tabindex="0" aria-label="对话内容" @scroll.passive="onScroll" @wheel.passive="onWheel" @keydown="onKeydown" @touchmove.passive="leaveBottom">
       <WelcomeHero v-if="session.isEmpty && !session.loadingChat" />
       <div v-else class="messages">
@@ -85,9 +91,9 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
           <div class="message-inner">
             <div class="message-meta"><strong class="message-author">Iris</strong></div>
             <div class="message-content"><BlockList :blocks="live.blocks" :streaming="true" /></div>
-            <UserQuestion v-for="question in live.questions" :key="question.id" :request="question" />
-            <template v-for="approval in live.approvals" :key="approval.id">
-              <section v-if="approval.state === 'pending'" class="tool-approval" :aria-label="approval.title" aria-live="polite">
+            <UserQuestion v-for="question in (live.questions || []).filter((q: any) => q.state === 'pending')" :key="question.id" :request="question" />
+            <template v-for="approval in (live.approvals || []).filter((a: any) => a.state === 'pending')" :key="approval.id">
+              <section class="tool-approval" :aria-label="approval.title" aria-live="polite">
                 <div class="tool-approval-title">
                   <Icon name="shield" :size="14" />
                   <strong>{{ approval.title }}</strong>
@@ -100,10 +106,6 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
                 </div>
                 <p v-if="approval.error" class="status-error" role="alert">{{ approval.error }}</p>
               </section>
-              <div v-else class="tool-approval-resolved">
-                <Icon :name="approval.state === 'allowed' ? 'check' : 'x'" :size="12" />
-                <span>{{ approval.state === 'allowed' ? '已允许执行本次操作' : '已拒绝执行本次操作' }} · {{ approval.title }}</span>
-              </div>
             </template>
             <div v-if="live.status || live.error || live.stopped" class="message-status" :class="{ 'is-error': live.error }">
               <span v-if="live.spinner && !live.error && !live.stopped" class="working-dot"></span>
@@ -122,6 +124,23 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
 
 <style>
 .stage { position: relative; min-height: 0; flex: 1; display: flex; overflow: hidden; }
+.floating-panels {
+  position: absolute;
+  top: 10px;
+  right: clamp(16px, 4vw, 36px);
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+@media (max-width: 640px) {
+  .floating-panels {
+    top: 6px;
+    right: 12px;
+    gap: 6px;
+  }
+}
 .conversation { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable both-edges; padding: 0 clamp(16px, 4vw, 40px); scroll-behavior: auto; overscroll-behavior: contain; }
 .conversation.is-unauthorized.is-empty { justify-content: center; }
 .conversation.is-empty { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
@@ -139,6 +158,34 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
 .status-error { color: var(--danger); }
 .working-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); animation: breathe 1.7s ease-in-out infinite; }
 @keyframes breathe { 0%, 100% { opacity: 1; box-shadow: 0 0 0 3px var(--accent-soft); } 50% { opacity: 0.5; box-shadow: 0 0 0 6px transparent; } }
-.jump-latest { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-2); border-radius: 50%; background: var(--surface); color: var(--text-2); box-shadow: var(--shadow-lg); transition: border-color var(--fast), color var(--fast), transform var(--fast); }
-.jump-latest:hover { border-color: var(--line-strong); color: var(--text); transform: translateX(-50%) translateY(-1px); }
+.jump-latest {
+  position: absolute;
+  right: 24px;
+  bottom: 18px;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-2);
+  box-shadow: var(--shadow-lg);
+  transition: border-color var(--fast), color var(--fast), transform var(--fast);
+  z-index: 10;
+}
+.jump-latest:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+@media (max-width: 640px) {
+  .jump-latest {
+    right: 14px;
+    bottom: 12px;
+    width: 34px;
+    height: 34px;
+  }
+}
 </style>

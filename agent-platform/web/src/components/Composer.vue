@@ -732,7 +732,7 @@ watch(() => session.draftText, (val) => {
 </template>
 
 <style>
-.composer-area { flex: none; padding: 6px clamp(16px, 4vw, 40px) max(10px, env(safe-area-inset-bottom)); background: linear-gradient(to top, var(--bg) 70%, transparent); transition: padding-bottom 350ms var(--ease); }
+.composer-area { flex: none; padding: 6px clamp(16px, 4vw, 40px) max(10px, env(safe-area-inset-bottom)); background: transparent; transition: padding-bottom 350ms var(--ease); }
 .composer-area.is-welcome { padding-bottom: clamp(60px, calc(50dvh - 145px), 320px); }
 @media (max-width: 860px) {
   .composer-area.is-welcome { padding-bottom: max(20px, calc(50dvh - 142px)); }

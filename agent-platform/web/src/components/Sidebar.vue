@@ -67,6 +67,7 @@ function cycleGroupMode() {
 }
 
 const collapsedGroups = ref<Record<string, boolean>>({});
+watch(()=>[session.chatId,session.chats.length],()=>{for(const group of groups.value)if(group.chats.some(c=>c.id===session.chatId))collapsedGroups.value[group.key]=false;});
 function toggleGroup(key: string) {
   collapsedGroups.value[key] = !collapsedGroups.value[key];
 }
@@ -305,8 +306,8 @@ watch(avatarUrl, () => { avatarError.value = false; });
 
     <div class="chat-list-shell">
     <nav ref="chatList" class="chat-list slim-scroll-target" :class="{ 'is-compact': ui.chatDensity === 'compact' }" aria-label="对话列表">
-      <div v-if="session.chatsLoading" class="list-state"><span class="spinner"></span><span>正在读取对话…</span></div>
-      <p v-else-if="session.chatsError" class="list-empty">{{ session.chatsError }}</p>
+      <div v-if="session.chatsLoading && !session.chats.length" class="list-state"><span class="spinner"></span><span>正在读取对话…</span></div>
+      <p v-else-if="session.chatsError && !session.chats.length" class="list-empty">{{ session.chatsError }}</p>
       <p v-else-if="!groups.length" class="list-empty">{{ !session.canExecute ? '开通执行权限后，可在这里管理对话。' : query ? '没有匹配的对话。' : '还没有对话，发送第一条消息后会出现在这里。' }}</p>
       <section v-for="g in groups" :key="g.key" class="chat-group">
         <header

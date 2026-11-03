@@ -1,5 +1,35 @@
 [
   {
+    "id": "exa-free",
+    "name": "Exa · 公共 MCP",
+    "kind": "json",
+    "category": "web",
+    "enabled": true,
+    "useProxy": true,
+    "endpoint": "https://mcp.exa.ai/mcp",
+    "method": "POST",
+    "auth": "none",
+    "bodyTemplate": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "tools/call",
+      "params": {
+        "name": "web_search_exa",
+        "arguments": {
+          "query": "{{query}}",
+          "numResults": "{{count}}"
+        }
+      }
+    },
+    "format": "auto",
+    "mapping": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "snippet"
+    }
+  },
+  {
     "id": "baidu",
     "name": "百度",
     "kind": "baidu",
@@ -30,36 +60,6 @@
     "category": "web",
     "enabled": false,
     "useProxy": true
-  },
-  {
-    "id": "exa-free",
-    "name": "Exa · 公共 MCP",
-    "kind": "json",
-    "category": "web",
-    "enabled": false,
-    "useProxy": true,
-    "endpoint": "https://mcp.exa.ai/mcp",
-    "method": "POST",
-    "auth": "none",
-    "bodyTemplate": {
-      "jsonrpc": "2.0",
-      "id": 1,
-      "method": "tools/call",
-      "params": {
-        "name": "web_search_exa",
-        "arguments": {
-          "query": "{{query}}",
-          "numResults": "{{count}}"
-        }
-      }
-    },
-    "format": "auto",
-    "mapping": {
-      "results": "results",
-      "title": "title",
-      "url": "url",
-      "snippet": "snippet"
-    }
   },
   {
     "id": "anysearch",

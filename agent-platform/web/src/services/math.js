@@ -33,9 +33,10 @@ function closingDollar(line, open) {
 /* Split a single line into literal text and inline-math segments. Accepts `$…$`
    and LaTeX-style `\(…\)` (models often emit the latter). Only `$…$` where the
    opener is followed by non-space and the closer preceded by non-space (and not
-   followed by a digit) counts as math. */
+   followed by a digit) counts as math. Also handles LLM-emitted unescaped
+   `(\operatorname{...})` formulas with explicit LaTeX macros. */
 export function splitInlineMath(line) {
-  if (!line.includes('$') && !line.includes('\\(')) return [{ text: line }];
+  if (!line.includes('$') && !line.includes('\\(') && !line.includes('\\')) return [{ text: line }];
   const parts = [];
   let buffer = '';
   let i = 0;
@@ -47,6 +48,18 @@ export function splitInlineMath(line) {
         if (buffer) { parts.push({ text: buffer }); buffer = ''; }
         parts.push({ math: line.slice(i + 2, close) });
         i = close + 2; continue;
+      }
+    }
+    if (ch === '(' && line.slice(i).includes('\\')) {
+      const close = findMatchingParen(line, i + 1);
+      if (close > i + 1) {
+        const candidate = line.slice(i + 1, close);
+        if (/\\(operatorname|frac|dfrac|boxed|sqrt|sum|int|lim|mathbf|mathrm|vec|partial|cdot|alpha|beta|gamma|theta|pi|le|ge|neq|approx|infty)\b/.test(candidate) && !candidate.includes('\n')) {
+          if (buffer) { parts.push({ text: buffer }); buffer = ''; }
+          parts.push({ math: candidate.trim() });
+          i = close + 1;
+          continue;
+        }
       }
     }
     if (ch === '\\' && line[i + 1] === '$') { buffer += '$'; i += 2; continue; }
@@ -69,6 +82,28 @@ export function splitInlineMath(line) {
   }
   if (buffer) parts.push({ text: buffer });
   return parts;
+}
+
+// Balance nested parentheses and braces so formulas like `(\operatorname{Cov}(X,Y)=\dfrac2\pi)`
+// find the correct outermost closing parenthesis.
+function findMatchingParen(line, from) {
+  let depth = 1;
+  let inBrace = 0;
+  for (let i = from; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '\\') { i += 1; continue; }
+    if (ch === '`') return -1;
+    if (ch === '{') { inBrace += 1; continue; }
+    if (ch === '}') { if (inBrace > 0) inBrace -= 1; continue; }
+    if (inBrace === 0) {
+      if (ch === '(') depth += 1;
+      else if (ch === ')') {
+        depth -= 1;
+        if (depth === 0) return i;
+      }
+    }
+  }
+  return -1;
 }
 
 // Index of the `\` in a closing `\)` at or after `from`, or -1.
@@ -125,6 +160,34 @@ export function extractDisplayMath(lines) {
           body.push(lines[m]); m += 1;
         }
         if (closed) { flush(); blocks.push({ type: 'math', tex: body.join('\n').trim() }); n = m; continue; }
+      }
+    }
+    // Standalone unescaped [ ... ] emitted by some LLMs as display math blocks.
+    if (trimmed === '[' || (trimmed.startsWith('[') && !trimmed.startsWith('[^') && !trimmed.startsWith('![') && trimmed.endsWith(']'))) {
+      if (trimmed !== '[' && trimmed.endsWith(']')) {
+        const inner = trimmed.slice(1, -1).trim();
+        if (/\\(boxed|frac|dfrac|sum|int|sqrt|operatorname|text|begin|align|matrix|lim|mathbf|mathrm|vec|partial|alpha|beta|gamma|theta|pi|infty)\b/.test(inner)) {
+          flush();
+          blocks.push({ type: 'math', tex: inner });
+          continue;
+        }
+      } else if (trimmed === '[') {
+        const body = [];
+        let m = n + 1;
+        let closed = false;
+        while (m < lines.length) {
+          const t = lines[m].trim();
+          if (t === ']') { closed = true; break; }
+          body.push(lines[m]);
+          m += 1;
+        }
+        const candidate = body.join('\n').trim();
+        if (closed && /\\(boxed|frac|dfrac|sum|int|sqrt|operatorname|text|begin|align|matrix|lim|mathbf|mathrm|vec|partial|alpha|beta|gamma|theta|pi|infty|[a-zA-Z]{2,})\b/.test(candidate)) {
+          flush();
+          blocks.push({ type: 'math', tex: candidate });
+          n = m;
+          continue;
+        }
       }
     }
     text.push(line);
