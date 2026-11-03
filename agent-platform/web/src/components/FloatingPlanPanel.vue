@@ -12,7 +12,7 @@ const plan = computed(() => {
   if (live?.blocks) {
     for (let i = live.blocks.length - 1; i >= 0; i--) {
       const b = live.blocks[i];
-      if (b.type === 'tool' && b.name === 'update_plan') {
+      if (b.type === 'tool' && b.name === 'update_plan' && b.state === 'success') {
         try {
           const args = JSON.parse(b.args || '{}');
           if (Array.isArray(args.steps) && args.steps.length) return args;
@@ -40,7 +40,7 @@ const plan = computed(() => {
 
 const steps = computed(() => plan.value?.steps || []);
 const completedCount = computed(() => steps.value.filter((s: any) => s.status === 'completed').length);
-const inProgressStep = computed(() => steps.value.find((s: any) => s.status === 'in_progress'));
+const inProgressStep = computed(() => session.busyHere ? steps.value.find((s: any) => s.status === 'in_progress') : null);
 </script>
 
 <template>
@@ -88,18 +88,18 @@ const inProgressStep = computed(() => steps.value.find((s: any) => s.status === 
           v-for="(st, i) in steps"
           :key="i"
           class="float-plan-item"
-          :class="'is-' + st.status"
+          :class="'is-' + (st.status === 'in_progress' && !session.busyHere ? 'pending' : st.status)"
         >
           <span class="float-plan-marker">
             <svg v-if="st.status === 'completed'" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="20 6 9 17 4 12"/>
             </svg>
-            <span v-else-if="st.status === 'in_progress'" class="float-plan-dot-active"></span>
+            <span v-else-if="st.status === 'in_progress' && session.busyHere" class="float-plan-dot-active"></span>
             <span v-else class="float-plan-dot-idle"></span>
           </span>
           <span class="float-plan-step-text">{{ st.step }}</span>
           <span class="float-plan-step-status">
-            {{ st.status === 'completed' ? '完成' : st.status === 'in_progress' ? '进行中' : '等待' }}
+            {{ st.status === 'completed' ? '完成' : st.status === 'in_progress' ? (session.busyHere ? '进行中' : '待确认') : '等待' }}
           </span>
         </li>
       </ol>
