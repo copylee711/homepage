@@ -5,9 +5,11 @@ import { requiresApproval } from './execution-policy.mjs';
 import { streamEvent } from './stream-wire.mjs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { body, equal, fail, json, modelLabel, required } from './shared.mjs';
+import { TurnFanout } from './turn-stream.mjs';
 import { publicProviders, saveProvider, deleteProvider, activeProvider, activateProvider, testProvider, discoverProviderModels, proxyEnvironment, loadProviders } from './providers.mjs';
 import { sandbox, sandboxTool } from './sandbox-client.mjs';
 import { sessionCapacity } from './session-limits.mjs';
@@ -41,7 +43,8 @@ class Pi {
   constructor(user, thread) {
     this.runtimeToken = randomUUID(); this.user = user; this.thread = thread; this.key = user + ':' + thread; this.pending = new Map(); this.busy = false; this.buffer = '';
     const reply = event => { if (this.proc?.stdin.writable) this.proc.stdin.write(JSON.stringify(event) + '\n'); };
-    const emit = event => { if (this.output && !this.output.destroyed) this.output.write(this.mask(JSON.stringify(streamEvent(event))) + '\n'); };
+    const emit = event => { this.publish(streamEvent(event)); };
+    this.disk = Promise.resolve();
     this.questions = new UserQuestions(reply, emit);
     this.mcp = new McpConnections(value => sandboxTool(this.lease, value, 45000));
     this.approvals = new ToolApprovals(reply, emit);
@@ -91,13 +94,12 @@ class Pi {
           const wait = this.pending.get(event.id);
           if (wait) { this.pending.delete(event.id); clearTimeout(wait.timer); event.success ? wait.resolve(event.data) : wait.reject(Object.assign(new Error(event.error || 'Pi 请求失败'), { status: 502 })); }
         }
-        if (this.output) {
+        if (this.fanout) {
           // Delta events contain a growing full-message snapshot in the SDK.
           // The browser reducer only needs the delta: avoid quadratic wire traffic.
           const wire = event.type === 'message_update' ? {type:event.type,assistantMessageEvent:{...event.assistantMessageEvent}} : event;
           if(wire.type === 'message_update') { delete wire.assistantMessageEvent.partial; delete wire.assistantMessageEvent.message; }
-          this.output.write(this.mask(JSON.stringify(wire)) + '\n');
-          if (this.output.writableLength > 2 * 1024 * 1024) this.output.destroy();
+          this.publish(wire);
         }
         if (event.type === 'agent_settled') this.finish();
       }
@@ -113,12 +115,30 @@ class Pi {
     this.pending.clear();
   }
   mask(text) { for (const key of this.secrets || []) text = text.split(key).join('[REDACTED]'); return text; }
+  publish(event) {
+    if (!this.fanout || !event) return;
+    const line = this.mask(JSON.stringify(event)) + '\n';
+    this.fanout.publish(line);
+    this.persist(line);
+  }
+  persist(line) {
+    if (!this.turnFile || this.persisted > 8 * 1024 * 1024) return;
+    this.persisted += line.length;
+    const file = this.turnFile;
+    this.disk = this.disk.then(() => appendFile(file, line)).catch(() => {});
+  }
+  abortTurn() {
+    // Policy stop: deadline, storage cap, or lost renew. Not a browser disconnect.
+    if (!this.busy || this.stopping) return;
+    this.stopping = true;
+    void cancel(this.user, { stopInstalls: true }).catch(() => { try { this.proc?.kill(); } catch { /* already gone */ } });
+  }
   finish() {
     this.approvals.clear(); this.questions.clear();
     invalidateWorkspace(this.user);
-    clearTimeout(this.deadline); clearInterval(this.storageCheck); this.busy = false;
-    const output = this.output; this.output = undefined;
-    if (output && !output.destroyed) output.end();
+    clearTimeout(this.deadline); clearInterval(this.storageCheck); clearInterval(this.renewWatch);
+    this.busy = false;
+    this.fanout?.end();
   }
   command(type, fields = {}, timeout = 120000) {
     const id = randomUUID();
@@ -143,16 +163,30 @@ class Pi {
     if (permission?.execution && ['auto', 'edit', 'ask'].includes(permission.execution)) {
       this.execution = permission.execution;
     }
-    this.busy = true; this.output = res;
-    res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
-    const abort = () => { if (this.busy && this.output === res) void cancel(this.user).catch(() => this.proc?.kill()); };
-    res.once('close', abort);
-    this.deadline = setTimeout(abort, 30 * 60000);
+    this.busy = true; this.stopping = false; this.lastRenew = Date.now();
+    this.fanout = new TurnFanout(); this.persisted = 0; this.disk = Promise.resolve();
+    this.turnFile = await resetTurnLog(this.user, this.thread);
+    // The HTTP response is only a subscriber. Its close must not kill Pi.
+    try {
+      if (!res.destroyed && !res.writableEnded) {
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Accel-Buffering': 'no', 'Cache-Control': 'no-store' });
+        this.fanout.attach(res, 0);
+      }
+    } catch { /* the browser left before the first byte; the turn still runs */ }
+    this.deadline = setTimeout(() => this.abortTurn(), 30 * 60000);
+    // Gateway heartbeats renew the lease. If that stops, the lease is already
+    // dead and this turn must not keep running on a stale authorization.
+    this.renewWatch = setInterval(() => {
+      if (this.busy && Date.now() - (this.lastRenew || 0) > 30000) this.abortTurn();
+    }, 5000);
     let checking = false;
     this.storageCheck = setInterval(async () => {
       if (checking) return; checking = true;
       try { await sessionCapacity(`/data/sessions/${this.user}`, this.thread); }
-      catch { if (this.output === res) { res.write(JSON.stringify({ type: 'gateway_error', error: '对话存储达到上限，任务已停止。请联系管理员归档。' }) + '\n'); abort(); } }
+      catch {
+        this.publish({ type: 'gateway_error', error: '对话存储达到上限，任务已停止。请联系管理员归档。' });
+        this.abortTurn();
+      }
       finally { checking = false; }
     }, 10000);
     try {
@@ -163,7 +197,7 @@ class Pi {
       if (Array.isArray(images) && images.length) promptFields.images = images;
       await this.command('prompt', promptFields, 120000);
     }
-    catch (error) { res.write(JSON.stringify({ type: 'gateway_error', error: error.message }) + '\n'); this.finish(); }
+    catch (error) { this.publish({ type: 'gateway_error', error: error.message }); this.finish(); }
   }
 }
 async function instance(user, thread) {
@@ -223,13 +257,31 @@ async function deleteChat(user, thread) {
     return result;
   } finally { deleting.delete(key); }
 }
-async function cancel(user) {
+async function resetTurnLog(user, thread) {
+  const file = `/data/turns/${user}/${thread}.ndjson`;
+  try {
+    await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+    await writeFile(file, '', { mode: 0o600 });
+    return file;
+  } catch { return undefined; }
+}
+async function savedTurn(user, thread) {
+  const file = `/data/turns/${user}/${thread}.ndjson`;
+  try {
+    const info = await stat(file);
+    if (Date.now() - info.mtimeMs > 30 * 60 * 1000) return null;
+    const text = await readFile(file, 'utf8');
+    const lines = text.split('\n').filter(line => line.length > 0);
+    return { lines, cursor: lines.length };
+  } catch { return null; }
+}
+async function cancel(user, extra) {
   cancelToolchain(user);
   // Kill model generation AND every tool descendant, including detached processes.
   for (const [key, entry] of sessions) {
     if (entry.pi.user === user) { sessions.delete(key); entry.pi.proc?.kill(); }
   }
-  await sandbox('/cancel', user);
+  await sandbox('/cancel', user, undefined, undefined, extra);
 }
 function assertUserIdle(user) {
   if (toolchainBusy(user) || [...sessions.values()].some(entry => entry.pi.user === user && (entry.initializing || entry.pi.busy || entry.pi.maintenance))) {
@@ -337,7 +389,10 @@ export const server = createServer(async (req, res) => {
     if (req.url === '/renew') {
       await renewToolchain(input.user);
       for (const entry of sessions.values()) {
-        if (entry.pi.user === input.user && entry.pi.busy) await sandbox('/renew', input.user, entry.pi.lease);
+        if (entry.pi.user === input.user && entry.pi.busy) {
+          await sandbox('/renew', input.user, entry.pi.lease);
+          entry.pi.lastRenew = Date.now();
+        }
       }
       return json(res, 200, { ok: true });
     }
@@ -562,7 +617,29 @@ export const server = createServer(async (req, res) => {
       for (const key of await secretValues()) text = text.split(key).join('[REDACTED]');
       return json(res, 200, { messages: JSON.parse(text), busy });
     }
-    if (req.url === '/abort') { await cancel(input.user); return json(res, 200, { ok: true }); }
+    if (req.url === '/abort') { await cancel(input.user, { stopInstalls: true }); return json(res, 200, { ok: true }); }
+    if (req.url === '/turns/status') {
+      const pi = sessions.get(input.user + ':' + input.thread)?.pi;
+      if (pi?.fanout) return json(res, 200, { thread: input.thread, busy: pi.busy === true, settled: pi.busy !== true && pi.fanout.cursor > 0, cursor: pi.fanout.cursor });
+      const saved = await savedTurn(input.user, input.thread);
+      if (saved) return json(res, 200, { thread: input.thread, busy: false, settled: saved.cursor > 0, cursor: saved.cursor });
+      return json(res, 200, { thread: input.thread, busy: false, settled: false, cursor: 0 });
+    }
+    if (req.url === '/turns/subscribe') {
+      const cursor = Number.isFinite(Number(input.cursor)) && Number(input.cursor) > 0 ? Math.floor(Number(input.cursor)) : 0;
+      const pi = sessions.get(input.user + ':' + input.thread)?.pi;
+      if (pi?.fanout && (pi.busy || pi.fanout.cursor > 0)) {
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Accel-Buffering': 'no', 'Cache-Control': 'no-store', 'X-Turn-Cursor': String(pi.fanout.cursor) });
+        pi.fanout.attach(res, cursor, { endIfIdle: !pi.busy });
+        return;
+      }
+      const saved = await savedTurn(input.user, input.thread);
+      if (!saved) fail(404, '没有可恢复的任务');
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Accel-Buffering': 'no', 'Cache-Control': 'no-store', 'X-Turn-Cursor': String(saved.cursor) });
+      for (const line of saved.lines.slice(cursor)) res.write(line + '\n');
+      res.end();
+      return;
+    }
     if (req.url === '/prompt') {
       if (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 20000) fail(422, '任务内容无效');
       await chats.initialize(input.user, input.thread, input.projectId, input.permission);

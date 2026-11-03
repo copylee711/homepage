@@ -1,9 +1,8 @@
 import { createServer } from 'node:http';
 import { createHmac, createHash, randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import { body, equal, fail, json, modelLabel, required } from './shared.mjs';
+import { createCloudTurns } from './cloud-turns.mjs';
 import { widgetDocument, WIDGET_CSP } from './widget-document.mjs';
 const widgets = new Map();
 
@@ -41,8 +40,7 @@ async function sso(path, value) {
   return response.json();
 }
 const identityRequests = new Map();
-async function identity(req) {
-  const token = cookies(req)[cookieName];
+async function identityFromToken(token) {
   if (!token || !/^[A-Za-z0-9_-]{40,128}$/.test(token)) fail(401, '请先登录');
   // Coalesce concurrent asset/API checks only; retain no completed authorization.
   const key = createHash('sha256').update(token).digest('hex');
@@ -54,6 +52,14 @@ async function identity(req) {
   }
   return { ...await pending, token };
 }
+async function identity(req) {
+  return identityFromToken(cookies(req)[cookieName]);
+}
+const cloudTurns = createCloudTurns({
+  runner,
+  identity: identityFromToken,
+  heartbeatMs: Number(process.env.TURN_HEARTBEAT_MS) || 10000,
+});
 function writeAccess(req, auth) {
   if (req.headers.origin !== publicURL || !equal(req.headers['x-csrf-token'], csrf(auth.token))) fail(403, '请求校验失败');
 }
@@ -218,7 +224,9 @@ export const server = createServer(async (req, res) => {
         grant_expires_at: auth.grant_expires_at, csrf: csrf(auth.token), model: await modelName(auth.user.id) });
     }
     if (url.pathname === '/auth/logout' && req.method === 'POST') {
-      writeAccess(req, auth); await sso('/revoke', { token: auth.token });
+      writeAccess(req, auth);
+      cloudTurns.abortUser(auth.user.id, '已退出，任务已停止');
+      await sso('/revoke', { token: auth.token });
       res.setHeader('Set-Cookie', cookie(cookieName, '', 0)); return json(res, 200, { ok: true });
     }
     if (url.pathname.startsWith('/api/')) {
@@ -229,7 +237,10 @@ export const server = createServer(async (req, res) => {
           writeAccess(req, auth); const input = await body(req);
           const result = await sso('/grants/save', { token: auth.token, user_id: input.user_id, days: input.days });
           // SSO commit is authoritative; active gateways also recheck on each heartbeat.
-          if (input.days === 0) await runner('/cancel', input.user_id, {});
+          if (input.days === 0) {
+            cloudTurns.abortUser(input.user_id, '执行授权已撤销，任务已停止');
+            await runner('/abort', input.user_id, {});
+          }
           return json(res, 200, result);
         }
         fail(404, '接口不存在');
@@ -297,6 +308,13 @@ export const server = createServer(async (req, res) => {
       }
       if (url.pathname === '/api/session' && req.method === 'GET') {
         const response = await runner('/session', auth.user.id, { thread: url.searchParams.get('chat') }); return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/turns/status' && req.method === 'GET') {
+        const thread = url.searchParams.get('thread') || '';
+        const local = cloudTurns.get(auth.user.id, thread);
+        if (local) return json(res, 200, local.publicStatus());
+        const response = await runner('/turns/status', auth.user.id, { thread });
+        return json(res, 200, await response.json());
       }
       if (url.pathname === '/api/git/status' && req.method === 'GET') {
         const response = await runner('/git/status', auth.user.id, { project: url.searchParams.get('project') || 'default' });
@@ -390,36 +408,63 @@ export const server = createServer(async (req, res) => {
         return json(res, 200, await response.json());
       }
       if (url.pathname === '/api/abort') {
+        cloudTurns.abort(auth.user.id, input.thread, '任务已停止');
         const response = await runner('/abort', auth.user.id, { thread: input.thread }); return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/turns/subscribe') {
+        const thread = typeof input.thread === 'string' ? input.thread : '';
+        const cursor = Number.isFinite(Number(input.cursor)) && Number(input.cursor) > 0 ? Math.floor(Number(input.cursor)) : 0;
+        const local = cloudTurns.get(auth.user.id, thread);
+        if (local) { local.attach(res, cursor); return; }
+        const statusResponse = await runner('/turns/status', auth.user.id, { thread });
+        const status = await statusResponse.json();
+        if (!status.busy && !status.settled) fail(404, '没有可恢复的任务');
+        if (status.busy) {
+          const turn = cloudTurns.begin({ userId: auth.user.id, token: auth.token, thread });
+          turn.fanout.advance(cursor);
+          try {
+            const response = await runner('/turns/subscribe', auth.user.id, { thread, cursor }, turn.controller.signal);
+            turn.attach(res, cursor);
+            void turn.pump(response).catch(() => {});
+          } catch (error) {
+            if (turn.policyStop) { await turn.finishStream(); fail(403, '执行授权已失效，任务已停止'); }
+            turn.failOpen();
+            throw error;
+          }
+          return;
+        }
+        const response = await runner('/turns/subscribe', auth.user.id, { thread, cursor }, AbortSignal.timeout(60000));
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'X-Accel-Buffering': 'no', 'Cache-Control': 'no-store' });
+        if (!response.body) return res.end();
+        const reader = response.body.getReader();
+        try {
+          while (!res.destroyed) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            res.write(Buffer.from(value));
+          }
+        } catch { /* replay ended or the browser left; a settled turn is not cancelled */ }
+        finally { if (!res.destroyed && !res.writableEnded) res.end(); }
+        return;
       }
       if (url.pathname === '/api/prompt') {
         if (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 20000) fail(422, '请输入 1–20000 个字符的任务');
         const validThinking = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
         const thinking = typeof input.thinking === 'string' && validThinking.includes(input.thinking) ? input.thinking : undefined;
         const images = Array.isArray(input.images) ? input.images.filter(img => img && typeof img.data === 'string' && typeof img.mimeType === 'string' && img.data.length <= 12 * 1024 * 1024) : undefined;
-        const abort = new AbortController();
-        res.once('close', () => abort.abort());
-        let checking = false, consecutiveFailures = 0;
-        const timer = setInterval(async () => {
-          if (checking) return; checking = true;
-          try {
-            const current = await identity(req);
-            if (!current.can_execute) abort.abort();
-            else {
-              await runner('/renew', auth.user.id, {});
-              consecutiveFailures = 0;
-            }
-          } catch {
-            consecutiveFailures++;
-            if (consecutiveFailures >= 5) abort.abort();
-          }
-          finally { checking = false; }
-        }, 10000);
+        const turn = cloudTurns.begin({ userId: auth.user.id, token: auth.token, thread: input.thread });
+        let response;
         try {
-          const response = await runner('/prompt', auth.user.id, { message: input.message, images, thread: input.thread, thinking, projectId: input.projectId, permission: input.permission }, abort.signal);
-          res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Accel-Buffering': 'no' });
-          await pipeline(Readable.fromWeb(response.body), res);
-        } finally { clearInterval(timer); await runner('/cancel', auth.user.id, {}).catch(() => {}); }
+          response = await turn.open({ message: input.message, images, thread: input.thread, thinking, projectId: input.projectId, permission: input.permission });
+        } catch (error) {
+          if (turn.policyStop) { await turn.finishStream(); fail(403, '执行授权已失效，任务已停止'); }
+          turn.failOpen();
+          throw error;
+        }
+        // Browser disconnect detaches this response only. The runner stream and
+        // the auth/renew heartbeat stay up until the turn ends or policy stops it.
+        turn.attach(res, 0);
+        void turn.pump(response).catch(() => {});
         return;
       }
       fail(404, '接口不存在');

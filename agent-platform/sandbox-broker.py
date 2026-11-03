@@ -211,6 +211,17 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(200, quotas.save(user, value.get('quota', {})) if self.path.endswith('/set') else quotas.status(user))
                 finally:
                     user_lock.release()
+            if self.path == "/cancel":
+                with guard:
+                    for key, lease in list(leases.items()):
+                        if lease["user"] == user:
+                            del leases[key]
+                    cancel(user)
+                # Outside the broker guard: stop() takes the task lock, and start()
+                # takes that lock before the guard. Install tasks only; previews stay.
+                if value.get("stopInstalls") is True:
+                    backgrounds.stop_installs(user)
+                return self.reply(200, {"ok": True})
             with guard:
                 if self.path == "/lease":
                     token = secrets.token_urlsafe(48)
@@ -222,12 +233,6 @@ class Handler(BaseHTTPRequestHandler):
                     if not lease or lease["user"] != user or lease["expires"] <= time.monotonic():
                         return self.reply(403, {"error": "租约已失效"})
                     lease["expires"] = time.monotonic() + 20
-                    return self.reply(200, {"ok": True})
-                if self.path == "/cancel":
-                    for key, lease in list(leases.items()):
-                        if lease["user"] == user:
-                            del leases[key]
-                    cancel(user)
                     return self.reply(200, {"ok": True})
             return self.reply(404, {"error": "接口不存在"})
         except Conflict as error:

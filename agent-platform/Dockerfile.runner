@@ -6,7 +6,7 @@ COPY agent-platform/package*.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 ENV PATH="/opt/pi/node_modules/.bin:$PATH" PI_CODING_AGENT_DIR=/data/agent HOME=/data
 WORKDIR /app
-COPY agent-platform/runner.mjs agent-platform/shared.mjs ./
+COPY agent-platform/runner.mjs agent-platform/shared.mjs agent-platform/turn-stream.mjs ./
 COPY agent-platform/providers.mjs agent-platform/provider-test.mjs agent-platform/provider-models.mjs ./
 COPY agent-platform/sandbox-client.mjs agent-platform/session-limits.mjs agent-platform/session-cwd.mjs ./
 COPY agent-platform/conversations.mjs agent-platform/workspace.mjs ./
@@ -18,6 +18,6 @@ COPY agent-platform/execution-policy.mjs /opt/pi/execution-policy.mjs
 COPY agent-platform/packages.mjs ./
 COPY agent-platform/toolchains.mjs agent-platform/toolchains.json agent-platform/search-presets.json ./
 COPY agent-platform/sandbox-extension.ts /opt/pi/sandbox-extension.ts
-COPY agent-platform/package-resources.mjs /opt/pi/package-resources.mjs
+COPY agent-platform/package-resources.mjs agent-platform/install-background.mjs /opt/pi/
 USER 1000:1000
 CMD ["node", "runner.mjs"]
