@@ -1,50 +1,23 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import Icon from './Icon.vue';
 import { useSession } from '../stores/session';
+import { planIsComplete } from '../services/plan-state.mjs';
 
 const session = useSession();
 const expanded = ref(false);
 
-const plan = computed(() => {
-  // Check active live stream first
-  const live = session.activeLive;
-  if (live?.blocks) {
-    for (let i = live.blocks.length - 1; i >= 0; i--) {
-      const b = live.blocks[i];
-      if (b.type === 'tool' && b.name === 'update_plan' && b.state === 'success') {
-        try {
-          const args = JSON.parse(b.args || '{}');
-          if (Array.isArray(args.steps) && args.steps.length) return args;
-        } catch {}
-      }
-    }
-  }
-  // Check session messages
-  for (let i = session.messages.length - 1; i >= 0; i--) {
-    const m = session.messages[i];
-    if (m.role === 'assistant' && Array.isArray(m.content)) {
-      for (let j = m.content.length - 1; j >= 0; j--) {
-        const c = m.content[j];
-        if (c.type === 'toolCall' && c.name === 'update_plan') {
-          try {
-            const args = typeof c.arguments === 'object' ? c.arguments : JSON.parse(c.arguments || '{}');
-            if (Array.isArray(args.steps) && args.steps.length) return args;
-          } catch {}
-        }
-      }
-    }
-  }
-  return null;
-});
-
-const steps = computed(() => plan.value?.steps || []);
+// Same checklist the bubble renders. Once every step is completed the corner
+// panel stays closed: a replayed pending/0/n snapshot is not a new plan.
+const steps = computed(() => session.taskPlan || []);
+const open = computed(() => steps.value.length > 0 && !planIsComplete(steps.value));
+watch(open, (value) => { if (!value) expanded.value = false; });
 const completedCount = computed(() => steps.value.filter((s: any) => s.status === 'completed').length);
 const inProgressStep = computed(() => session.busyHere ? steps.value.find((s: any) => s.status === 'in_progress') : null);
 </script>
 
 <template>
-  <div v-if="steps.length" class="float-plan-root" :class="{ 'is-expanded': expanded }">
+  <div v-if="open" class="float-plan-root" :class="{ 'is-expanded': expanded }">
     <!-- Collapsed pill button -->
     <button
       type="button"

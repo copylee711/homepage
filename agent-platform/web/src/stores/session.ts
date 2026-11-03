@@ -1,4 +1,5 @@
 import { reactiveLive, handleEvent, settleTools } from '../services/live.mjs';
+import { resolveTaskPlan } from '../services/plan-state.mjs';
 import { defineStore } from 'pinia';
 import { reactive } from 'vue';
 import { get, post, setCsrf, ApiError } from '../services/api';
@@ -122,6 +123,12 @@ export const useSession = defineStore('session', {
     // The live model belongs to one thread only; other chats keep rendering
     // their own transcript while it streams in the background.
     activeLive: (s): any => (s.live && s.liveThread === s.chatId ? s.live : null),
+    // Latest checklist for this chat. Live blocks win over older transcripts,
+    // and a stale pending/0/n snapshot cannot roll a completed plan backwards.
+    taskPlan: (s): Array<{ step: string; status: string }> => {
+      const live = s.live && s.liveThread === s.chatId ? s.live : null;
+      return resolveTaskPlan(s.messages, live?.blocks) || [];
+    },
     busyHere: (s): boolean => s.busy && s.liveThread === s.chatId,
     busyElsewhere: (s): boolean => s.busy && !!s.liveThread && s.liveThread !== s.chatId,
     currentProjectId: (s): string => s.chats.find(c => c.id === s.chatId)?.projectId || s.newChatProjectId || s.lastProjectId || 'default',
