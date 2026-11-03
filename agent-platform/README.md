@@ -122,6 +122,21 @@ xa 外网下载慢时，可手动运行 GitHub Actions 的 `Build Agent images`�
 `agent-images` 构件，传到 xa 后执行 `docker load -i agent-images.tar.gz`、
 `docker compose up -d --no-build`。镜像内不包含任何运行密钥，构建无需服务器或模型凭据。
 
+xa 直连 deb.debian.org（IPv6）会卡住：在 xa 的 `.env` 写入 `APT_MIRROR=mirrors.aliyun.com`、
+`APT_FORCE_IPV4=1`，`Dockerfile.runner` / `Dockerfile.sandbox` 的同名构建参数（默认关闭，行为与不设时相同）
+会改写 apt 源并强制 IPv4；`docker compose build` 也会从 `.env` 传给 runner。在 xa 上按 runner → sandbox →
+egress → gateway 串行构建、打 `:main-<sha>` 标签、重启并写入版本标记：
+
+```sh
+cd /opt/homepage/agent-platform
+REVISION=<完整 commit sha> sh scripts/deploy-images.sh
+# web/dist 已由同一 commit 构建且 .deployed-web-revision 等于 REVISION 时，可跳过镜像内前端构建：
+REVISION=<sha> GATEWAY_WEB=prebuilt sh scripts/deploy-images.sh
+```
+
+脚本先把现有 `:latest` 另存为 `:pre-<sha>` 以便回滚；不会改动 `data/`、`.env` 或密钥。
+`Dockerfile.gateway.prebuilt` 是 `Dockerfile.gateway` 第二阶段加上预构建的 `web/dist`。
+
 将 `agent-tunnel.service.example` 安装到 xa 的 systemd，替换 SSH 地址，使用专用 `agent-tunnel` 用户，
 校验并固定 gz 的 SSH host key。gz 端公钥限制：
 

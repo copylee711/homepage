@@ -1,7 +1,17 @@
 # Same locked, credential-free toolchain; no Pi process runs in this container.
 FROM copylee-agent-runner:latest
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Same optional apt tweaks as Dockerfile.runner; defaults change nothing. A runner
+# built with them already carries the mirror and IPv4 settings.
+ARG APT_MIRROR=
+ARG APT_FORCE_IPV4=0
+RUN if [ "$APT_FORCE_IPV4" = 1 ]; then echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4; fi \
+    && if [ -n "$APT_MIRROR" ]; then \
+         for f in /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list; do \
+           if [ -f "$f" ]; then sed -i "s|deb.debian.org|$APT_MIRROR|g" "$f"; fi; \
+         done; \
+       fi \
+    && apt-get update && apt-get install -y --no-install-recommends \
     python3-pip python3-venv python3-dev build-essential pkg-config jq zip unzip less file \
     && rm -rf /var/lib/apt/lists/* \
     && npm cache clean --force
