@@ -732,14 +732,10 @@ watch(() => session.draftText, (val) => {
 </template>
 
 <style>
-.composer-area { flex: none; padding: 6px clamp(16px, 4vw, 40px) max(10px, env(safe-area-inset-bottom)); background: transparent; transition: padding-bottom 240ms var(--ease); }
-.composer-area.is-welcome { padding-bottom: clamp(60px, calc(50dvh - 145px), 320px); }
-.composer-area.is-welcome:focus-within { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
-@media (max-width: 860px) {
-  /* On mobile, completely remove the slow padding-bottom transition to eliminate keyboard jitter / violent bounce */
-  .composer-area { transition: none !important; }
-  .composer-area.is-welcome { padding-bottom: clamp(20px, 18vh, 100px); }
-  .composer-area.is-welcome:focus-within { padding-bottom: max(8px, env(safe-area-inset-bottom)) !important; }
+.composer-area {
+  flex: none;
+  padding: 6px clamp(16px, 4vw, 40px) max(10px, env(safe-area-inset-bottom));
+  background: transparent;
 }
 .composer {
   position: relative;

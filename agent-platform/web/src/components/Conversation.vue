@@ -143,7 +143,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
 }
 .conversation { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable both-edges; padding: 0 clamp(16px, 4vw, 40px); scroll-behavior: auto; overscroll-behavior: contain; }
 .conversation.is-unauthorized.is-empty { justify-content: center; }
-.conversation.is-empty { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; padding-top: var(--header-h); }
+.conversation.is-empty { display: flex; flex-direction: column; justify-content: center; align-items: center; }
 .messages { width: 100%; max-width: 760px; margin: 0 auto; padding: calc(var(--header-h) + 16px) 0 44px; display: flex; flex-direction: column; gap: 30px; }
 .is-jump-target .user-bubble { box-shadow:0 0 0 2px var(--line-strong); }
 @media(max-width:640px){.conversation{padding-right:30px;}}
