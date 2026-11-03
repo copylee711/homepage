@@ -57,33 +57,62 @@ function isImage(name: string) {
 const REF_BLOCK_RE = /^【工作区引用文件】\n((?:- `?\/workspace\/[^\n]+`?\n?)+)\n*/;
 const QUOTE_BLOCK_RE = /(?:^|\n\n)【引用内容】\n((?:> [^\n]+\n?)+)/;
 
+function refRecord(raw: any) {
+  const p = typeof raw === 'string' ? raw : raw?.path;
+  const clean = String(p || '').replace(/^\/workspace\/?/, '');
+  const name = (typeof raw === 'object' && raw?.name) || clean.split('/').pop() || clean;
+  return {
+    path: clean,
+    name,
+    type: typeof raw === 'object' ? raw?.type : undefined,
+    previewUrl: typeof raw === 'object' ? raw?.previewUrl : undefined,
+    isDir: (typeof raw === 'object' && raw?.type === 'dir') || clean.endsWith('/'),
+    dir: clean.includes('/') ? clean.split('/').slice(0, -1).join('/') : '',
+  };
+}
 const parsedUserRefs = computed(() => {
   if (Array.isArray(props.message?.refs) && props.message.refs.length) {
-    return props.message.refs.map((r: any) => {
-      const p = typeof r === 'string' ? r : r.path;
-      const clean = String(p || '').replace(/^\/workspace\/?/, '');
-      return {
-        path: clean,
-        name: (typeof r === 'object' && r.name) || clean.split('/').pop() || clean,
-        isDir: (typeof r === 'object' && r.type === 'dir') || clean.endsWith('/'),
-        dir: clean.includes('/') ? clean.split('/').slice(0, -1).join('/') : '',
-      };
-    });
+    return props.message.refs.map(refRecord).filter((r: { path: string }) => r.path);
   }
   const match = userRawText.value.match(REF_BLOCK_RE);
   if (!match) return [];
-  const lines = match[1].split('\n').filter(Boolean);
-  return lines.map((l: string) => {
+  return match[1].split('\n').filter(Boolean).map((l: string) => {
     const rawPath = l.replace(/^-\s*`?/, '').replace(/`?\s*$/, '');
-    const clean = rawPath.replace(/^\/workspace\/?/, '');
-    return {
-      path: clean,
-      name: clean.split('/').pop() || clean,
-      isDir: clean.endsWith('/'),
-      dir: clean.includes('/') ? clean.split('/').slice(0, -1).join('/') : '',
-    };
-  });
+    return refRecord(rawPath);
+  }).filter((r: { path: string }) => r.path);
 });
+const inlineImages = computed(() => {
+  const content = props.message?.content;
+  if (!Array.isArray(content)) return [] as Array<{ key: string; url: string; name: string }>;
+  const out: Array<{ key: string; url: string; name: string }> = [];
+  content.forEach((part: any, index: number) => {
+    if (!part || part.type !== 'image') return;
+    const mime = part.mimeType || part.mime || 'image/png';
+    const data = part.data || part.source?.data;
+    if (typeof data === 'string' && data) {
+      out.push({ key: 'inline-' + index, name: part.name || '图片', url: data.startsWith('data:') ? data : `data:${mime};base64,${data}` });
+    } else if (typeof part.url === 'string' && part.url) {
+      out.push({ key: 'inline-' + index, name: part.name || '图片', url: part.url });
+    }
+  });
+  return out;
+});
+function fileUrl(path: string) {
+  return '/api/files/download?path=' + encodeURIComponent(path) + '&inline=1';
+}
+function isImageRef(r: { name?: string; type?: string; previewUrl?: string }) {
+  return r.type === 'image' || !!r.previewUrl || isImage(r.name || '');
+}
+const imageAttachments = computed(() => {
+  const fromRefs = parsedUserRefs.value.filter(isImageRef).map((r: any) => ({
+    key: r.path || r.name,
+    url: r.previewUrl || fileUrl(r.path),
+    name: r.name,
+    path: r.path,
+  }));
+  return [...fromRefs, ...inlineImages.value.map(img => ({ ...img, path: '' }))];
+});
+const fileAttachments = computed(() => parsedUserRefs.value.filter((r: any) => !isImageRef(r)));
 
 const parsedUserQuotes = computed(() => {
   if (Array.isArray(props.message?.quotes) && props.message.quotes.length) {
@@ -103,7 +132,10 @@ const parsedUserQuotes = computed(() => {
 const userDisplayText = computed(() => {
   let txt = userRawText.value.replace(REF_BLOCK_RE, '');
   txt = txt.replace(QUOTE_BLOCK_RE, '');
-  return txt.trim();
+  txt = txt.trim();
+  // Older image-only sends stored a filler sentence as the whole prompt.
+  if (imageAttachments.value.length && /^(请查看并分析我发送的图片。|请根据以上引用内容进行分析并回答。)$/.test(txt)) return '';
+  return txt;
 });
 
 function plainText() {
@@ -267,17 +299,28 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
           </div>
         </div>
 
-        <!-- Referenced workspace file badges -->
-        <div v-if="parsedUserRefs.length" class="user-bubble-chips">
+        <div v-if="imageAttachments.length" class="user-bubble-images">
+          <button
+            v-for="img in imageAttachments"
+            :key="img.key"
+            type="button"
+            class="user-bubble-image"
+            :title="'点击放大预览' + (img.name ? ' · ' + img.name : '')"
+            @click="ui.openLightbox({ url: img.path ? fileUrl(img.path) : img.url, name: img.name || '图片' })"
+          >
+            <img :src="img.url" :alt="img.name || '图片'" />
+          </button>
+        </div>
+
+        <!-- Referenced workspace files that are not images -->
+        <div v-if="fileAttachments.length" class="user-bubble-chips">
           <span
-            v-for="r in parsedUserRefs"
+            v-for="r in fileAttachments"
             :key="r.path"
             class="user-bubble-chip"
-            :class="{ 'is-image': isImage(r.name) }"
-            :title="isImage(r.name) ? '点击放大预览 · /workspace/' + r.path : '/workspace/' + r.path"
-            @click="isImage(r.name) && ui.openLightbox({ url: '/api/files/download?path=' + encodeURIComponent(r.path) + '&inline=1', name: r.name })"
+            :title="'/workspace/' + r.path"
           >
-            <Icon :name="isImage(r.name) ? 'image' : (r.isDir ? 'folder' : 'file')" :size="12" />
+            <Icon :name="r.isDir ? 'folder' : 'file'" :size="12" />
             <span class="user-chip-name">{{ r.name }}</span>
             <span v-if="r.dir" class="user-chip-dir">{{ r.dir }}</span>
           </span>
@@ -427,6 +470,9 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
   user-select: none;
 }
 
+.user-bubble-images { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.user-bubble-image { padding: 0; border: 0; border-radius: 12px; overflow: hidden; background: color-mix(in srgb, var(--text) 4%, transparent); cursor: pointer; max-width: min(100%, 280px); }
+.user-bubble-image img { display: block; width: auto; max-width: 100%; max-height: 220px; object-fit: contain; }
 .user-bubble-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 7px; }
 .user-bubble-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 240px; height: 24px; padding: 0 7px; border-radius: 6px; background: color-mix(in srgb, var(--text) 7.5%, transparent); color: var(--text); font-size: 11.5px; font-weight: 520; user-select: none; transition: background-color var(--fast), color var(--fast); }
 .user-bubble-chip.is-image { cursor: pointer; }

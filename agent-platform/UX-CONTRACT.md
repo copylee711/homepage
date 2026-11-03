@@ -144,6 +144,9 @@ Escape closes idle dialogs and focus returns to their trigger.
   snapshots reconcile missing deltas. Text/thinking/tool order is preserved in
   live views and replay. Groups include adjacent tools only, across consecutive
   assistant messages in the same user turn; intervening text splits groups.
+  A multi-operation group stays open while any child is running or pending, and
+  collapses once every child has succeeded or failed. Reopening that settled
+  group pins it open until the reader collapses it or a child runs again.
 - Thinking preview follows the newest lines until the reader scrolls upward.
   Parent conversation follow also pauses on manual scrolling. User timestamps
   appear below their message bubbles.

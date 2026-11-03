@@ -74,9 +74,10 @@ onMounted(() => { setTimeout(() => input.value?.focus(), 30); });
 </template>
 
 <style>
-.command-palette { position: fixed; inset: 0; z-index: 150; display: flex; align-items: flex-start; justify-content: center; padding: clamp(44px, 13vh, 150px) 16px 16px; background: rgba(12, 13, 18, 0.5); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); animation: fade-in 140ms var(--ease); }
-.command-panel { position: relative; width: min(640px, 100%); max-height: min(70dvh, 560px); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line-2); border-radius: 20px; background: var(--surface); box-shadow: var(--shadow-lg); animation: command-in 200ms var(--ease); }
-@keyframes command-in { from { opacity: 0; transform: translateY(-10px) scale(0.98); } to { opacity: 1; transform: none; } }
+.command-palette { position: fixed; inset: 0; z-index: 150; display: flex; align-items: flex-start; justify-content: center; padding: clamp(44px, 13vh, 150px) 16px 16px; background: rgba(12, 13, 18, 0.5); animation: command-scrim-in var(--fast) var(--ease); }
+@keyframes command-scrim-in { from { opacity: 0; } to { opacity: 1; } }
+.command-panel { position: relative; width: min(640px, 100%); max-height: min(70dvh, 560px); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line-2); border-radius: 20px; background: var(--surface); box-shadow: var(--shadow-lg); animation: command-in var(--fast) var(--ease); }
+@keyframes command-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
 .command-field { display: flex; align-items: center; gap: 10px; padding: 15px 16px; border-bottom: 1px solid var(--line); }
 .command-field .search-icon { color: var(--muted); display: flex; }
 .command-field input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 16px; }

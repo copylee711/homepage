@@ -127,5 +127,8 @@ function toggleWorkspace() {
 .theme-btn svg { animation: theme-icon-in 260ms var(--ease); }
 @keyframes theme-icon-in { from { opacity: 0.4; transform: rotate(-45deg) scale(0.82); } to { opacity: 1; transform: none; } }
 .only-mobile { display: none; }
-@media (max-width: 860px) { .only-mobile { display: inline-flex; } }
+@media (max-width: 860px) {
+  .only-mobile { display: inline-flex; }
+  .topbar { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
 </style>

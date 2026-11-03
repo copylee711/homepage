@@ -2,7 +2,7 @@
 import { ref, watch, onMounted } from 'vue';
 // @ts-ignore - JS module with no types
 import { renderMarkdown } from '../services/markdown.js';
-import { runWidget } from '../services/widgets.js';
+import { bindWidgetFrame, runWidget } from '../services/widgets.js';
 import { streamingMarkdown } from '../services/stream-markdown.js';
 import { copyText } from '../services/clipboard';
 import { useWorkspace } from '../stores/workspace';
@@ -26,7 +26,7 @@ function render() {
 function onClick(event: MouseEvent) {
   const target = event.target as HTMLElement;
   const widgetAction=target.closest<HTMLElement>('[data-widget-action]');
-  if(widgetAction){const wrap=widgetAction.closest<HTMLElement>('[data-widget-source]');let frame=wrap?.querySelector('iframe');if(wrap){if(!frame){frame=document.createElement('iframe');frame.title='交互组件';frame.setAttribute('sandbox','allow-scripts');wrap.querySelector('.status-error')?.remove();wrap.insertBefore(frame,wrap.querySelector('details'));}if(widgetAction.dataset.widgetAction==='pause')frame.src='about:blank';else void runWidget(frame,wrap.dataset.widgetSource||'');}return;}
+  if(widgetAction){const wrap=widgetAction.closest<HTMLElement>('[data-widget-source]');if(wrap){let frame=wrap.querySelector('iframe');if(!frame){frame=document.createElement('iframe');frame.title='交互组件';frame.style.height='120px';bindWidgetFrame(frame);wrap.querySelector('.status-error')?.remove();wrap.append(frame);}void runWidget(frame,wrap.dataset.widgetSource||'');}return;}
   const image=target.closest<HTMLElement>('[data-image-preview]');
   if(image){event.preventDefault();useUi().openLightbox({url:image.dataset.imagePreview||'',name:image.querySelector('img')?.alt||'图片预览'});return;}
 
@@ -41,6 +41,15 @@ function onClick(event: MouseEvent) {
       void useWorkspace().locateAndOpenFile(filePath, proj);
       return;
     }
+  }
+
+  const wrapToggle = target.closest<HTMLElement>('[data-table-wrap]');
+  if (wrapToggle) {
+    const box = wrapToggle.closest('.md-table-wrap');
+    const on = wrapToggle.getAttribute('aria-pressed') !== 'true';
+    wrapToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+    box?.classList.toggle('is-nowrap', !on);
+    return;
   }
 
   const btn = target.closest('[data-copy-code]') as HTMLElement | null;
@@ -66,11 +75,10 @@ watch(() => [props.source, props.streaming,props.citations], render);
 .md-image.is-failed{padding:14px;color:var(--muted);font-size:13px;}
 .md-stream-tail{display:contents;}
 .md-widget{margin:18px 0;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--surface);}
-.md-widget-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px}.md-widget-head strong{margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.md-widget iframe{display:block;width:100%;height:500px;border:0;background:#fff}.md-widget details{padding:10px 14px;font-size:12px;color:var(--muted)}.md-widget summary{cursor:pointer}.md-widget pre{max-height:240px;overflow:auto;white-space:pre-wrap}
+.md-widget-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px}.md-widget-head strong{margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.md-widget iframe{display:block;width:100%;height:120px;border:0;overflow:hidden;background:var(--surface)}
 @media(max-width:640px){
   .md-widget{margin:10px 0;border:0;border-radius:0;background:transparent;overflow:visible;}
   .md-widget-head{padding:0 0 6px;border-bottom:0;background:transparent;}
   .md-widget iframe{border-radius:12px;}
-  .md-widget details{padding:8px 0;}
 }
 </style>

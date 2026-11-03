@@ -13,28 +13,46 @@ function widgetTitle(html, label) {
   } catch {}
   return '交互组件';
 }
+// Content height comes from the widget document, not from the iframe viewport.
+// Accept later reports so a chart can grow or shrink after it finishes drawing.
+export function bindWidgetFrame(frame) {
+  frame.setAttribute('sandbox', 'allow-scripts');
+  frame.setAttribute('referrerpolicy', 'no-referrer');
+  frame.setAttribute('scrolling', 'no');
+  frame.dataset.widgetFrame = '';
+  frame.style.overflow = 'hidden';
+  if (!frame.style.height) frame.style.height = '120px';
+  if (frame.dataset.widgetSized === '1') return frame;
+  frame.dataset.widgetSized = '1';
+  let applied = 0;
+  const onHeight = (event) => {
+    if (!frame.isConnected) { window.removeEventListener('message', onHeight); return; }
+    if (event.source !== frame.contentWindow) return;
+    const data = event.data;
+    if (!data || data.type !== 'iris-widget-height') return;
+    const height = Number(data.height);
+    if (!Number.isFinite(height) || height < 32) return;
+    const next = Math.min(4000, Math.ceil(height));
+    if (Math.abs(next - applied) < 2) return;
+    applied = next;
+    frame.style.height = next + 'px';
+  };
+  window.addEventListener('message', onHeight);
+  return frame;
+}
 export function widget(doc, html, label) {
   const wrap=doc.createElement('section');wrap.className='md-widget';wrap.dataset.widgetSource=html;
   const heading=doc.createElement('div');heading.className='md-widget-head';
   const title=doc.createElement('strong');title.textContent=widgetTitle(html, label);heading.append(title);
-  for(const [action,text]of [['restart','重新运行'],['pause','暂停组件']]){const button=doc.createElement('button');button.type='button';button.className='btn btn-quiet btn-sm';button.dataset.widgetAction=action;button.textContent=text;heading.append(button);}
-  const frame=doc.createElement('iframe');frame.title=title.textContent;frame.setAttribute('sandbox','allow-scripts');frame.setAttribute('referrerpolicy','no-referrer');
-  frame.dataset.widgetFrame='';frame.style.height='480px';
-  // The widget document posts its own height so the card can grow to fit the
-  // whole visual instead of trapping it behind an inner scrollbar.
-  const onHeight=(event)=>{
-    if(!frame.isConnected){window.removeEventListener('message',onHeight);return;}
-    if(event.source!==frame.contentWindow)return;
-    const data=event.data;
-    if(!data||data.type!=='iris-widget-height')return;
-    const height=Number(data.height);
-    if(!Number.isFinite(height)||height<40)return;
-    frame.style.height=Math.min(4000,Math.ceil(height))+'px';
-  };
-  window.addEventListener('message',onHeight);
+  const refresh=doc.createElement('button');refresh.type='button';refresh.className='btn btn-quiet btn-sm';refresh.dataset.widgetAction='refresh';refresh.textContent='刷新';heading.append(refresh);
+  const frame=doc.createElement('iframe');frame.title=title.textContent;
+  // A short placeholder. A 480px floor becomes the document viewport, and a
+  // scrollHeight report of that viewport then locks in a tall empty card.
+  frame.style.height='120px';
+  bindWidgetFrame(frame);
   wrap.append(heading,frame);
   queueMicrotask(()=>{if(frame.isConnected)void runWidget(frame,html);});
-  const details=doc.createElement('details'),summary=doc.createElement('summary'),pre=doc.createElement('pre');summary.textContent='查看组件代码';pre.textContent=html;details.append(summary,pre);wrap.append(details);return wrap;
+  return wrap;
 }
 export async function runWidget(frame,html) {
   try {
@@ -43,5 +61,5 @@ export async function runWidget(frame,html) {
     const theme=document.documentElement.dataset.theme==='dark'?'dark':'light';
     frame.src=result.url+(result.url.includes('?')?'&':'?')+'theme='+theme;
   }
-  catch {const message=frame.ownerDocument.createElement('p');message.className='status-error';message.textContent='组件加载失败，请点击重新运行。';frame.replaceWith(message);}
+  catch {const message=frame.ownerDocument.createElement('p');message.className='status-error';message.textContent='组件加载失败，请点击刷新。';frame.replaceWith(message);}
 }
