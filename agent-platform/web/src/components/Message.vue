@@ -113,7 +113,9 @@ const parsedUserRefs = computed(() => {
   });
 });
 const inlineImages = computed(() => {
-  const content = props.message?.content;
+  const message = props.message;
+  const hasImageRefs = parsedUserRefs.value.some(isImageRef);
+  const content = Array.isArray(message?.content) ? message.content : hasImageRefs ? [] : message?._promptImages;
   if (!Array.isArray(content)) return [] as Array<{ key: string; url: string; name: string }>;
   const out: Array<{ key: string; url: string; name: string }> = [];
   content.forEach((part: any, index: number) => {
