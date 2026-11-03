@@ -1,5 +1,18 @@
 FROM node:24.21.0-bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git python3 ripgrep curl \
+# Optional apt tweaks for hosts with a slow or broken route to deb.debian.org.
+# Defaults leave the base image's apt setup untouched.
+#   APT_MIRROR=mirrors.aliyun.com  replaces deb.debian.org in the apt sources
+#   APT_FORCE_IPV4=1               writes Acquire::ForceIPv4 "true" for apt
+# Both persist in this image, so images built FROM it (sandbox, egress) inherit them.
+ARG APT_MIRROR=
+ARG APT_FORCE_IPV4=0
+RUN if [ "$APT_FORCE_IPV4" = 1 ]; then echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4; fi \
+    && if [ -n "$APT_MIRROR" ]; then \
+         for f in /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list; do \
+           if [ -f "$f" ]; then sed -i "s|deb.debian.org|$APT_MIRROR|g" "$f"; fi; \
+         done; \
+       fi \
+    && apt-get update && apt-get install -y --no-install-recommends ca-certificates git python3 ripgrep curl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/pi
 COPY agent-platform/package*.json ./
