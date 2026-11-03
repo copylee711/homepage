@@ -57,6 +57,7 @@ function syncEndGap() {
   if (!el) return;
   const stack = document.querySelector('.composer-area');
   const overlap = stack ? Math.max(0, el.getBoundingClientRect().bottom - stack.getBoundingClientRect().top) : 0;
+  el.parentElement?.style.setProperty('--composer-overlap', Math.round(overlap) + 'px');
   const gap = Math.round(overlap + 12) + 'px';
   if (el.style.getPropertyValue('--thread-end-gap') !== gap) el.style.setProperty('--thread-end-gap', gap);
 }
@@ -274,7 +275,7 @@ onMounted(() => {
 .status-error { color: var(--danger); }
 .working-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); animation: breathe 1.7s ease-in-out infinite; }
 @keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.82); } }
-.jump-latest { position: absolute; left: 50%; right: auto; bottom: 16px; z-index: 5; width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-2); border-radius: 50%; background: var(--surface); color: var(--text-2); box-shadow: var(--shadow); transform: translateX(-50%); transition: border-color var(--fast), color var(--fast), transform var(--fast); }
+.jump-latest { position: absolute; left: 50%; right: auto; bottom: calc(16px + var(--composer-overlap, 0px)); z-index: 5; width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-2); border-radius: 50%; background: var(--surface); color: var(--text-2); box-shadow: var(--shadow); transform: translateX(-50%); transition: border-color var(--fast), color var(--fast), transform var(--fast); }
 .jump-latest:hover { border-color: var(--line-strong); color: var(--text); transform: translateX(-50%) translateY(-1px); }
-@media(max-width:640px){ .jump-latest { left: auto; right: max(28px, calc(env(safe-area-inset-right) + 18px)); bottom: 12px; transform: none; } .jump-latest:hover { transform: translateY(-1px); } }
+@media(max-width:640px){ .jump-latest { left: auto; right: max(28px, calc(env(safe-area-inset-right) + 18px)); bottom: calc(12px + var(--composer-overlap, 0px)); transform: none; } .jump-latest:hover { transform: translateY(-1px); } }
 </style>

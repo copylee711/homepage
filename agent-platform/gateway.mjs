@@ -293,7 +293,7 @@ export const server = createServer(async (req, res) => {
       }
       if (url.pathname === '/api/image' && req.method === 'GET') {
         const response=await runner('/image',auth.user.id,{url:url.searchParams.get('url'),path:url.searchParams.get('path')},AbortSignal.timeout(45000));
-        const value=await response.json();if(!['image/png','image/jpeg','image/gif','image/webp','image/svg+xml'].includes(value.mime))fail(415,'图片格式不支持');
+        const value=await response.json();if(!['image/png','image/jpeg','image/gif','image/webp','image/svg+xml','image/vnd.microsoft.icon'].includes(value.mime))fail(415,'图片格式不支持');
         res.writeHead(200,{'Content-Type':value.mime,'Cache-Control':'private, max-age=300','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; sandbox"});return res.end(Buffer.from(value.data,'base64'));
       }
       if (url.pathname === '/api/search/settings' && req.method === 'GET') {

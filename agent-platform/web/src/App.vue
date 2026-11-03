@@ -106,6 +106,14 @@ onMounted(() => {
   background: var(--bg);
 }
 
+.main-col:not(.is-welcome) .composer-area {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 10;
+  pointer-events: none;
+}
+.main-col:not(.is-welcome) .composer-stack { pointer-events: auto; }
+
 .main-col.is-welcome {
   justify-content: center;
   align-items: center;

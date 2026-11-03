@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue';
 import Icon from './Icon.vue';
+import SiteIcon from './SiteIcon.vue';
+import WebToolPages from './WebToolPages.vue';
 import { formatDuration } from '../services/format';
 import { useWorkspace } from '../stores/workspace';
 import { useSession } from '../stores/session';
@@ -110,6 +112,10 @@ function parseArgs(raw: any): Record<string, any> {
   try { return JSON.parse(String(raw)) || {}; } catch { return {}; }
 }
 
+function isWebTool(block: any) {
+  return ['web_fetch', 'fetch', 'web_search', 'image_search'].includes(block?.name);
+}
+
 function actionParts(b: any): { verb: string; target: string; full: string } {
   const name = String(b?.name || 'tool').trim();
   const key = name.toLowerCase();
@@ -123,8 +129,12 @@ function actionParts(b: any): { verb: string; target: string; full: string } {
     return { verb: '运行', target: t, full: `运行 ${t}` };
   }
   let target = String(a.path || a.file_path || a.pattern || a.query || a.url || a.name || '').replace(/\s+/g, ' ').trim();
+  if (isWebTool(b) && (key === 'web_fetch' || key === 'fetch')) {
+    try { target = new URL(a.url).hostname; } catch {}
+    return { verb, target, full: target ? verb + ' ' + target : verb };
+  }
   if (target) {
-    if (target.includes('/')) {
+    if (target.includes('/') && !isWebTool(b)) {
       const parts = target.split('/');
       target = parts[parts.length - 1] || target;
     }
@@ -248,6 +258,7 @@ function openArgFile(v: string) {
       <span v-if="list[0].state === 'running' || list[0].state === 'pending'" class="tc-dots" aria-hidden="true">
         <i></i><i></i><i></i>
       </span>
+      <SiteIcon v-else-if="isWebTool(list[0])" :url="parseArgs(list[0].args).url" />
       <span v-else class="tc-mini-icon" aria-hidden="true">
         <Icon :name="toolIcon(list[0])" :size="13" />
       </span>
@@ -270,6 +281,7 @@ function openArgFile(v: string) {
           </dd>
         </template>
       </dl>
+      <WebToolPages v-if="isWebTool(list[0])" :block="list[0]" />
       <div v-if="list[0].result" class="tc-out" :class="{ 'is-error': list[0].state === 'error' }">{{ list[0].result }}</div>
     </div>
   </div>
@@ -319,6 +331,7 @@ function openArgFile(v: string) {
           @click="toggleRow(b, idx)"
         >
           <span v-if="b.state === 'running' || b.state === 'pending'" class="tc-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <SiteIcon v-else-if="isWebTool(b)" :url="parseArgs(b.args).url" />
           <span class="tg-row-summary" :title="summarize(b)">
             <span class="tg-row-verb">{{ actionParts(b).verb }}</span>
             <span class="tg-row-target">{{ actionParts(b).target }}</span>
@@ -341,6 +354,7 @@ function openArgFile(v: string) {
               </dd>
             </template>
           </dl>
+          <WebToolPages v-if="isWebTool(b)" :block="b" />
           <div v-if="b.result" class="tc-out" :class="{ 'is-error': b.state === 'error' }">{{ b.result }}</div>
         </div>
       </div>

@@ -44,7 +44,10 @@ export function widget(doc, html, label) {
   const wrap=doc.createElement('section');wrap.className='md-widget';wrap.dataset.widgetSource=html;
   const heading=doc.createElement('div');heading.className='md-widget-head';
   const title=doc.createElement('strong');title.textContent=widgetTitle(html, label);heading.append(title);
-  const refresh=doc.createElement('button');refresh.type='button';refresh.className='btn btn-quiet btn-sm';refresh.dataset.widgetAction='refresh';refresh.textContent='刷新';heading.append(refresh);
+  const refresh=doc.createElement('button');refresh.type='button';refresh.className='md-widget-refresh';refresh.dataset.widgetAction='refresh';
+  refresh.title='刷新组件';refresh.setAttribute('aria-label','刷新组件');
+  refresh.innerHTML='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3v5h-5M3 21v-5h5M3 12a9 9 0 0 1 15.7-6L21 8M21 12a9 9 0 0 1-15.7 6L3 16"/></svg>';
+  heading.append(refresh);
   const frame=doc.createElement('iframe');frame.title=title.textContent;
   // A short placeholder. A tall floor becomes the document viewport, and a
   // scrollHeight report of that viewport then locks in a tall empty card.
