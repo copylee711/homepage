@@ -97,7 +97,7 @@ test('new file/chat endpoints enforce CSRF and derive tenant identity; local mod
   // a missing hashed asset is 404, and unauthenticated page loads still redirect.
   const shell = await fetch(base + '/', { headers });
   assert.equal(shell.status, 200);
-  assert.equal(shell.headers.get('content-security-policy'), "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+  assert.equal(shell.headers.get('content-security-policy'), "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob: https:; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   assert.equal((await fetch(base + '/assets/missing-abcdef.js', { headers })).status, 404);
   assert.equal((await fetch(base + '/', { redirect: 'manual' })).status, 302);
   const promptHigh = await fetch(base + '/api/prompt', { method: 'POST', headers, body: JSON.stringify({ thread: '11111111-1111-4111-8111-111111111111', message: 'hello', thinking: 'high' }) });
