@@ -3,6 +3,10 @@
 import { splitInlineMath, extractDisplayMath, renderMathInto } from './math.js';
 import { highlightInto } from './highlight.js';
 import { widget } from './widgets.js';
+import { isWsFilePath, safeHref } from './markdown-url.mjs';
+import { createMarkdownImage, imageUrl as markdownImageUrl } from './markdown-image.mjs';
+
+export { isWsFilePath, safeHref };
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*([A-Za-z0-9_+#.-]*)[^`~]*$/;
 const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*)$/;
@@ -11,14 +15,6 @@ const QUOTE = /^ {0,3}>[ \t]?(.*)$/;
 const UL = /^( {0,3})([-+*])[ \t]+(.*)$/;
 const OL = /^( {0,3})(\d{1,9})[.)][ \t]+(.*)$/;
 const SEPARATOR = /^ {0,3}\|?[ \t]*:?-{2,}:?[ \t]*(?:\|[ \t]*:?-{2,}:?[ \t]*)*\|?[ \t]*$/;
-
-export function isWsFilePath(raw) {
-  if (typeof raw !== 'string') return false;
-  const v = raw.trim();
-  if (!v || v.length > 500 || /\s/.test(v)) return false;
-  if (v.startsWith('/workspace/') || v.startsWith('workspace/')) return true;
-  return /^[a-zA-Z0-9_\-一-龥./]+\.(?:docx?|xlsx?|pptx?|pdf|zip|tar|gz|7z|rar|csv|tsv|py|js|mjs|cjs|ts|tsx|jsx|vue|html|css|scss|json|md|txt|png|jpe?g|gif|svg|webp|sh|bash|yml|yaml|sql|go|rs|c|cpp|h|toml|ini|env)$/i.test(v) && !v.includes('://');
-}
 
 export function isDeliverableExt(path) {
   return /\.(docx?|xlsx?|pptx?|pdf|zip|tar|gz|7z|rar)$/i.test(String(path || '').trim());
@@ -77,19 +73,6 @@ export function deliverableCard(doc, filePath, label) {
   return card;
 }
 
-export function safeHref(raw) {
-  if (typeof raw !== 'string') return null;
-  const value = raw.trim();
-  if (!value || value.length > 2048 || /[\u0000-\u001f\u007f]/.test(value)) return null;
-  if (!/^(?:https?:\/\/|mailto:)/i.test(value)) return null;
-  let url;
-  try { url = new URL(value); } catch { return null; }
-  if (!['http:', 'https:', 'mailto:'].includes(url.protocol)) return null;
-  if ((url.protocol === 'http:' || url.protocol === 'https:') && (url.username || url.password)) return null;
-  if (url.protocol === 'mailto:' && /[?&](?:body|cc|bcc)=/i.test(value)) return null;
-  return url.href;
-}
-
 function node(doc, tag, className, text) {
   const element = doc.createElement(tag);
   if (className) element.className = className;
@@ -116,38 +99,11 @@ function link(doc, href, label, className = '') {
 function text(doc, value) { return doc.createTextNode(String(value)); }
 
 let activeProject='default';
-export function imageUrl(raw,project=activeProject) {
-  if (isWsFilePath(raw)) return '/api/image?path='+encodeURIComponent(raw.startsWith('/workspace/')||raw.startsWith('workspace/')?raw.replace(/^\/?workspace\//,''):project+'/'+raw);
-  const safe=safeHref(raw);if(!safe)return null;
-  const u=new URL(safe);if(!['https:','http:'].includes(u.protocol)||u.hostname==='localhost'||u.hostname.endsWith('.local')||u.hostname.endsWith('.internal')||/^[\d.]+$/.test(u.hostname)||u.hostname.includes(':'))return null;
-  return '/api/image?url='+encodeURIComponent(safe);
+export function imageUrl(raw, project = activeProject) {
+  return markdownImageUrl(raw, project);
 }
 function image(doc, raw, label) {
-  const src=imageUrl(raw);if(!src)return node(doc,'span','md-blocked-link',label||'图片地址不可用');
-  const anchor=node(doc,'a','md-image',null);anchor.href=src;anchor.target='_blank';anchor.rel='noopener noreferrer';anchor.dataset.imagePreview=src;anchor.setAttribute('aria-label','放大图片：'+(label||'图片'));
-  const img=node(doc,'img',null,null);img.alt=label||'图片';img.loading='lazy';img.decoding='async';img.referrerPolicy='no-referrer';img.src=src;
-  let retries = 0;
-  img.addEventListener('error', () => {
-    if (retries < 2) {
-      const attempt = ++retries;
-      setTimeout(() => { if (anchor.isConnected) img.src = src + '&retry=' + attempt; }, attempt * 1200 + Math.random() * 600);
-      return;
-    }
-    anchor.classList.add('is-failed');
-    anchor.removeAttribute('data-image-preview');
-    anchor.setAttribute('aria-label', '重新加载图片：' + (label || '图片'));
-    anchor.replaceChildren(node(doc, 'span', null, '图片加载失败 · 点击重试'));
-  });
-  anchor.addEventListener('click', event => {
-    if (!anchor.classList.contains('is-failed')) return;
-    event.preventDefault();
-    retries = 0;
-    anchor.classList.remove('is-failed');
-    anchor.dataset.imagePreview = src;
-    anchor.replaceChildren(img);
-    img.src = src + '&retry=' + Date.now();
-  });
-  anchor.append(img);return anchor;
+  return createMarkdownImage(doc, raw, label, activeProject);
 }
 
 let activeFootnotes = null;

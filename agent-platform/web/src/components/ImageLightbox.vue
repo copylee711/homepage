@@ -64,7 +64,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey, true));
 
       <div class="iris-lightbox-content" @click.self="emit('close')">
         <div class="iris-lightbox-img-wrap" :style="{ transform: `scale(${scale})` }">
-          <img :src="item.url" :alt="item.name || '预览图片'" class="iris-lightbox-img" />
+          <img :src="item.url" :alt="item.name || '预览图片'" class="iris-lightbox-img" referrerpolicy="no-referrer" />
         </div>
       </div>
     </div>

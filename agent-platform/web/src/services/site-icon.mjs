@@ -1,8 +1,8 @@
 // Site icons load in the page, not through /api/image. That proxy only fetches
 // <origin>/favicon.ico inside the sandbox (and the dev mock returns 404), so
-// missing favicon files become the globe. These URLs are https; the console CSP
-// in gateway.mjs still has img-src 'self' data: blob: and will block them until
-// that directive includes https:.
+// missing favicon files become the globe. The first candidate is
+// https://<host>/favicon.ico. gateway.mjs img-src includes https:, so the page
+// can request it directly; a miss still falls through Google, then DuckDuckGo.
 
 const states = new Map();
 
