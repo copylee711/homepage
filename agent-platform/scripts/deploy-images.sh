@@ -11,6 +11,8 @@
 #   GATEWAY_WEB=build|prebuilt  build: Dockerfile.gateway builds web/ in Docker (default)
 #                               prebuilt: Dockerfile.gateway.prebuilt reuses agent-platform/web/dist;
 #                               requires .deployed-web-revision to equal REVISION
+#   IRIS_PRIVATE_SKILLS_DIR  trusted host directory with docx/pdf/pptx/xlsx skills
+#   SANDBOX_PIP_INDEX_URL  optional index URL for hash-verified wheels
 #   DEPLOY_UP=1|0               0 only builds and tags; no restart, no markers
 #   DRY_RUN=1                   print the commands without running them
 #
@@ -74,7 +76,7 @@ APT_ARGS="--build-arg APT_MIRROR=$APT_MIRROR --build-arg APT_FORCE_IPV4=$APT_FOR
 build runner "$ROOT/agent-platform/Dockerfile.runner" "$ROOT" $APT_ARGS
 # sandbox and egress are FROM copylee-agent-runner:latest, so they must follow it.
 # shellcheck disable=SC2086
-build sandbox "$ROOT/agent-platform/Dockerfile.sandbox" "$ROOT" $APT_ARGS
+build sandbox "$ROOT/agent-platform/Dockerfile.sandbox" "$ROOT" $APT_ARGS --build-arg "PIP_INDEX_URL=${SANDBOX_PIP_INDEX_URL:-https://pypi.org/simple}"
 build egress "$ROOT/agent-platform/Dockerfile.egress" "$ROOT"
 
 if [ "$GATEWAY_WEB" = prebuilt ]; then
@@ -87,6 +89,17 @@ if [ "$GATEWAY_WEB" = prebuilt ]; then
   build gateway "$APP/Dockerfile.gateway.prebuilt" "$ctx"
 else
   build gateway "$ROOT/agent-platform/Dockerfile.gateway" "$ROOT"
+fi
+
+private_skills=${IRIS_PRIVATE_SKILLS_DIR:-/opt/copylee-agent-private/skills}
+if [ -d "$private_skills" ]; then
+  for skill in docx pdf pptx xlsx; do
+    [ -f "$private_skills/$skill/SKILL.md" ] || { echo "Missing private skill: $skill" >&2; exit 1; }
+  done
+  for name in runner sandbox; do
+    printf 'FROM copylee-agent-%s:main-%s\nCOPY --chmod=0555 docx /opt/iris-skills/docx\nCOPY --chmod=0555 pdf /opt/iris-skills/pdf\nCOPY --chmod=0555 pptx /opt/iris-skills/pptx\nCOPY --chmod=0555 xlsx /opt/iris-skills/xlsx\n' "$name" "$SHORT" |
+      run docker build -f - -t "copylee-agent-$name:latest" -t "copylee-agent-$name:main-$SHORT" "$private_skills"
+  done
 fi
 
 [ "$DEPLOY_UP" = 1 ] || { echo "built :main-$SHORT; DEPLOY_UP=0, not restarting"; exit 0; }
