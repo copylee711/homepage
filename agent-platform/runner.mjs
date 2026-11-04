@@ -16,7 +16,7 @@ import { publicProviders, saveProvider, deleteProvider, activeProvider, activate
 import { sandbox, sandboxTool } from './sandbox-client.mjs';
 import { sessionCapacity } from './session-limits.mjs';
 import { prepareSessionCwd } from './session-cwd.mjs';
-import { ChatStore, normalizeProjectId, sanitizePermission } from './conversations.mjs';
+import { ChatStore, normalizeProjectId, paginateChats, sanitizePermission } from './conversations.mjs';
 import { SearchSettings, publicSearch } from './search.mjs';
 import { ToolApprovals, UserQuestions } from './tool-approvals.mjs';
 import { SessionSnapshots, projectSession } from './session-snapshot.mjs';
@@ -41,32 +41,39 @@ async function secretValues() {
   return [(process.env.OPENCODE_API_KEY || ''), ...(await loadProviders()).providers.map(item => item.apiKey || '')]
     .filter(key => key.length >= 8);
 }
+const hasResults = value => Boolean(value?.results?.length || value?.images?.length);
 async function searchWeb(lease, config, input) {
   const image = input.category === 'image';
   const count = input.count ?? config.count;
   const request = { op: 'web-search', ...config, query: input.query, count };
+  // A source that answers with zero matches returns {status:'empty'} instead of throwing,
+  // so WebSession can tell "nothing found" apart from a broken source.
+  let result, error;
   try {
-    return await sandboxTool(lease, { ...request, category: image ? 'image' : 'web', engine: image ? config.imageEngine : config.engine }, 45000);
-  } catch (error) {
-    if (!image || !config.sources.some(source => source.enabled && source.category === 'image')) throw error;
-    // Open-license image indexes are sparse for niche queries. Inspect a few
-    // already-ranked source pages through the same public-only broker.
-    const web = await sandboxTool(lease, { ...request, category: 'web', engine: config.engine, count: 3 }, 20000);
-    const pages = await Promise.allSettled(web.results.slice(0, 3).map(result =>
-      sandboxTool(lease, { op: 'web-fetch', url: result.url }, 20000)));
-    const images = new Map();
-    for (const page of pages) {
-      if (page.status !== 'fulfilled') continue;
-      for (const item of page.value.images || []) {
-        if (!item.alt?.trim() || images.has(item.url)) continue;
-        images.set(item.url, { ...item, title: item.alt, provider: 'source-page' });
-      }
+    result = await sandboxTool(lease, { ...request, category: image ? 'image' : 'web', engine: image ? config.imageEngine : config.engine }, 45000);
+  } catch (caught) { error = caught; }
+  if (hasResults(result)) return result;
+  const giveUp = () => { if (error) throw error; return result; };
+  if (!image || !config.sources.some(source => source.enabled && source.category === 'image')) return giveUp();
+  // Open-license image indexes are sparse for niche queries. Inspect a few
+  // already-ranked source pages through the same public-only broker.
+  let web;
+  try { web = await sandboxTool(lease, { ...request, category: 'web', engine: config.engine, count: 3 }, 20000); }
+  catch { return giveUp(); }
+  const pages = await Promise.allSettled((web.results || []).slice(0, 3).map(item =>
+    sandboxTool(lease, { op: 'web-fetch', url: item.url }, 20000)));
+  const images = new Map();
+  for (const page of pages) {
+    if (page.status !== 'fulfilled') continue;
+    for (const item of page.value.images || []) {
+      if (!item.alt?.trim() || images.has(item.url)) continue;
+      images.set(item.url, { ...item, title: item.alt, provider: 'source-page' });
     }
-    if (!images.size) throw error;
-    const candidates = [...images.values()].slice(0, count);
-    return { engine: 'source-page', images: candidates, results: candidates,
-      notice: '这些是网页中的候选图。核对图片与主题的相关性，附原网页链接。授权情况未知。' };
   }
+  if (!images.size) return giveUp();
+  const candidates = [...images.values()].slice(0, count);
+  return { engine: 'source-page', images: candidates, results: candidates,
+    notice: '这些是网页中的候选图。核对图片与主题的相关性，附原网页链接。授权情况未知。' };
 }
 class Pi {
   constructor(user, thread) {
@@ -621,7 +628,7 @@ export const server = createServer(async (req, res) => {
       }
       return json(res, 200, { output, exitCode: result.exitCode ?? 0, cwd: nextCwd });
     }
-    if (req.url === '/chats') return json(res, 200, { chats: await chats.list(input.user) });
+    if (req.url === '/chats') return json(res, 200, paginateChats(await chats.list(input.user), { limit: input.limit, cursor: input.cursor }));
     if (req.url === '/chats/rename') return json(res, 200, await chats.rename(input.user, input.thread, input.title));
     if (req.url === '/chats/pin') return json(res, 200, await chats.setPinned(input.user, input.thread, input.pinned));
     if (req.url === '/chats/archive') return json(res, 200, await chats.setArchived(input.user, input.thread, input.archived));

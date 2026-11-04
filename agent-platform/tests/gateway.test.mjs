@@ -135,3 +135,12 @@ test('image-only HTTP prompts reach runner unchanged without an invented request
  admin=true;const cookie='copylee_ai='+'t'.repeat(64),me=await(await fetch(base+'/api/me',{headers:{cookie}})).json();
  const r=await fetch(base+'/api/prompt',{method:'POST',headers:{cookie,Origin:'http://127.0.0.1','X-CSRF-Token':me.csrf},body:JSON.stringify({thread:'11111111-1111-4111-8111-111111111111',message:'',images:[{type:'image',data:'AA==',mimeType:'image/png'}]})});assert.equal(r.status,200);await r.text();assert.equal(lastPrompt.message,'');assert.equal(lastPrompt.images.length,1);
 });
+
+test('chat list forwards only the optional paging parameters to the runner', async () => {
+  admin = true;
+  const cookie = 'copylee_ai=' + 't'.repeat(64);
+  assert.equal((await fetch(base + '/api/chats', { headers: { cookie } })).status, 200);
+  assert.equal(lastRunner.path, '/chats'); assert.equal('limit' in lastRunner.value, false); assert.equal('cursor' in lastRunner.value, false);
+  assert.equal((await fetch(base + '/api/chats?limit=20&cursor=40&user=evil', { headers: { cookie } })).status, 200);
+  assert.equal(lastRunner.value.limit, '20'); assert.equal(lastRunner.value.cursor, '40'); assert.notEqual(lastRunner.value.user, 'evil');
+});
