@@ -310,7 +310,11 @@ export const server = createServer(async (req, res) => {
         const response = await runner('/background/list', auth.user.id, { id: url.searchParams.get('id') || undefined }); return json(res, 200, await response.json());
       }
       if (url.pathname === '/api/session' && req.method === 'GET') {
-        const response = await runner('/session', auth.user.id, { thread: url.searchParams.get('chat') }); return json(res, 200, await response.json());
+        const thread = url.searchParams.get('chat');
+        const response = await runner('/session', auth.user.id, { thread });
+        const session = await response.json();
+        if (cloudTurns.get(auth.user.id, thread)?.publicStatus().busy) session.busy = true;
+        return json(res, 200, session);
       }
       if (url.pathname === '/api/turns/status' && req.method === 'GET') {
         const thread = url.searchParams.get('thread') || '';
@@ -387,7 +391,7 @@ export const server = createServer(async (req, res) => {
         return json(res, 200, await response.json());
       }
       if (url.pathname === '/api/files/manage') {
-        const response = await runner('/files/manage', auth.user.id, { action: input.action, path: input.path, destination: input.destination });
+        const response = await runner('/files/manage', auth.user.id, { action: input.action, path: input.path, destination: input.destination, recursive: input.recursive === true });
         return json(res, 200, await response.json());
       }
       if (['/api/providers/test', '/api/providers/models', '/api/providers/save'].includes(url.pathname)) {

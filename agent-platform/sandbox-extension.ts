@@ -4,7 +4,7 @@ import { createReadToolDefinition, createWriteToolDefinition, createEditToolDefi
 import { Type } from 'typebox';
 import { packageReader } from './package-resources.mjs';
 import { requiresApproval } from './execution-policy.mjs';
-import { prefersBackgroundInstall, taskPurpose, INSTALL_GUIDANCE } from './install-background.mjs';
+import { prefersBackgroundInstall, taskPurpose, INSTALL_GUIDANCE, waitForBackground } from './install-background.mjs';
 import { turnGuidance } from './agent-guidance.mjs';
 
 export default async function (pi) {
@@ -86,25 +86,12 @@ export default async function (pi) {
     parameters: Type.Object({ id: Type.String({ minLength: 1, maxLength: 100 }), timeoutSec: Type.Optional(Type.Integer({ minimum: 1, maximum: 1500 })) }),
     async execute(_id, params, signal) {
       const timeoutMs = Math.min(Math.max(1, params.timeoutSec || 1500), 1500) * 1000;
-      const deadline = Date.now() + timeoutMs;
-      let last = null;
-      while (Date.now() < deadline) {
-        if (signal?.aborted) throw new Error('等待已取消');
-        last = await call('background-status', { id: params.id }, signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000));
-        if (last.state && last.state !== 'running') return { content: [{ type: 'text', text: JSON.stringify(last) }], details: last };
-        await new Promise((resolve, reject) => {
-          const timer = setTimeout(finish, 2000);
-          const onAbort = () => finish(new Error('等待已取消'));
-          function finish(error?: Error) {
-            clearTimeout(timer);
-            signal?.removeEventListener('abort', onAbort);
-            if (error) reject(error); else resolve(undefined);
-          }
-          signal?.addEventListener('abort', onAbort, { once: true });
-        });
-      }
-      const pending = { ...(last || {}), waiting: 'timeout', message: '任务仍在运行。可以继续其他工作，或稍后再调用 background_wait。' };
-      return { content: [{ type: 'text', text: JSON.stringify(pending) }], details: pending };
+      const { task, timedOut } = await waitForBackground(
+        (requestSignal) => call('background-status', { id: params.id }, requestSignal), timeoutMs, signal);
+      const result = timedOut
+        ? { ...task, waiting: 'timeout', message: '任务仍在运行。可以继续其他工作，或稍后再调用 background_wait。' }
+        : task;
+      return { content: [{ type: 'text', text: JSON.stringify(result) }], details: result };
     } });
   pi.registerTool({ name: 'ask_user', label: '询问用户', description: 'Ask the user a necessary clarification with 2–4 suggested options, marking one recommended. Pauses until the user selects or writes an answer. Never use for tool approval. Ask before making consequential assumptions.',
     parameters: Type.Object({ question: Type.String({ minLength: 1, maxLength: 1000 }), options: Type.Array(Type.Object({ label: Type.String({ minLength: 1, maxLength: 120 }), description: Type.Optional(Type.String({ maxLength: 400 })), recommended: Type.Optional(Type.Boolean()) }), { minItems: 2, maxItems: 4 }) }),

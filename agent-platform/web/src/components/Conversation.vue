@@ -189,8 +189,8 @@ onMounted(() => {
 <template>
   <div class="stage">
     <div class="floating-panels">
-      <FloatingPlanPanel />
       <FloatingBackgroundPanel />
+      <FloatingPlanPanel />
     </div>
     <div class="conversation" :class="{ 'is-empty': session.isEmpty && !session.loadingChat, 'is-unauthorized': session.booted && !session.canExecute }" ref="scroller" tabindex="0" aria-label="对话内容" @scroll.passive="onScroll" @wheel.passive="onWheel" @keydown="onKeydown" @touchstart.passive="onTouchStart" @touchmove.passive="onTouchMove">
       <WelcomeHero v-if="session.isEmpty && !session.loadingChat" />
@@ -244,7 +244,8 @@ onMounted(() => {
   right: clamp(16px, 4vw, 36px);
   z-index: 12;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
+  flex-direction: column;
   gap: 8px;
   pointer-events: none;
 }

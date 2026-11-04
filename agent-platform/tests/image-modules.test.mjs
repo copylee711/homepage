@@ -2,11 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Every local module the entry point imports must be COPYed into /app, or the
 // container dies on start with ERR_MODULE_NOT_FOUND (912e32c shipped without
 // turn-watchdog.mjs in the runner image).
-const root = new URL('..', import.meta.url).pathname;
+const root = fileURLToPath(new URL('..', import.meta.url));
 const copied = dockerfile => {
   const files = new Set();
   for (const line of readFileSync(join(root, dockerfile), 'utf8').split('\n')) {

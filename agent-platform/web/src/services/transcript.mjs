@@ -59,3 +59,20 @@ export function segmentBlocks(blocks) {
   }
   return out;
 }
+
+export function groupExecution(blocks, streaming) {
+  const groups = [];
+  let execution = [];
+  for (const block of blocks) {
+    if (block.type === 'text') {
+      if (!block.text?.trim()) continue;
+      if (execution.length) groups.push({ type: 'execution', items: execution, collapsed: true });
+      execution = [];
+      groups.push(block);
+    } else if (block.type !== 'thinking' || block.text?.trim()) {
+      execution.push(block);
+    }
+  }
+  if (execution.length) groups.push({ type: 'execution', items: execution, collapsed: !streaming });
+  return groups;
+}

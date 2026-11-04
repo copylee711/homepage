@@ -17,9 +17,21 @@ let writer: ReturnType<typeof streamingMarkdown> | undefined;
 function render() {
   const el = host.value;
   if (!el) return;
+  const toggles = Array.from(el.querySelectorAll<HTMLElement>('[data-table-wrap]'));
+  const nowrap = toggles.map(button => button.getAttribute('aria-pressed') === 'false');
+  const focused = toggles.indexOf(document.activeElement as HTMLElement);
   const options={sources:props.sources,project:useSession().currentProjectId,citations:props.citations};
   if (props.streaming) { writer ||= streamingMarkdown(el,document,options); writer(props.source || '', true,options); }
   else { writer = undefined; el.replaceChildren(renderMarkdown(props.source || '', document, options)); }
+  el.querySelectorAll<HTMLElement>('[data-table-wrap]').forEach((button, index) => {
+    if (nowrap[index]) setTableWrap(button, false);
+    if (index === focused && button !== toggles[index]) button.focus({ preventScroll: true });
+  });
+}
+
+function setTableWrap(button: HTMLElement, wrap: boolean) {
+  button.setAttribute('aria-pressed', String(wrap));
+  button.closest('.md-table-wrap')?.classList.toggle('is-nowrap', !wrap);
 }
 
 // Delegate copy-code buttons and workspace file links produced by the renderer.
@@ -45,10 +57,7 @@ function onClick(event: MouseEvent) {
 
   const wrapToggle = target.closest<HTMLElement>('[data-table-wrap]');
   if (wrapToggle) {
-    const box = wrapToggle.closest('.md-table-wrap');
-    const on = wrapToggle.getAttribute('aria-pressed') !== 'true';
-    wrapToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
-    box?.classList.toggle('is-nowrap', !on);
+    setTableWrap(wrapToggle, wrapToggle.getAttribute('aria-pressed') !== 'true');
     return;
   }
 

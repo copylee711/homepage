@@ -4,7 +4,7 @@ import { defineStore } from 'pinia';
 import { reactive } from 'vue';
 import { get, post, setCsrf, ApiError } from '../services/api';
 import { textContent } from '../services/format';
-import { streamPrompt } from '../services/stream';
+import { streamPrompt, resumePrompt } from '../services/stream';
 import { useUi } from './ui';
 
 type ImagePart = { type: 'image'; data: string; mimeType: string };
@@ -353,12 +353,56 @@ export const useSession = defineStore('session', {
         if (!this.live) {
           this.busy = value.busy === true;
           this.liveThread = this.busy ? id : null;
+          if (this.busy) void this.resumeTurn(id);
         }
         this.lastUserText = lastUser(this.messages);
       } catch (error: any) {
         if (this.chatId !== id) return;
         this.chatError = error.message || '无法读取对话。';
       } finally { this.loadingChat = false; }
+    },
+    async resumeTurn(thread: string) {
+      const controller = new AbortController();
+      const live = reactive(reactiveLive());
+      const messages = this.messages;
+      this.liveMessages = messages;
+      this.controller = controller;
+      this.live = live;
+      let matchedPrompt = false;
+      try {
+        const result = await resumePrompt({ thread, signal: controller.signal, onEvent: event => {
+          if (!matchedPrompt && event.type === 'message_start' && event.message?.role === 'user') {
+            matchedPrompt = true;
+            const index = messages.findLastIndex(item => item.role === 'user' && item.timestamp === event.message.timestamp);
+            if (index >= 0) messages.splice(index + 1);
+            else messages.push(event.message);
+          }
+          if (event.type === 'chat_title' && event.thread === thread) {
+            const chat = this.chats.find(c => c.id === thread);
+            if (chat) chat.title = event.title;
+          }
+          handleEvent(event, live);
+        } });
+        if (!result.settled) throw new ApiError('实时连接已结束，请重新载入对话。', 0);
+      } catch (error: any) {
+        if (!controller.signal.aborted) useUi().toast(error.message || '实时连接中断', { tone: 'error' });
+      } finally {
+        this.snapshots.delete(thread);
+        let snapshot;
+        try { snapshot = await get('/api/session?chat=' + encodeURIComponent(thread)); } catch {}
+        if (snapshot && !snapshot.busy) {
+          this.snapshots.set(thread, snapshot);
+          if (this.chatId === thread) this.messages = snapshot.messages || [];
+        }
+        this.live = null;
+        this.liveThread = null;
+        this.liveMessages = [];
+        this.controller = null;
+        this.busy = false;
+        this.stopping = false;
+        if (this.chatId === thread) this.lastUserText = lastUser(this.messages);
+        if (this.canExecute) void this.loadChats();
+      }
     },
     async send(text: string, opts: { retry?: boolean; continuation?: boolean; replay?: { images: ImagePart[]; refs: WorkspaceRef[]; quotes: TextQuote[] } } = {}) {
       const rawText = typeof text === 'string' ? (opts.replay ? text : text.trim()) : '';

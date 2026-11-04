@@ -23,7 +23,7 @@ h1.md-heading { font-size: 1.48em; } h2.md-heading { font-size: 1.28em; } h3.md-
 .md-task-item > .md-task { position: absolute; top: 0.4em; left: 0; width: 15px; height: 15px; margin: 0; }
 .md-quote { margin: 0 0 12px; padding: 3px 0 3px 14px; border-left: 2px solid var(--line-strong); color: var(--text-2); }
 .md-rule { margin: 18px 0; border: 0; border-top: 1px solid var(--line); }
-/* Tables — full grid, with a wrap toggle. Nowrap scrolls horizontally. */
+/* Tables use horizontal rules. The control stays outside the scroll area. */
 .md-table-wrap { max-width: 100%; min-width: 0; margin: 0 0 13px; border: 0; border-radius: 0; background: transparent; }
 .md-table-bar { display: flex; justify-content: flex-end; margin: 0 0 4px; }
 .md-table-wrap-toggle { height: 22px; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--faint); font-size: 11px; font-weight: 550; line-height: 1; }
@@ -180,3 +180,7 @@ h1.md-heading { font-size: 1.48em; } h2.md-heading { font-size: 1.28em; } h3.md-
 
 .md-widget-refresh { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
 .md-widget-refresh:hover { background: var(--surface-2); color: var(--text); }
+
+/* Table links retain their labels. Numeric citations use a native tooltip here
+   because a rich popup inside the horizontal scroller would be clipped. */
+.md-table-wrap .md-citation-preview { display: none; }

@@ -1,4 +1,4 @@
-import { ApiError, getCsrf } from './api';
+import { ApiError, get, getCsrf } from './api';
 import { eventBatch } from './event-batch.mjs';
 
 // Parses the runner's NDJSON prompt stream. Handles UTF-8 split across chunks and
@@ -22,66 +22,93 @@ export async function streamPrompt({ thread, message, images, thinking, projectI
     const data: any = await response.json().catch(() => ({}));
     throw new ApiError(typeof data.error === 'string' ? data.error : '任务启动失败，请重试', response.status, data);
   }
-  if (!response.body) throw new ApiError('浏览器无法读取流式响应', 0);
-  let reader = response.body.getReader();
-  let decoder = new TextDecoder('utf-8');
-  let buffer = '';
+  return readTurn(response, { thread, signal, onEvent });
+}
+
+type Subscription = { thread: string; signal: AbortSignal; onEvent: (event: any) => void };
+
+function subscribe(thread: string, cursor: number, signal: AbortSignal) {
+  return fetch('/api/turns/subscribe', {
+    method: 'POST', credentials: 'same-origin', signal,
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrf() },
+    body: JSON.stringify({ thread, cursor }),
+  });
+}
+
+function retryDelay(ms: number, signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    signal.throwIfAborted();
+    const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, ms);
+    function abort() { clearTimeout(timer); reject(signal.reason); }
+    signal.addEventListener('abort', abort, { once: true });
+  });
+}
+
+export function resumePrompt(options: Subscription) {
+  return readTurn(null, options);
+}
+
+async function readTurn(initial: Response | null, { thread, signal, onEvent }: Subscription) {
+  let response = initial;
   let settled = false;
   let cursor = 0;
-  let reconnects = 0;
+  let failures = 0;
   const batch = eventBatch(onEvent);
   const dispatch = (line: string) => {
     if (!line.trim()) return;
     let event: any;
     try { event = JSON.parse(line); } catch { return; }
-    if (event?.type === 'turn_gap') throw new ApiError('部分实时记录已过期，请刷新对话查看结果。', 0);
+    if (event?.type === 'turn_gap') throw new ApiError('部分实时记录已过期，请重新载入对话。', 0);
     cursor++;
+    failures = 0;
     if (event?.type === 'agent_settled') settled = true;
     batch.push(event);
   };
-  try {
-    while (true) {
-      let chunk: ReadableStreamReadResult<Uint8Array>;
-      try { chunk = await reader.read(); }
-      catch (error: any) {
-        if (signal.aborted || error?.name === 'AbortError') throw error;
-        chunk = { done: true, value: undefined };
-      }
-      const { done, value } = chunk;
-      if (done) {
-        if (settled || signal.aborted || reconnects++ >= 3) break;
-        reader.releaseLock();
-        buffer = '';
-        decoder = new TextDecoder();
-        let resumed: Response;
-        try {
-          resumed = await fetch('/api/turns/subscribe', {
-            method: 'POST', credentials: 'same-origin', signal,
-            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrf() },
-            body: JSON.stringify({ thread, cursor }),
-          });
-        } catch (error: any) {
-          if (signal.aborted || error?.name === 'AbortError') throw error;
-          throw new ApiError('连接暂时中断，请刷新对话查看云端任务。', 0);
-        }
-        if (!resumed.ok || !resumed.body) break;
-        reader = resumed.body.getReader();
+  while (!settled) {
+    signal.throwIfAborted();
+    if (!response) {
+      if (failures) await retryDelay(Math.min(500 * 2 ** Math.min(failures - 1, 5), 10000), signal);
+      try { response = await subscribe(thread, cursor, signal); }
+      catch { signal.throwIfAborted(); failures++; continue; }
+      if (response.status === 429 || response.status >= 500) {
+        void response.body?.cancel();
+        response = null;
+        failures++;
         continue;
       }
-      buffer += decoder.decode(value, { stream: true });
-      let newline: number;
-      while ((newline = buffer.indexOf('\n')) >= 0) {
-        let line = buffer.slice(0, newline);
-        buffer = buffer.slice(newline + 1);
-        if (line.endsWith('\r')) line = line.slice(0, -1);
-        dispatch(line);
+      if (!response.ok) throw new ApiError('无法继续接收当前任务，请重新载入对话。', response.status);
+    }
+    if (!response.body) throw new ApiError('浏览器无法读取流式响应', 0);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      while (!settled) {
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try { chunk = await reader.read(); }
+        catch { signal.throwIfAborted(); break; }
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        let newline: number;
+        while ((newline = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, newline);
+          buffer = buffer.slice(newline + 1);
+          dispatch(line);
+        }
+      }
+    } finally {
+      void reader.cancel().catch(() => {});
+      reader.releaseLock();
+      batch.flush();
+    }
+    response = null;
+    if (!settled) {
+      failures++;
+      if (failures > 1) {
+        const status = await get('/api/turns/status?thread=' + encodeURIComponent(thread), signal).catch(() => null);
+        if (status && !status.busy && cursor >= status.cursor) return { settled: status.settled === true };
       }
     }
-    buffer += decoder.decode();
-    if (buffer.trim()) dispatch(buffer);
-  } finally {
-    batch.flush();
-    reader.releaseLock?.();
   }
   return { settled };
 }

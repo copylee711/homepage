@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 /**
  * Install/build commands that can outlast one sandbox bash slot.
  * The agent chooses background execution; bash refuses these shapes so the
@@ -56,3 +57,23 @@ export const INSTALL_GUIDANCE =
   'Keep working on other useful steps while it runs. If nothing else is useful, call background_wait to pause this turn; when the task exits the tool returns and you continue. ' +
   'Ordinary bash background processes (&, nohup, setsid) still die when the tool container is removed. Use purpose "server" only for long-running preview servers. ' +
   'Explicit stop, revoked execution, logout, lease expiry and the turn deadline stop in-flight install tasks. They do not stop purpose "server" previews.';
+
+export async function waitForBackground(readStatus, timeoutMs, signal, intervalMs = 1000) {
+  const deadline = performance.now() + timeoutMs;
+  let task;
+  while (true) {
+    signal?.throwIfAborted();
+    const remaining = Math.ceil(deadline - performance.now());
+    if (remaining <= 0) return { task, timedOut: true };
+    const limit = AbortSignal.timeout(Math.min(remaining, 20000));
+    try {
+      task = await readStatus(signal ? AbortSignal.any([signal, limit]) : limit);
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (!limit.aborted || performance.now() < deadline) throw error;
+      return { task, timedOut: true };
+    }
+    if (task?.state && task.state !== 'running') return { task, timedOut: false };
+    await sleep(Math.min(intervalMs, Math.max(0, deadline - performance.now())), undefined, { signal });
+  }
+}

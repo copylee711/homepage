@@ -113,6 +113,18 @@ test('new file/chat endpoints enforce CSRF and derive tenant identity; local mod
   assert.equal((await fetch(base + '/api/chats/export', { headers })).status, 403);
   admin = true;
 });
+test('gateway forwards explicit recursive deletion only', async () => {
+  const cookie = 'copylee_ai=' + 't'.repeat(64);
+  const { csrf } = await (await fetch(base + '/api/me', { headers: { cookie } })).json();
+  for (const recursive of [true, false, 'true', undefined]) {
+    const response = await fetch(base + '/api/files/manage', {
+      method: 'POST', headers: { cookie, Origin: 'http://127.0.0.1', 'X-CSRF-Token': csrf },
+      body: JSON.stringify({ action: 'delete', path: 'example/subfolder', recursive }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(lastRunner.value.recursive, recursive === true);
+  }
+});
 test('preview capabilities are structurally validated and sandbox active content',async()=>{
  assert.equal((await fetch(base+'/preview/not-a-token/')).status,404);
  assert.equal((await fetch(base+'/preview/'+'a'.repeat(43)+'/',{method:'POST'})).status,405);

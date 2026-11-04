@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import Icon from './Icon.vue';
 import { get, post } from '../services/api';
 import { useUi } from '../stores/ui';
@@ -15,26 +15,24 @@ const pending = ref('');
 const error = ref('');
 let timer: ReturnType<typeof setTimeout> | undefined;
 let disposed = false;
+let loading = false;
 
-// CRITICAL: Only show when there are actively running tasks
 const runningTasks = computed(() => tasks.value.filter(t => t.state === 'running'));
 
 async function load() {
+  if (loading || disposed || !session.canExecute) return;
   if (timer) clearTimeout(timer);
-  if (!session.canExecute) return;
+  loading = true;
   try {
     const r = await get('/api/background');
-    if (disposed) return;
+    if (disposed || !session.canExecute) return;
     tasks.value = r.tasks || [];
     error.value = '';
-    // If no more tasks running, automatically fold
-    if (runningTasks.value.length === 0) {
-      expanded.value = false;
-    }
   } catch (e: any) {
     if (!disposed) error.value = e.message || '加载后台任务失败';
   } finally {
-    if (!disposed) timer = setTimeout(load, 5000);
+    loading = false;
+    if (!disposed) timer = setTimeout(load, runningTasks.value.length || session.busy ? 1500 : 5000);
   }
 }
 
@@ -67,7 +65,19 @@ async function stop(task: any) {
   }
 }
 
-onMounted(load);
+const startResults = computed(() => session.activeLive?.blocks.filter((b: any) =>
+  (b.name === 'background_start' || b.name === 'bash') && b.state === 'success' &&
+  /"purpose"\s*:\s*"(?:install|server)"/.test(b.result || '')).length || 0);
+watch([() => session.canExecute, () => session.busy, startResults], ([allowed]) => {
+  if (allowed) void load();
+  else { clearTimeout(timer); tasks.value = []; logs.value = {}; expanded.value = false; }
+}, { immediate: true });
+
+function taskState(task: any) {
+  if (task.state === 'running') return '运行中';
+  if (task.state === 'stopped') return '已停止';
+  return task.exitCode === 0 ? '已完成' : '执行失败';
+}
 onBeforeUnmount(() => {
   disposed = true;
   if (timer) clearTimeout(timer);
@@ -75,22 +85,21 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <!-- Only rendered when there are running tasks -->
-  <div v-if="runningTasks.length" class="float-bg-root" :class="{ 'is-expanded': expanded }">
+  <div v-if="tasks.length" class="float-bg-root" :class="{ 'is-expanded': expanded }">
     <!-- Collapsed pill button -->
     <button
       type="button"
       class="float-bg-pill"
-      :title="expanded ? '收起后台任务' : '查看运行中的后台任务'"
+      :title="expanded ? '收起后台任务' : '查看后台任务'"
       :aria-expanded="expanded"
       @click="expanded = !expanded"
     >
-      <span class="float-bg-pulse"></span>
+      <span v-if="runningTasks.length" class="float-bg-pulse"></span>
       <span class="float-bg-icon">
         <Icon name="activity" :size="13" />
       </span>
       <span class="float-bg-title">后台任务</span>
-      <span class="float-bg-badge">{{ runningTasks.length }}</span>
+      <span class="float-bg-badge">{{ runningTasks.length || tasks.length }}</span>
       <Icon name="chevron-right" :size="12" class="float-bg-arrow" />
     </button>
 
@@ -107,10 +116,10 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="float-bg-list">
-        <section v-for="task in runningTasks" :key="task.id" class="float-bg-item">
+        <section v-for="task in [...tasks].reverse()" :key="task.id" class="float-bg-item">
           <div class="float-bg-item-head">
             <strong class="float-bg-item-title">{{ task.title }}</strong>
-            <span class="float-bg-item-state">运行中</span>
+            <span class="float-bg-item-state" :class="{ running: task.state === 'running' }">{{ taskState(task) }}</span>
           </div>
           <code class="float-bg-cmd">{{ task.command }}</code>
           <p class="float-bg-meta">
@@ -119,7 +128,7 @@ onBeforeUnmount(() => {
 
           <div class="float-bg-actions">
             <a
-              v-if="task.previewPath"
+              v-if="task.state === 'running' && task.previewPath"
               :href="task.previewPath"
               target="_blank"
               rel="noopener noreferrer"
@@ -137,6 +146,7 @@ onBeforeUnmount(() => {
             </button>
             <button
               type="button"
+              v-if="task.state === 'running'"
               class="btn btn-quiet float-bg-btn float-bg-btn-danger"
               :disabled="!!pending"
               @click="stop(task)"
@@ -226,8 +236,8 @@ onBeforeUnmount(() => {
   position: absolute;
   top: 36px;
   right: 0;
-  width: 330px;
-  max-height: 460px;
+  width: min(330px, calc(100vw - 24px));
+  max-height: min(460px, 55dvh);
   overflow-y: auto;
   padding: 12px 14px;
   border: 1px solid var(--line-2);
@@ -310,10 +320,11 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .float-bg-item-state {
-  color: #10b981;
+  color: var(--muted);
   font-size: 11px;
   font-weight: 560;
 }
+.float-bg-item-state.running { color: var(--accent); }
 .float-bg-cmd {
   display: block;
   padding: 4px 6px;

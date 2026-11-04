@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { reactiveLive, handleEvent } from '../web/src/services/live.mjs';
-import { segmentBlocks, buildTranscript } from '../web/src/services/transcript.mjs';
+import { segmentBlocks, buildTranscript, groupExecution } from '../web/src/services/transcript.mjs';
 test('multiple model messages reset contentIndex without merging text or moving tools', () => {
   const live = reactiveLive();
   for (const [text, id] of [['before', 'a'], ['between', 'b'], ['after', null]]) {
@@ -54,4 +54,20 @@ test('message_end records an output-limit stop without treating a normal stop as
   assert.equal(live.stopReason, 'length');
   handleEvent({ type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [] } }, live);
   assert.equal(live.stopReason, 'length');
+});
+
+test('execution disclosure stops at each visible answer segment', () => {
+  const blocks = [
+    { type: 'thinking', text: 'first thought' },
+    { type: 'text', text: 'first answer' },
+    { type: 'tool', id: 'read' },
+    { type: 'text', text: 'second answer' },
+    { type: 'tool', id: 'wait' },
+  ];
+  for (const streaming of [true, false]) {
+    const groups = groupExecution(blocks, streaming);
+    assert.deepEqual(groups.filter(block => block.type === 'text'), [blocks[1], blocks[3]]);
+    assert.deepEqual(groups.filter(block => block.type === 'execution').map(group => group.items), [[blocks[0]], [blocks[2]], [blocks[4]]]);
+    assert.deepEqual(groups.filter(block => block.type === 'execution').map(group => group.collapsed), [true, true, !streaming]);
+  }
 });

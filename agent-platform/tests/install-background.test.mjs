@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { prefersBackgroundInstall, taskPurpose, INSTALL_GUIDANCE, INSTALL_REDIRECT } from '../install-background.mjs';
+import { prefersBackgroundInstall, taskPurpose, INSTALL_GUIDANCE, INSTALL_REDIRECT, waitForBackground } from '../install-background.mjs';
 
 const installs = [
   'pip install -r requirements.txt',
@@ -57,4 +57,17 @@ test('the sandbox extension moves installs to the background and can pause until
   assert.match(source, /taskPurpose\(params\.command, params\.purpose\)/);
   assert.match(source, /INSTALL_GUIDANCE/);
   assert.match(source, /call\('background-start', \{ command, cwd, purpose: 'install' \}, signal\)/);
+});
+
+test('background wait resumes on exit before the timeout and preserves exit details', async () => {
+  const exited = { state: 'exited', exitCode: 1, logs: 'installation failed' };
+  let calls = 0;
+  const result = await waitForBackground(async () => ++calls === 1 ? { state: 'running' } : exited, 5000, undefined, 5);
+  assert.deepEqual(result, { task: exited, timedOut: false });
+  assert.equal(calls, 2);
+
+  const controller = new AbortController();
+  const wait = waitForBackground(async () => ({ state: 'running' }), 5000, controller.signal);
+  controller.abort();
+  await assert.rejects(wait, { name: 'AbortError' });
 });

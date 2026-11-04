@@ -110,8 +110,8 @@ let activeFootnotes = null;
 let activeStreaming = false;
 export function renderMarkdown(value, doc = globalThis.document, options = {}) {
   const fragment = doc.createDocumentFragment();
-  const raw = String(value ?? '').replace(/\r\n?/g, '\n');
-  const prevCitations=activeCitations;activeCitations=new Map((options.citations||(options.sources?collectSources(raw):[])).map(s=>[s.url,s]));
+  const { text: raw, sources } = splitSourceBlocks(value);
+  const prevCitations=activeCitations;activeCitations=new Map((options.citations||(options.sources?collectSources(raw, [], sources):[])).map(s=>[s.url,s]));
   const prevFootnotes = activeFootnotes,prevProject=activeProject,prevStreaming=activeStreaming;activeProject=options.project||'default';activeStreaming=options.streaming===true;
   activeFootnotes = extractFootnoteMap(raw);
   const cleaned = activeFootnotes.size ? raw.replace(FOOTNOTE_DEF, '') : raw;
@@ -153,19 +153,19 @@ export function splitSourceBlocks(text) {
   const sources = [];
   const body = [];
   let fence;
-  for (const line of String(text ?? '').split('\n')) {
+  for (const line of String(text ?? '').replace(/\r\n?/g, '\n').split('\n')) {
     const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
     if (fence) {
       if (match && match[1][0] === fence.marker[0] && match[1].length >= fence.marker.length && !match[2].trim()) {
         if (!fence.sources) body.push(line);
         fence = undefined;
       } else if (fence.sources) {
-        const value = line.trim().replace(/^[-*]\s+/, '');
+        const value = line.trim().replace(/^(?:[-*+]|\d+[.)])\s+/, '');
         const link = linkAt(value, 0, false);
         if (link && link.end === value.length && sources.length < 30) sources.push({ url: link.href, title: link.label });
       } else body.push(line);
     } else if (match) {
-      fence = { marker: match[1], sources: match[2].trim() === 'iris-sources' };
+      fence = { marker: match[1], sources: line.match(FENCE)?.[2]?.toLowerCase() === 'iris-sources' };
       if (!fence.sources) body.push(line);
     } else body.push(line);
   }
@@ -197,6 +197,7 @@ export function collectSources(text, metadata = [], additional = []) {
 export function citationBadge(doc,source){
   const badge=link(doc,source.url,source.label,'md-citation');badge.setAttribute('aria-label','引用 '+source.label+'：'+(source.title||source.host));badge.title=source.title||source.host;
   if(source.label.length===1)badge.classList.add('is-single');
+  badge.title = source.title || source.host;
   const popup=node(doc,'span','md-citation-preview');popup.append(node(doc,'span','md-citation-host',source.host),node(doc,'strong',null,source.title||source.host));if(source.snippet)popup.append(node(doc,'span','md-citation-snippet',String(source.snippet).slice(0,240)));badge.append(popup);return badge;
 }
 let activeCitations=null;
@@ -240,6 +241,7 @@ function renderBlocks(lines, parent, doc) {
       }
       const closed=index < lines.length;
       if (closed) index += 1;
+      if (language === 'iris-sources') continue;
       if (/^iris-widget(\s|$)/.test(language)) {
         if (!closed) {
           if (activeStreaming) { parent.append(widgetPending(doc)); continue; }
@@ -381,6 +383,7 @@ function renderTable(lines, doc) {
   toggle.dataset.tableWrap = '';
   toggle.setAttribute('aria-pressed', 'true');
   toggle.setAttribute('aria-label', '单元格换行');
+  toggle.title = '切换换行/单行显示';
   bar.append(toggle);
   scroller.append(table);
   wrap.append(bar, scroller);
@@ -549,7 +552,7 @@ export function renderInline(value, parent, doc = globalThis.document, depth = 0
       if (found) {
         const citeMatch = found.label.trim().match(/^\[?\^?(\d{1,3})\]?$/);
         const source = activeCitations?.get(safeHref(found.href));
-        if (source || (citeMatch && safeHref(found.href))) {
+        if (citeMatch && safeHref(found.href) || source?.label && !parent.closest('td, th')) {
           // Strip redundant surrounding parentheses: e.g. `( [10](...) )` or `（[10](...)）`
           const leftParen = buffer.match(/[（(]\s*$/);
           if (leftParen) {
