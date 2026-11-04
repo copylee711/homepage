@@ -38,6 +38,30 @@ function validateBaseUrl(rawUrl) {
   return url.href.replace(/\/$/, '');
 }
 
+// Pi gives a custom model 16384 output tokens unless told otherwise, and reasoning
+// shares that allowance with the answer. A long think could use all of it and end with
+// stopReason "length" and no reply. Use the limits from Pi's own catalog for models we
+// know, and let a provider override them (maxTokens / contextWindow).
+export const DEFAULT_MODEL_LIMITS = Object.freeze({ contextWindow: 128000, maxTokens: 16384 });
+const KNOWN_MODEL_LIMITS = [
+  // Pi 1.4.0 catalog: opencode / opencode-go deepseek-v4.x
+  { host: /(^|\.)opencode\.ai$/, model: /^deepseek-v4/, contextWindow: 1000000, maxTokens: 384000 },
+];
+export function modelLimits(provider, model) {
+  let host = '';
+  try { host = new URL(provider.baseUrl).hostname; } catch { /* invalid URLs are rejected on save */ }
+  const known = KNOWN_MODEL_LIMITS.find(item => item.host.test(host) && item.model.test(model)) || DEFAULT_MODEL_LIMITS;
+  const contextWindow = Number.isInteger(provider.contextWindow) ? provider.contextWindow : known.contextWindow;
+  const maxTokens = Number.isInteger(provider.maxTokens) ? provider.maxTokens : known.maxTokens;
+  return { contextWindow, maxTokens: Math.min(maxTokens, contextWindow) };
+}
+function optionalLimit(value, min, max, message) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < min || number > max) fail(422, message);
+  return number;
+}
+
 export async function loadProviders() {
   try { return JSON.parse(await readFile(file, 'utf8')); }
   catch (error) {
@@ -99,6 +123,10 @@ export async function normalizeProvider(input) {
     reasoning: input.reasoning === true,
     apiKey,
   };
+  const maxTokens = optionalLimit(input.maxTokens, 256, 2000000, '最大输出 token 需为 256–2000000 的整数');
+  const contextWindow = optionalLimit(input.contextWindow, 1024, 10000000, '上下文窗口需为 1024–10000000 的整数');
+  if (maxTokens !== undefined) value.maxTokens = maxTokens;
+  if (contextWindow !== undefined) value.contextWindow = contextWindow;
   if (!providerKey(value)) fail(422, '请先填写 API 密钥');
   return value;
 }
@@ -168,6 +196,14 @@ export async function activateProvider({ id, model } = {}) {
   return { active: config.active, activeModel: config.activeModel };
 }
 
+// Rewrite models.json from the saved providers, e.g. at startup so new limits apply.
+export async function refreshModelsJson() {
+  let config;
+  try { config = JSON.parse(await readFile(file, 'utf8')); }
+  catch (error) { if (error.code === 'ENOENT') return; throw error; } // built-in provider only
+  if (config.providers?.length) await syncModelsJson(config);
+}
+
 async function syncModelsJson(config) {
   const providers = Object.fromEntries(config.providers.map(item => {
     const list = Array.isArray(item.models) && item.models.length ? item.models : [item.model];
@@ -176,7 +212,7 @@ async function syncModelsJson(config) {
     return [item.id, {
       baseUrl: item.baseUrl, api: item.api, apiKey: item.apiKey || '$OPENCODE_API_KEY', authHeader: item.api.startsWith('openai-'),
       headers: { 'User-Agent': 'copylee-pi-agent/0.1.0' },
-      models: ordered.map(id => ({ id, reasoning: item.reasoning === true, input: ['text', 'image'], contextWindow: 128000, maxTokens: 16384 })),
+      models: ordered.map(id => ({ id, reasoning: item.reasoning === true, input: ['text', 'image'], ...modelLimits(item, id) })),
     }];
   }));
   await mkdir(root + '/agent', { recursive: true, mode: 0o700 });

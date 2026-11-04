@@ -1,5 +1,6 @@
 import { promptInput } from './prompt-input.mjs';
 import { WebSession } from './web-session.mjs';
+import { TurnWatchdog } from './turn-watchdog.mjs';
 import { FeatureStore, publicFeatures, mcpToolName } from './features.mjs';
 import { McpConnections } from './mcp.mjs';
 import { MemoryStore, memoryContext } from './memory.mjs';
@@ -12,7 +13,7 @@ import { dirname } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { body, equal, fail, json, modelLabel, required } from './shared.mjs';
 import { TurnFanout } from './turn-stream.mjs';
-import { publicProviders, saveProvider, deleteProvider, activeProvider, activateProvider, testProvider, discoverProviderModels, proxyEnvironment, loadProviders } from './providers.mjs';
+import { publicProviders, saveProvider, deleteProvider, activeProvider, activateProvider, testProvider, discoverProviderModels, proxyEnvironment, loadProviders, refreshModelsJson } from './providers.mjs';
 import { sandbox, sandboxTool } from './sandbox-client.mjs';
 import { sessionCapacity } from './session-limits.mjs';
 import { prepareSessionCwd } from './session-cwd.mjs';
@@ -118,6 +119,7 @@ class Pi {
         const line = this.buffer.slice(0, index); this.buffer = this.buffer.slice(index + 1);
         let event;
         try { event = JSON.parse(line); } catch { continue; }
+        this.watchdog?.activity(event);
         if (this.busy) { this.approvals.capture(event); this.questions.capture(event); setImmediate(() => this.approvals.allowPending(tool => !requiresApproval(this.execution, tool))); }
         if (event.type === 'response') {
           const wait = this.pending.get(event.id);
@@ -159,7 +161,7 @@ class Pi {
     this.disk = this.disk.then(() => appendFile(file, line)).catch(() => {});
   }
   abortTurn() {
-    // Policy stop: deadline, storage cap, or lost renew. Not a browser disconnect.
+    // Policy stop: silent turn, storage cap, or lost renew. Not a browser disconnect.
     if (!this.busy || this.stopping) return;
     this.stopping = true;
     void cancel(this.user, { stopInstalls: true }).catch(() => { try { this.proc?.kill(); } catch { /* already gone */ } });
@@ -167,7 +169,7 @@ class Pi {
   finish() {
     this.approvals.clear(); this.questions.clear();
     invalidateWorkspace(this.user);
-    clearTimeout(this.deadline); clearInterval(this.storageCheck); clearInterval(this.renewWatch);
+    clearInterval(this.deadline); this.watchdog = null; clearInterval(this.storageCheck); clearInterval(this.renewWatch);
     this.busy = false;
     this.fanout?.end();
   }
@@ -204,7 +206,12 @@ class Pi {
         this.fanout.attach(res, 0);
       }
     } catch { /* the browser left before the first byte; the turn still runs */ }
-    this.deadline = setTimeout(() => this.abortTurn(), 30 * 60000);
+    // No cap on turn or thinking duration; only a silent turn is stopped.
+    this.watchdog = new TurnWatchdog(() => {
+      this.publish({ type: 'gateway_error', error: '模型与工具已长时间没有任何输出，任务已停止。' });
+      this.abortTurn();
+    });
+    this.deadline = setInterval(() => { if (this.busy) this.watchdog.check(); }, 15000);
     // Gateway heartbeats renew the lease. If that stops, the lease is already
     // dead and this turn must not keep running on a stale authorization.
     this.renewWatch = setInterval(() => {
@@ -695,4 +702,6 @@ export const server = createServer(async (req, res) => {
     json(res, error.status || 503, { error: error.status ? error.message : 'Pi 服务暂时不可用' });
   }
 });
+// Apply current model limits to models.json written by older releases.
+await refreshModelsJson().catch(() => {});
 server.listen(Number(process.env.PORT || 8081), '0.0.0.0');

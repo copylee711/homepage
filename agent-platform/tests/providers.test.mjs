@@ -7,7 +7,7 @@ import { join } from 'node:path';
 const directory = await mkdtemp(join(tmpdir(), 'agent-providers-'));
 process.env.PROVIDER_DATA_DIR = directory;
 process.env.OPENCODE_API_KEY = 'test-only-provider-key';
-const { presets, normalizeProvider, normalizeProbeInput, saveProvider, deleteProvider, activateProvider, publicProviders, proxyEnvironment } = await import('../providers.mjs');
+const { presets, normalizeProvider, normalizeProbeInput, saveProvider, deleteProvider, activateProvider, publicProviders, proxyEnvironment, modelLimits, refreshModelsJson, DEFAULT_MODEL_LIMITS } = await import('../providers.mjs');
 test('keys are never returned, blank preserves key, changed host requires explicit key', async () => {
   const input = { ...presets[0], apiKey: 'saved-secret-for-tests' };
   const result = await saveProvider(input);
@@ -51,3 +51,19 @@ test('multi-model list,probe input security, activation, and provider deletion w
   await assert.rejects(deleteProvider('opencode-go'), /至少需要保留/);
 });
 test.after(async () => rm(directory, { recursive: true, force: true }));
+
+test('reasoning models get real output limits instead of the 16384-token default', async () => {
+  // The KMP turn spent all 16384 output tokens on thinking and stopped with no answer.
+  assert.deepEqual(modelLimits(presets[0], 'deepseek-v4.1-flash'), { contextWindow: 1000000, maxTokens: 384000 });
+  assert.deepEqual(modelLimits({ baseUrl: 'https://api.example.com/v1' }, 'other'), { ...DEFAULT_MODEL_LIMITS });
+  assert.deepEqual(modelLimits({ baseUrl: 'https://api.example.com/v1', maxTokens: 65536, contextWindow: 200000 }, 'other'), { contextWindow: 200000, maxTokens: 65536 });
+  assert.equal(modelLimits({ baseUrl: 'https://api.example.com/v1', maxTokens: 900000, contextWindow: 200000 }, 'x').maxTokens, 200000);
+  const saved = await normalizeProvider({ ...presets[0], apiKey: 'test-key', maxTokens: '65536', contextWindow: 262144 });
+  assert.equal(saved.maxTokens, 65536); assert.equal(saved.contextWindow, 262144);
+  for (const bad of [{ maxTokens: 0 }, { maxTokens: 'lots' }, { contextWindow: 10 }]) await assert.rejects(normalizeProvider({ ...presets[0], apiKey: 'test-key', ...bad }), error => error.status === 422);
+  await saveProvider({ ...presets[0], apiKey: 'saved-secret-for-tests' });
+  await refreshModelsJson();
+  const stored = JSON.parse(await readFile(join(directory, 'agent/models.json'), 'utf8'));
+  const model = stored.providers['opencode-go'].models.find(item => item.id === 'deepseek-v4.1-flash');
+  assert.equal(model.maxTokens, 384000); assert.equal(model.contextWindow, 1000000);
+});
