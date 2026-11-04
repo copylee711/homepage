@@ -15,6 +15,7 @@ const isUser = computed(() => props.message.role === 'user');
 const userRawText = computed(() => textContent(props.message.content));
 const blocks = computed(() => normalizeBlocks(props.message.content, props.toolResults));
 const turnState = computed(() => props.message._vm || null);
+const outputLimited = computed(() => props.message.stopReason === 'length' || turnState.value?.stopReason === 'length');
 const time = computed(() => formatClock(props.message.timestamp || Date.now()));
 
 const durationText = computed(() => {
@@ -351,6 +352,7 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
         <p v-if="turnState?.error" class="assistant-note is-error" role="alert">{{ turnState.error }}</p>
         <p v-else-if="!blocks.length && turnState?.stopped" class="assistant-note">已停止生成</p>
         <p v-else-if="!blocks.length" class="assistant-note">这次没有收到模型回复。如果发送了图片或附件，可能是当前模型不支持这类输入，换一个模型或补充文字说明后再试。</p>
+        <p v-if="outputLimited" class="assistant-limit">输出已达上限，可继续</p>
         <footer class="assistant-footer">
           <div class="assistant-actions">
             <button
@@ -502,6 +504,7 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
 /* Assistant footer: quiet action row plus a single muted meta line */
 .assistant-note { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
 .assistant-note.is-error { color: var(--danger); }
+.assistant-limit { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; font-weight: 400; }
 .assistant-footer {
   display: flex;
   align-items: center;

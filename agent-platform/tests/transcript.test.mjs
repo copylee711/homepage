@@ -31,3 +31,27 @@ test('only adjacent tools group, across history message boundaries; source histo
   assert.equal(segments[0].items[0].result, 'found');
   assert.equal(JSON.stringify(messages), before);
 });
+test('reloaded history keeps stopReason length, including when a later assistant message is merged', () => {
+  const limited = buildTranscript([
+    { role: 'user', content: '继续' },
+    { role: 'assistant', stopReason: 'toolUse', content: [{ type: 'text', text: '先看一下' }] },
+    { role: 'toolResult', toolCallId: 't', content: [{ type: 'text', text: 'ok' }] },
+    { role: 'assistant', stopReason: 'length', content: [{ type: 'text', text: '截断的回答' }] },
+  ]);
+  assert.equal(limited[1].stopReason, 'length');
+  assert.equal(limited[1].content.some(block => block.text === '截断的回答'), true);
+  const finished = buildTranscript([
+    { role: 'user', content: 'hi' },
+    { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: '完成' }] },
+  ]);
+  assert.equal(finished[1].stopReason, 'stop');
+});
+test('message_end records an output-limit stop without treating a normal stop as one', () => {
+  const live = reactiveLive();
+  handleEvent({ type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'ok' }] } }, live);
+  assert.equal(live.stopReason, '');
+  handleEvent({ type: 'message_end', message: { role: 'assistant', stopReason: 'length', content: [{ type: 'text', text: 'cut' }] } }, live);
+  assert.equal(live.stopReason, 'length');
+  handleEvent({ type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [] } }, live);
+  assert.equal(live.stopReason, 'length');
+});

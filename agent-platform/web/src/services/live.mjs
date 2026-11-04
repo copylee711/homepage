@@ -2,7 +2,7 @@ import { assignToolArgs, finishedPlan } from './plan-state.mjs';
 
 // A plain reactive-friendly object describing the streaming assistant turn.
 export function reactiveLive() {
-  return { blocks: [], approvals: [], questions: [], status: '正在连接模型…', spinner: true, finished: false, error: '', stopped: false, tools: {} };
+  return { blocks: [], approvals: [], questions: [], status: '正在连接模型…', spinner: true, finished: false, error: '', stopped: false, stopReason: '', tools: {} };
 }
 
 // Reduce a runner stream event into the live view model's block list.
@@ -50,6 +50,9 @@ export function handleEvent(event, live) {
         if (!b.state) b.state = 'pending';
       }
     }
+    // Pi sends stopReason on the assistant message. "length" means this reply
+    // stopped because the output token budget was used up.
+    if (event.message.stopReason === 'length') vm.stopReason = 'length';
     return;
   }
   if (event.type === 'message_update') {

@@ -31,6 +31,8 @@ export function buildTranscript(messages) {
     if (last?.role === 'assistant') {
       last.content.push(...blocks);
       if (m.durationMs) last.durationMs = (last.durationMs || 0) + m.durationMs;
+      // A later model message in the same turn can be the one that hit the cap.
+      if (m.stopReason === 'length') last.stopReason = 'length';
     }
     else items.push({ ...m, content: [...blocks] });
   }
