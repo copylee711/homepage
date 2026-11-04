@@ -378,12 +378,13 @@ function renderTable(lines, doc) {
   }
   table.append(thead, tbody);
   const bar = node(doc, 'div', 'md-table-bar');
-  const toggle = node(doc, 'button', 'md-table-wrap-toggle', '换行');
+  const toggle = node(doc, 'button', 'md-table-wrap-toggle');
   toggle.type = 'button';
   toggle.dataset.tableWrap = '';
   toggle.setAttribute('aria-pressed', 'true');
   toggle.setAttribute('aria-label', '单元格换行');
   toggle.title = '切换换行/单行显示';
+  toggle.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M3 12h14a3 3 0 0 1 0 6h-4M16 15l-3 3 3 3"/></svg>';
   bar.append(toggle);
   scroller.append(table);
   wrap.append(bar, scroller);
@@ -552,7 +553,14 @@ export function renderInline(value, parent, doc = globalThis.document, depth = 0
       if (found) {
         const citeMatch = found.label.trim().match(/^\[?\^?(\d{1,3})\]?$/);
         const source = activeCitations?.get(safeHref(found.href));
-        if (citeMatch && safeHref(found.href) || source?.label && !parent.closest('td, th')) {
+        if (source?.label || (citeMatch && safeHref(found.href))) {
+          if (!citeMatch && parent.closest('td, th')) {
+            flush();
+            renderInline(found.label, parent, doc, depth + 1);
+            parent.append(citationBadge(doc, source));
+            index = found.end;
+            continue;
+          }
           // Strip redundant surrounding parentheses: e.g. `( [10](...) )` or `（[10](...)）`
           const leftParen = buffer.match(/[（(]\s*$/);
           if (leftParen) {

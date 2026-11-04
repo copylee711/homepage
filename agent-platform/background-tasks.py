@@ -38,6 +38,7 @@ class BackgroundTasks:
         with self.lock: return sum(t['memory'] for t in self.tasks.values() if t['state'] == 'running')
     def public(self, task):
         data = {key: task[key] for key in ['id', 'title', 'command', 'cwd', 'port', 'startedAt', 'expiresAt', 'state', 'exitCode']}
+        data['thread'] = task.get('thread')
         data['purpose'] = task.get('purpose', 'server')
         data['previewPath'] = '/preview/' + task['id'] + '/' if task['port'] else None
         return data
@@ -57,7 +58,7 @@ class BackgroundTasks:
         task = self.tasks.get(task_id)
         if not task or task['user'] != user: raise ValueError('后台任务不存在')
         return task
-    def start(self, user, value, rules):
+    def start(self, user, value, rules, thread=None):
         command = value.get('command'); cwd = value.get('cwd')
         if not isinstance(command, str) or not command.strip() or len(command) > 8000 or '\x00' in command: raise ValueError('后台命令无效')
         if not isinstance(cwd, str) or not cwd.startswith('/workspace/') or any(c in cwd for c in ['\x00', '\n', '\r']) or '..' in cwd.split('/'): raise ValueError('后台目录必须位于项目内')
@@ -72,6 +73,7 @@ class BackgroundTasks:
             if self.memory_used() + sum(self.active_memory.values()) + quota['memory_mib'] > int(os.environ.get('SANDBOX_ACTIVE_MEMORY_MIB', '4096')): raise ValueError('运行内存预算已满，请先停止其他任务')
             root = self.workspace(user); task_id = secrets.token_urlsafe(32); name = 'cl-background-' + task_id[:20].lower().replace('_', 'x')
             task = {'id': task_id, 'user': user, 'container': name, 'memory': quota['memory_mib'], 'title': str(value.get('title') or '后台任务')[:100], 'command': command, 'cwd': cwd, 'port': port, 'purpose': purpose, 'startedAt': int(time.time()*1000), 'expiresAt': int((time.time()+3600)*1000), 'state': 'running', 'exitCode': None}
+            task['thread'] = thread
             task['previewBase'] = value.get('previewBase') is True
             args = ['run', '-d', '--name', name, '--label', 'copylee.background=1', '--network', self.network, '--read-only', '--user', '1000:1000', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--sysctl', 'net.ipv6.conf.all.disable_ipv6=1', '--memory', str(quota['memory_mib'])+'m', '--memory-swap', str(quota['memory_mib'])+'m', '--cpus', str(quota['cpus']), '--pids-limit', str(quota['pids']), '--ulimit', 'nofile=1024:1024', '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m,mode=1777', '--shm-size', '8m', '--log-driver', 'json-file', '--log-opt', 'max-size=1m', '--log-opt', 'max-file=1', *self.policy.mount_arguments(root, rules), '--env', 'HOME=/tmp', '--env', 'HTTP_PROXY=http://192.168.85.2:3128', '--env', 'HTTPS_PROXY=http://192.168.85.2:3128', '--entrypoint', 'python3', self.image, '/background-worker.py', json.dumps({'command': command, 'cwd': cwd})]
             args[args.index('--entrypoint'):args.index('--entrypoint')] = ['--env', 'IRIS_PREVIEW_BASE=/preview/' + task_id + '/']
@@ -96,6 +98,24 @@ class BackgroundTasks:
             task['logsTail'] = (result.stdout + result.stderr)[-65536:].decode('utf8', errors='replace')
             self.docker('rm', '-f', task['container']); task['state'] = 'stopped'
             return {'ok': True}
+    def clear_history(self, user, task_id=None):
+        with self.lock:
+            candidates = [self.owned(user, task_id)] if task_id else [
+                t for t in self.tasks.values() if t['user'] == user
+            ]
+            deleted = []
+            for task in candidates:
+                self.refresh(task)
+                if task['state'] == 'running':
+                    if task_id: raise ValueError('运行中的任务不能删除')
+                    continue
+                if task['state'] == 'exited':
+                    result = self.docker('rm', task['container'])
+                    if result.returncode and b'No such container' not in result.stderr:
+                        raise ValueError('无法清除后台任务容器，请重试')
+                self.tasks.pop(task['id'])
+                deleted.append(task['id'])
+            return {'deleted': deleted}
     def stop_user(self, user):
         with self.lock:
             for task in list(self.tasks.values()):

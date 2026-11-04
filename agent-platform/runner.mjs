@@ -100,7 +100,7 @@ class Pi {
     const permission = chatItem.permission || { scope: 'project_only', extraProjects: {} };
     this.execution = ['auto', 'edit'].includes(permission.execution) ? permission.execution : 'ask';
     this.secrets = await secretValues();
-    this.lease = (await sandbox('/lease', this.user, undefined, { project: projectId, ...permission })).token;
+    this.lease = (await sandbox('/lease', this.user, undefined, { project: projectId, ...permission }, { thread: this.thread })).token;
     await sandboxTool(this.lease, { op: 'mkdir', path: `/workspace/${projectId}` });
     const env = proxyEnvironment(config.proxy); delete env.RUNNER_SECRET; delete env.SANDBOX_SECRET;
     env.SANDBOX_URL = process.env.SANDBOX_URL || 'http://192.168.84.1:18082';
@@ -430,9 +430,9 @@ export const server = createServer(async (req, res) => {
       const response = await fetch((process.env.SANDBOX_URL || 'http://192.168.84.1:18082') + '/background/preview', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + required('SANDBOX_SECRET') }, body: JSON.stringify({ token: input.token, path: input.path }), signal: AbortSignal.timeout(15000) });
       const value = await response.json(); if (!response.ok) fail(404, value.error || '预览不可用'); return json(res, 200, value);
     }
-    if (req.url === '/background/list' || req.url === '/background/stop') {
+    if (['/background/list', '/background/stop', '/background/clear-history'].includes(req.url)) {
       const lease = (await sandbox('/lease', input.user)).token;
-      return json(res, 200, await sandboxTool(lease, { op: req.url.endsWith('/list') ? 'background-status' : 'background-stop', id: input.id }));
+      return json(res, 200, await sandboxTool(lease, { op: req.url.endsWith('/list') ? 'background-status' : req.url.slice(1).replace('/', '-'), id: input.id, all: input.all === true }));
     }
     if (req.url === '/memory' || req.url === '/memory/update') {
       const project = input.project || 'default'; await projectDirectory(input.user, project);

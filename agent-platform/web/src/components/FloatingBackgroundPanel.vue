@@ -16,16 +16,20 @@ const error = ref('');
 let timer: ReturnType<typeof setTimeout> | undefined;
 let disposed = false;
 let loading = false;
+let historyRevision = 0;
 
+const floating = computed(() => !!session.chatId && tasks.value.some(t => t.thread === session.chatId));
+watch(() => session.chatId, () => { expanded.value = false; });
 const runningTasks = computed(() => tasks.value.filter(t => t.state === 'running'));
 
 async function load() {
   if (loading || disposed || !session.canExecute) return;
   if (timer) clearTimeout(timer);
   loading = true;
+  const revision = historyRevision;
   try {
     const r = await get('/api/background');
-    if (disposed || !session.canExecute) return;
+    if (disposed || !session.canExecute || revision !== historyRevision) return;
     tasks.value = r.tasks || [];
     error.value = '';
   } catch (e: any) {
@@ -65,6 +69,29 @@ async function stop(task: any) {
   }
 }
 
+async function clearHistory(task?: { id: string; title: string }) {
+  if (pending.value || !await ui.confirm({
+    title: task ? '删除后台任务记录' : '清空后台任务历史',
+    message: task ? `删除“${task.title}”的记录和日志？` : '删除所有已结束任务的记录和日志。运行中的任务和工作区文件会保留。',
+    confirmText: task ? '删除记录' : '清空历史',
+    danger: true,
+  })) return;
+  pending.value = task?.id || 'history';
+  try {
+    const { deleted } = await post('/api/background/clear-history', task ? { id: task.id } : { all: true });
+    historyRevision++;
+    const ids = new Set<string>(deleted);
+    tasks.value = tasks.value.filter(item => !ids.has(item.id));
+    for (const id of ids) delete logs.value[id];
+    if (!tasks.value.length) expanded.value = false;
+    error.value = '';
+  } catch (e: any) {
+    error.value = e.message;
+  } finally {
+    pending.value = '';
+  }
+}
+
 const startResults = computed(() => session.activeLive?.blocks.filter((b: any) =>
   (b.name === 'background_start' || b.name === 'bash') && b.state === 'success' &&
   /"purpose"\s*:\s*"(?:install|server)"/.test(b.result || '')).length || 0);
@@ -85,10 +112,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="tasks.length" class="float-bg-root" :class="{ 'is-expanded': expanded }">
-    <!-- Collapsed pill button -->
+  <Teleport v-if="tasks.length" to="#background-toolbar-slot" :disabled="floating">
+  <div class="float-bg-root" :class="{ 'is-expanded': expanded, 'is-toolbar': !floating }" @keydown.esc.stop="expanded = false">
+    <button v-if="!floating" type="button" class="icon-button" title="后台任务" aria-label="后台任务" :aria-expanded="expanded" @click="expanded = !expanded">
+      <Icon name="activity" />
+    </button>
     <button
       type="button"
+      v-else
       class="float-bg-pill"
       :title="expanded ? '收起后台任务' : '查看后台任务'"
       :aria-expanded="expanded"
@@ -108,7 +139,8 @@ onBeforeUnmount(() => {
       <div class="float-bg-head">
         <div class="float-bg-head-left">
           <strong>后台任务</strong>
-          <span class="float-bg-active-tag">运行中 ({{ runningTasks.length }})</span>
+          <span v-if="runningTasks.length" class="float-bg-active-tag">运行中 ({{ runningTasks.length }})</span>
+          <button v-if="tasks.length > runningTasks.length" type="button" class="btn btn-quiet float-bg-btn float-bg-btn-danger" :disabled="!!pending" @click="clearHistory()">清空历史</button>
         </div>
         <button type="button" class="float-bg-close" title="收起" @click="expanded = false">
           <Icon name="x" :size="13" />
@@ -153,6 +185,9 @@ onBeforeUnmount(() => {
             >
               停止
             </button>
+            <button v-else type="button" class="btn btn-quiet float-bg-btn float-bg-btn-danger" :disabled="!!pending" @click="clearHistory(task)">
+              删除记录
+            </button>
           </div>
 
           <pre v-if="logs[task.id]" class="float-bg-logs">{{ logs[task.id] }}</pre>
@@ -161,6 +196,7 @@ onBeforeUnmount(() => {
       <p v-if="error" class="status-error" role="alert">{{ error }}</p>
     </div>
   </div>
+  </Teleport>
 </template>
 
 <style>
@@ -173,6 +209,8 @@ onBeforeUnmount(() => {
   font-size: 12.5px;
   user-select: none;
 }
+.float-bg-root.is-toolbar { position: static; }
+.float-bg-root.is-toolbar .float-bg-card { top: calc(100% + 8px); }
 .float-bg-pill {
   display: inline-flex;
   align-items: center;

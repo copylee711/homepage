@@ -89,9 +89,16 @@ def run_tool(user, value, lease):
     if value.get('op') == 'quota-info': return quotas.status(user)
     if value.get('op', '').startswith('background-'):
         with guard:
-            if value['op'] == 'background-start': return backgrounds.start(user, value, leases[lease].get('policy'))
+            if value['op'] == 'background-start': return backgrounds.start(user, value, leases[lease].get('policy'), leases[lease].get('thread'))
             if value['op'] == 'background-status': return backgrounds.logs(user, value['id']) if value.get('id') else backgrounds.list(user)
             if value['op'] == 'background-stop': return backgrounds.stop(user, value.get('id'))
+            if value['op'] == 'background-clear-history':
+                task_id = value.get('id')
+                if isinstance(task_id, str) and task_id and value.get('all') is not True:
+                    return backgrounds.clear_history(user, task_id)
+                if task_id is None and value.get('all') is True:
+                    return backgrounds.clear_history(user)
+                raise ValueError('请选择后台任务或明确清空历史')
             raise ValueError('后台操作无效')
     if value.get("op") in {"web-fetch", "web-search", "mcp-request", "image-fetch"}:
         if not web_slots.acquire(blocking=False):
@@ -230,9 +237,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, {"ok": True})
             with guard:
                 if self.path == "/lease":
+                    thread = value.get("thread")
                     token = secrets.token_urlsafe(48)
                     leases[token] = {"user": user, "expires": time.monotonic() + 20,
-                                     "policy": project_policy.policy(value.get("policy"))}
+                                     "policy": project_policy.policy(value.get("policy")),
+                                     "thread": thread if isinstance(thread, str) and re.fullmatch(r"[a-f0-9-]{36}", thread) else None}
                     return self.reply(200, {"token": token})
                 if self.path == "/renew":
                     lease = leases.get(value.get("token"))

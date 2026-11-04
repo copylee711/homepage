@@ -10,7 +10,7 @@ defineProps<{ sources: any[] }>();
       <span>参考来源 · {{ sources.length }}</span>
       <Icon name="chevron-right" :size="11" class="sources-chevron" />
     </summary>
-    <ol>
+    <ol tabindex="0" aria-label="参考来源列表">
       <li v-for="source in sources" :key="source.url">
         <a :href="source.url" target="_blank" rel="noopener noreferrer">
           <span v-if="source.label" class="source-number">{{ source.label }}</span>
@@ -60,11 +60,13 @@ defineProps<{ sources: any[] }>();
   transform: rotate(90deg);
 }
 .citation-sources ol {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scroll-snap-type: x proximity;
   gap: 8px;
   list-style: none;
-  padding: 0;
+  padding: 2px 2px 6px;
   margin: 10px 0 0;
   animation: sources-in 180ms var(--ease) both;
 }
@@ -72,7 +74,7 @@ defineProps<{ sources: any[] }>();
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: none; }
 }
-.citation-sources li { min-width: 0; }
+.citation-sources li { flex: 0 0 min(236px, 82%); min-width: 0; scroll-snap-align: start; }
 .citation-sources a {
   display: flex;
   gap: 9px;

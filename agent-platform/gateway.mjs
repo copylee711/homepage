@@ -364,8 +364,8 @@ export const server = createServer(async (req, res) => {
       if (url.pathname === '/api/memory/update') {
         const response = await runner('/memory/update', auth.user.id, { project: input.project, scope: input.scope, action: input.action, content: input.content, revision: input.revision }); return json(res, 200, await response.json());
       }
-      if (url.pathname === '/api/background/stop') {
-        const response = await runner('/background/stop', auth.user.id, { id: input.id }); return json(res, 200, await response.json());
+      if (['/api/background/stop', '/api/background/clear-history'].includes(url.pathname)) {
+        const response = await runner(url.pathname.slice(4), auth.user.id, { id: input.id, all: input.all === true }); return json(res, 200, await response.json());
       }
       if (['/api/questions/answer', '/api/steer', '/api/search/settings/save', '/api/search/test'].includes(url.pathname)) {
           const response = await runner(url.pathname.replace('/api', ''), auth.user.id, { thread: input.thread, id: input.id, answer: input.answer, message: input.message, config: input.config, query: input.query, category:input.category,source:input.source }, AbortSignal.timeout(55000));
