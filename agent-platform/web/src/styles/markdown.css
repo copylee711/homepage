@@ -24,28 +24,50 @@ h1.md-heading { font-size: 1.48em; } h2.md-heading { font-size: 1.28em; } h3.md-
 .md-quote { margin: 0 0 12px; padding: 3px 0 3px 14px; border-left: 2px solid var(--line-strong); color: var(--text-2); }
 .md-rule { margin: 18px 0; border: 0; border-top: 1px solid var(--line); }
 /* Tables — clean, borderless ChatGPT-like presentation */
-.md-table-wrap { position: relative; max-width: 100%; min-width: 0; margin: 12px 0 16px; }
-.md-table-scroll { max-width: 100%; overflow-x: auto; }
-.md-table-wrap table { border-collapse: collapse; width: 100%; font-size: 13.5px; line-height: 1.55; text-align: left; }
-.md-table-wrap th, .md-table-wrap td { padding: 9px 13px; text-align: left; vertical-align: top; border-right: 0; border-left: 0; overflow-wrap: anywhere; }
+.md-table-wrap { position: relative; max-width: 100%; min-width: 0; margin: 12px 0 16px; border-radius: 10px; }
+.md-table-scroll { max-width: 100%; overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; -webkit-overflow-scrolling: touch; }
+.md-table-wrap table { border-collapse: collapse; width: max-content; min-width: 100%; font-size: 13.5px; line-height: 1.55; text-align: left; }
+.md-table-wrap th, .md-table-wrap td { padding: 9px 14px; text-align: left; vertical-align: top; border-right: 0; border-left: 0; white-space: nowrap; overflow-wrap: normal; }
 .md-table-wrap th { background: transparent; font-weight: 620; color: var(--text); border-bottom: 1px solid var(--line-strong); }
 .md-table-wrap td { border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); color: var(--text); }
 .md-table-wrap tr:last-child td { border-bottom: 0; }
 .md-table-wrap .align-center { text-align: center; } .md-table-wrap .align-right { text-align: right; }
-.md-table-wrap-btn { position: absolute; top: -10px; right: 0; display: none; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface); color: var(--muted); cursor: pointer; opacity: 0.55; transition: opacity var(--fast), color var(--fast), background-color var(--fast); z-index: 2; box-shadow: var(--shadow-sm); }
-.md-table-wrap-btn:hover { opacity: 1; color: var(--text); background: var(--surface-2); }
-.md-table-wrap-btn[aria-pressed='true'] { color: var(--accent-ink); border-color: var(--line-strong); opacity: 1; }
-.md-table-wrap.is-nowrap table { width: max-content; min-width: 100%; }
-.md-table-wrap.is-nowrap th, .md-table-wrap.is-nowrap td { white-space: nowrap; overflow-wrap: normal; }
+.md-table-wrap.is-wrap table { width: 100%; }
+.md-table-wrap.is-wrap th, .md-table-wrap.is-wrap td { white-space: normal; overflow-wrap: anywhere; }
+.md-table-wrap-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity var(--fast), color var(--fast), background-color var(--fast), transform var(--fast);
+  z-index: 2;
+  box-shadow: var(--shadow-sm);
+}
+.md-table-wrap-btn:hover { opacity: 0.95; color: var(--text); background: var(--surface-2); transform: scale(1.04); }
+.md-table-wrap-btn[aria-pressed='true'] { color: var(--accent-ink); border-color: var(--line-strong); opacity: 1; background: var(--surface); }
 @media (max-width: 640px) {
-  .md-table-wrap th, .md-table-wrap td { padding: 7px 10px; font-size: 13px; }
+  .md-table-wrap th, .md-table-wrap td { padding: 7px 11px; font-size: 13px; }
 }
 
 /* Display math — pure unboxed centered typography */
-.md-math-block { margin: 16px 0; padding: 4px 0; overflow-x: auto; overflow-y: hidden; text-align: center; background: transparent; border: 0; }
+.md-math-block { margin: 18px 0; padding: 6px 0; overflow-x: auto; overflow-y: hidden; text-align: center; background: transparent; border: 0; }
 .md-math-block .katex-display { margin: 0; }
-.md-math-pending { color: var(--muted); font-family: var(--font-mono); font-size: 0.9em; }
-.katex { font-size: 1.06em; }
+.md-math-pending { color: var(--muted); font-family: var(--font-mono); font-size: 0.95em; }
+.katex { font-size: calc(1.14em * var(--math-scale, 1)); }
+.md-math-block .katex { font-size: calc(1.26em * var(--math-scale, 1)); }
 
 /* Inline citations + horizontal pill-chip sources strip (distinct from code blocks) */
 .md-citation { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 17px; padding: 0 4.5px; margin: 0 2px; vertical-align: super; border-radius: 999px; background: color-mix(in srgb, var(--text) 8.5%, transparent); color: var(--text-2); font-family: var(--font); font-size: 10px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1; text-decoration: none !important; transition: background-color var(--fast), color var(--fast), transform var(--fast); }

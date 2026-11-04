@@ -265,23 +265,64 @@
 .mobile-drawer .workspace { width: 100%; flex: 1; height: 100dvh; border-left: 0; }
 .mobile-drawer .resize-workspace { display: none; }
 
-/* Linux Virtual Terminal Pane */
+/* Linux Virtual Terminal Pane — Theme-adaptive terminal presentation */
 .ws-terminal-pane {
+  --term-bg: #121317;
+  --term-bar-bg: rgba(255, 255, 255, 0.03);
+  --term-border: rgba(255, 255, 255, 0.08);
+  --term-fg: #e4e4e7;
+  --term-title: #a1a1aa;
+  --term-prompt-u: #34d399;
+  --term-prompt-at: #71717a;
+  --term-prompt-h: #10b981;
+  --term-prompt-d: #60a5fa;
+  --term-cmd: #fafafa;
+  --term-out: #d4d4d8;
+  --term-err: #f87171;
+  --term-placeholder: rgba(255, 255, 255, 0.32);
+  --term-btn-hover: rgba(255, 255, 255, 0.08);
+  --term-btn-hover-fg: #ffffff;
+  --term-info-bg: rgba(56, 189, 248, 0.08);
+  --term-info-border: #38bdf8;
+  --term-info-fg: #bae6fd;
+  --term-spinner-border: rgba(255, 255, 255, 0.2);
+  --term-spinner-top: #38bdf8;
+
   flex: 1;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: #14151a;
-  color: #e4e4e7;
+  background: var(--term-bg);
+  color: var(--term-fg);
   overflow: hidden;
   font-family: var(--font-mono);
   letter-spacing: normal;
+  -webkit-font-smoothing: antialiased;
 }
 :root[data-theme='light'] .ws-terminal-pane {
-  background: #18191f;
-  color: #f4f4f5;
+  --term-bg: #fafafc;
+  --term-bar-bg: var(--surface);
+  --term-border: var(--line);
+  --term-fg: #18181b;
+  --term-title: var(--muted);
+  --term-prompt-u: #059669;
+  --term-prompt-at: var(--faint);
+  --term-prompt-h: #0d9488;
+  --term-prompt-d: #2563eb;
+  --term-cmd: #09090b;
+  --term-out: #27272a;
+  --term-err: #dc2626;
+  --term-placeholder: var(--faint);
+  --term-btn-hover: color-mix(in srgb, var(--text) 7%, transparent);
+  --term-btn-hover-fg: var(--text);
+  --term-info-bg: rgba(14, 165, 233, 0.08);
+  --term-info-border: #0284c7;
+  --term-info-fg: #0369a1;
+  --term-spinner-border: rgba(0, 0, 0, 0.15);
+  --term-spinner-top: #0284c7;
 }
+
 .ws-term-bar {
   flex: none;
   height: 38px;
@@ -290,8 +331,8 @@
   justify-content: space-between;
   gap: 8px;
   padding: 0 10px 0 13px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--term-border);
+  background: var(--term-bar-bg);
   overflow: hidden;
 }
 .ws-term-meta {
@@ -307,7 +348,7 @@
   gap: 6px;
   font-size: 11.5px;
   font-weight: 600;
-  color: #a1a1aa;
+  color: var(--term-title);
   flex: none;
   white-space: nowrap;
 }
@@ -318,11 +359,11 @@
   flex: none;
 }
 .ws-terminal-pane .icon-button.mini {
-  color: #a1a1aa;
+  color: var(--term-title);
 }
 .ws-terminal-pane .icon-button.mini:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
+  background: var(--term-btn-hover);
+  color: var(--term-btn-hover-fg);
 }
 .ws-term-logs {
   flex: 1;
@@ -333,6 +374,8 @@
   line-height: 1.6;
   cursor: text;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 .ws-term-line {
   margin-bottom: 4px;
@@ -342,12 +385,12 @@
   user-select: none;
   font-weight: 550;
 }
-.ws-term-u { color: #34d399; }
-.ws-term-at { color: #a1a1aa; }
-.ws-term-h { color: #10b981; }
-.ws-term-d { color: #60a5fa; font-weight: 600; }
+.ws-term-u { color: var(--term-prompt-u); }
+.ws-term-at { color: var(--term-prompt-at); }
+.ws-term-h { color: var(--term-prompt-h); }
+.ws-term-d { color: var(--term-prompt-d); font-weight: 600; }
 .ws-term-cmd-text {
-  color: #fafafa;
+  color: var(--term-cmd);
   font-weight: 550;
 }
 .ws-term-out {
@@ -357,11 +400,11 @@
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-all;
-  color: #d4d4d8;
+  color: var(--term-out);
   letter-spacing: normal;
 }
 .ws-term-out.is-error {
-  color: #f87171;
+  color: var(--term-err);
 }
 
 /* Terminal ANSI escape colors */
@@ -375,12 +418,21 @@
 .term-c-white { color: #f4f4f5; }
 .term-c-black { color: #71717a; }
 
+:root[data-theme='light'] .term-c-blue { color: #1d4ed8; }
+:root[data-theme='light'] .term-c-green { color: #15803d; }
+:root[data-theme='light'] .term-c-red { color: #b91c1c; }
+:root[data-theme='light'] .term-c-yellow { color: #b45309; }
+:root[data-theme='light'] .term-c-magenta { color: #7e22ce; }
+:root[data-theme='light'] .term-c-cyan { color: #0284c7; }
+:root[data-theme='light'] .term-c-white { color: #18181b; }
+:root[data-theme='light'] .term-c-black { color: #71717a; }
+
 .ws-term-info {
   margin: 2px 0 8px;
   padding: 6px 10px;
-  border-left: 2px solid #38bdf8;
-  background: rgba(56, 189, 248, 0.08);
-  color: #bae6fd;
+  border-left: 2px solid var(--term-info-border);
+  background: var(--term-info-bg);
+  color: var(--term-info-fg);
   font-size: 11.5px;
   white-space: pre-wrap;
 }
@@ -397,7 +449,8 @@
   background: transparent;
   border: 0;
   outline: 0;
-  color: #ffffff;
+  color: var(--term-cmd);
+  caret-color: var(--term-prompt-d);
   font-family: inherit;
   font-size: 12.5px;
   padding: 0;
@@ -405,7 +458,7 @@
   letter-spacing: normal;
 }
 .ws-term-input::placeholder {
-  color: rgba(255, 255, 255, 0.32);
+  color: var(--term-placeholder);
   font-family: var(--font);
   letter-spacing: normal;
 }
@@ -413,6 +466,6 @@
   width: 14px;
   height: 14px;
   flex: none;
-  border-color: rgba(255, 255, 255, 0.2);
-  border-top-color: #38bdf8;
+  border-color: var(--term-spinner-border);
+  border-top-color: var(--term-spinner-top);
 }

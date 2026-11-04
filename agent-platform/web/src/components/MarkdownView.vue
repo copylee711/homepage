@@ -48,7 +48,7 @@ function onClick(event: MouseEvent) {
     const box = wrapToggle.closest('.md-table-wrap');
     const on = wrapToggle.getAttribute('aria-pressed') === 'true';
     wrapToggle.setAttribute('aria-pressed', on ? 'false' : 'true');
-    box?.classList.toggle('is-nowrap', !on);
+    box?.classList.toggle('is-wrap', !on);
     return;
   }
 

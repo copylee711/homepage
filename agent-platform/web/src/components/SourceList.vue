@@ -59,19 +59,29 @@ defineProps<{ sources: any[] }>();
   transform: rotate(90deg);
 }
 .citation-sources ol {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   gap: 8px;
   list-style: none;
-  padding: 0;
-  margin: 10px 0 0;
+  padding: 4px 2px 10px;
+  margin: 8px 0 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
   animation: sources-in 180ms var(--ease) both;
 }
 @keyframes sources-in {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: none; }
 }
-.citation-sources li { min-width: 0; }
+.citation-sources li {
+  flex: 0 0 220px;
+  max-width: min(220px, 78vw);
+  min-width: 0;
+}
 .citation-sources a {
   display: flex;
   gap: 9px;
