@@ -247,6 +247,7 @@ runner 和 sandbox 镜像并更新主机 broker 脚本。UI/权限行为见 `UX-
 - 独立搜索：百度/Bing/DuckDuckGo、DeepSeek API 预设和自定义 HTTPS JSON 来源。密钥与配置存于 data/search-settings/，不发给模型。
 - “能力、MCP 与 Skill”内置三项默认技能，支持个人 Markdown 技能、远程 HTTPS MCP 的 JSON/SSE 工具，以及 Pi 原生上下文统计/压缩。配置与生成的只读技能资源位于 data/features/。
 - 后台任务可运行 Vite 等 HTTP 服务，也可运行安装/构建；两项/账户、四项/全局、每项一小时，内存预算与工具容器共享。日志可查看，任务可停止。文件保留；broker 重启会清理任务容器。
+- 沙箱的系统 Python 内置 NumPy、pandas、Matplotlib、seaborn、SciPy 和 SymPy，普通命令和后台任务均可直接导入。文档处理内置 python-docx、python-pptx、openpyxl、XlsxWriter、PyPDF2、ReportLab 和 Poppler，设置中提供 DOCX、PPTX、XLSX、PDF 和 grill-me 技能。项目需要虚拟环境时，可以用 `/usr/bin/python3 -m venv --system-site-packages .venv` 创建可读取内置包的环境。已有的隔离虚拟环境保留其项目依赖配置，可用 `/usr/bin/python3` 显式调用系统 Python。
 - 安装与构建（`pip install`、`python -m pip install`、`npm install` / `npm ci`、`pnpm`/`yarn`/`bun` install、`cargo build`、`go build`、`mvn`/`gradle` 构建等）不要用 bash。模型应调用 `background_start` 且 `purpose` 为 `install`（不要设置 port）。还有其他工作时继续做；否则调用 `background_wait` 暂停当前回合，任务退出后带着状态和日志继续。bash 遇到这类命令会直接拒绝（退出码 126），避免单次工具容器被长安装占满后删除、进程一起消失。
 - 用户停止、撤权、登出、租约丢失和回合上限会停止 `purpose=install` 的任务。预览服务（`purpose=server`）不会因此被停止。回合自然结束后，仍在运行的 install 任务会继续，直到它自己结束、被 `background_stop` 或达到 1 小时。隔离、出口代理和配额与原来的后台任务相同。
 - Vite 示例：background_start 的 command 为 `npm run dev -- --host 0.0.0.0 --port 5173 --strictPort --base "$IRIS_PREVIEW_BASE"`，port=5173、previewBase=true。预览走临时私密链接，支持 HTTP，暂不支持 WebSocket/HMR。
