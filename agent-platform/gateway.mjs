@@ -263,7 +263,9 @@ export const server = createServer(async (req, res) => {
         const response = await runner('/projects', auth.user.id, {}); return json(res, 200, await response.json());
       }
       if (url.pathname === '/api/chats' && req.method === 'GET') {
-        const response = await runner('/chats', auth.user.id, {}); return json(res, 200, await response.json());
+        const page = {};
+        for (const key of ['limit', 'cursor']) if (url.searchParams.has(key)) page[key] = url.searchParams.get(key);
+        const response = await runner('/chats', auth.user.id, page); return json(res, 200, await response.json());
       }
       if (url.pathname === '/api/chats/export' && req.method === 'GET') {
         const response = await runner('/chats/export', auth.user.id, { thread: url.searchParams.get('chat'),

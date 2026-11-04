@@ -6,6 +6,21 @@ const PROJECT_ID = /^[a-zA-Z0-9_\-一-龥]{1,40}$/;
 const RESERVED_PROJECTS = new Set(['__proto__', 'constructor', 'prototype', 'lost+found', 'node_modules']);
 const MAX_TITLE = 80;
 const MAX_EXPORT = 4 * 1024 * 1024;
+export const CHAT_PAGE_DEFAULT = 50, CHAT_PAGE_MAX = 500;
+
+// Optional paging over the full, sorted chat list. Without limit or cursor every chat is
+// returned, so older clients keep working. cursor is the opaque nextCursor of the previous
+// page (an offset into the pinned-first, most-recent-first order).
+export function paginateChats(chats, { limit, cursor } = {}) {
+  const given = value => value !== undefined && value !== null && value !== '';
+  if (!given(limit) && !given(cursor)) return { chats, total: chats.length, hasMore: false, nextCursor: null };
+  const size = given(limit) ? Number(limit) : CHAT_PAGE_DEFAULT;
+  if (!Number.isInteger(size) || size < 1 || size > CHAT_PAGE_MAX) fail(422, '分页数量需为 1–' + CHAT_PAGE_MAX);
+  const raw = given(cursor) ? String(cursor) : '0';
+  if (!/^\d{1,9}$/.test(raw)) fail(422, '分页游标无效');
+  const start = Number(raw), page = chats.slice(start, start + size), end = start + page.length;
+  return { chats: page, total: chats.length, hasMore: end < chats.length, nextCursor: end < chats.length ? String(end) : null };
+}
 const queues = new Map();
 
 export function validThread(value) {
@@ -422,7 +437,7 @@ export class ChatStore {
     // Keep pinned first, then most recently active; archived stays in the same stream.
     const present=new Set(result.map(item=>item.id));
     for(const [id,item]of Object.entries(meta.chats||{}))if(!present.has(id)&&item.createdAt&&['pending','agent'].includes(item.titleSource))result.push({id,title:item.title||'新任务',updated:item.createdAt||item.updatedAt,projectId:item.projectId||'default',permission:item.permission,pinned:item.pinned===true,archived:item.archived===true});
-    return result.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updated - a.updated).slice(0, 100);
+    return result.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updated - a.updated || (a.id < b.id ? -1 : 1));
   }
   async export(user, thread, format, secrets = []) {
     if (format !== 'md' && format !== 'json') fail(422, '导出格式无效');

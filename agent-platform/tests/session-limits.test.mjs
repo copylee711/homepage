@@ -17,3 +17,11 @@ test('conversation count and per-file/total storage are bounded per user', async
     await sessionCapacity(directory, a, { chats: 1, file: 6, bytes: 6 });
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+test('there is no default cap on the number of conversations', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'pi-capacity-many-'));
+  try {
+    for (let i = 0; i < 60; i++) await writeFile(join(directory, `${String(i).padStart(8, '0')}-0000-4000-8000-000000000000.jsonl`), 'x');
+    await sessionCapacity(directory, 'ffffffff-ffff-4fff-8fff-ffffffffffff');
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

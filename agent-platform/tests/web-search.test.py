@@ -55,6 +55,15 @@ class SearchTests(unittest.TestCase):
             self.assertEqual(captured[0][1]['request']['method'],source['method'])
             if source['auth']=='x-api-key':self.assertEqual(captured[0][1]['request']['headers']['X-API-Key'],'synthetic-secret')
         self.assertEqual(search.auto_results({'citations':['https://example.com']} )[0]['url'],'https://example.com')
+    def test_no_matches_is_an_empty_result_not_an_error(self):
+        result=search.search_public({'query':'cat meme funny reaction','engine':'auto','count':3},lambda url,**kw:{'status':200,'text':'<rss><channel></channel></rss>' if 'bing' in url else '<html>nothing</html>'})
+        self.assertEqual(result['status'],'empty');self.assertEqual(result['results'],[])
+        source={'id':'openverse','name':'Openverse','kind':'json','category':'image','format':'openverse','enabled':True,'endpoint':'https://api.openverse.org/v1/images/','method':'GET','auth':'none','queryTemplate':{'q':'{{query}}'}}
+        import json
+        image=search.search_public({'query':'搞笑表情包 沙雕','category':'image','sources':[source]},lambda url,**kw:{'status':200,'text':json.dumps({'results':[]})})
+        self.assertEqual(image['status'],'empty');self.assertEqual(image['images'],[])
+    def test_broken_sources_still_raise(self):
+        with self.assertRaises(ValueError):search.search_public({'query':'cats','engine':'auto'},lambda url,**kw:{'status':503,'text':''})
     def test_image_category_cannot_use_web_sources(self):
         calls=[]
         with self.assertRaises(ValueError):search.search_public({'query':'cats','category':'image','sources':[{'id':'baidu','kind':'baidu','enabled':True}]},lambda url,**kw:calls.append(url))
