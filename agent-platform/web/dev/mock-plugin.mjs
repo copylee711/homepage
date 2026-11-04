@@ -35,6 +35,7 @@ const gitBranches = {
 };
 
 const chats = [
+  { id: '55555555-5555-4555-8555-555555555555', title: '网页与搜索图标', updated: now - 1e5, pinned: true, archived: false, projectId: 'iris-rebuild', permission: { scope: 'project_only', extraProjects: {} } },
   { id: '11111111-1111-4111-8111-111111111111', title: '重构 Iris 控制台界面', updated: now - 6e5, pinned: true, archived: false, projectId: 'iris-rebuild', permission: { scope: 'project_only', extraProjects: {} } },
   { id: '22222222-2222-4222-8222-222222222222', title: '用 Python 生成项目说明', updated: now - 36e5, pinned: false, archived: false, projectId: 'default', permission: { scope: 'project_only', extraProjects: {} } },
   { id: '33333333-3333-4333-8333-333333333333', title: '推导梯度下降收敛性', updated: now - 9e7, pinned: false, archived: false, projectId: 'default', permission: { scope: 'scoped', extraProjects: { 'iris-rebuild': 'read' } } },
@@ -61,7 +62,38 @@ const sampleAssistant = {
     { type: 'text', text: '```python\ndef area(r: float) -> float:\n    import math\n    return math.pi * r ** 2\n\nprint(area(2))\n```\n\n完成，你可以在工作区查看 `demo.py`。' },
   ],
 };
+function webTool(id, name, args, result) {
+  return { type: 'tool', id, name, args: JSON.stringify(args, null, 2), state: 'success', result: JSON.stringify(result), durationMs: 640 };
+}
 const sessions = {
+  '55555555-5555-4555-8555-555555555555': {
+    busy: false,
+    messages: [
+      { role: 'user', timestamp: now - 2e5, content: '打开 GitHub、Vue 文档，再搜一下 favicon，并看一张没有站点的图片搜索。' },
+      {
+        role: 'assistant',
+        timestamp: now - 1e5,
+        stopReason: 'length',
+        content: [
+          { type: 'text', text: 'GitHub 提供 /favicon.ico。' },
+          webTool('web-gh', 'web_fetch', { url: 'https://github.com/' }, { url: 'https://github.com/', status: 200, text: 'GitHub' }),
+          { type: 'text', text: 'Vue 官网没有 /favicon.ico，改用公共图标。' },
+          webTool('web-vue', 'web_fetch', { url: 'https://vuejs.org/guide/introduction.html' }, { url: 'https://vuejs.org/guide/introduction.html', status: 200, text: 'Vue.js' }),
+          { type: 'text', text: '搜索结果逐条显示站点。' },
+          webTool('web-search', 'web_search', { query: 'favicon vue github' }, { query: 'favicon vue github', engine: 'demo', results: [
+            { title: 'Vue.js', url: 'https://vuejs.org/guide/introduction.html', snippet: '官方文档' },
+            { title: 'GitHub', url: 'https://github.com/', snippet: '代码托管' },
+            { title: 'Favicon', url: 'https://en.wikipedia.org/wiki/Favicon', snippet: '维基百科' },
+            { title: '不存在的站点', url: 'https://this-domain-does-not-exist-9d22.example/', snippet: '应回退地球图标' },
+          ] }),
+          { type: 'text', text: '打不开的地址回到地球图标。' },
+          webTool('web-miss', 'web_fetch', { url: 'https://this-domain-does-not-exist-9d22.example/' }, { url: 'https://this-domain-does-not-exist-9d22.example/', status: 0, text: '无法连接' }),
+          { type: 'text', text: '图片搜索没有具体站点。' },
+          webTool('web-img', 'image_search', { query: 'mountain lake' }, { query: 'mountain lake', engine: 'demo', results: [{ title: 'Lake', url: 'https://images.example/lake.jpg', sourceUrl: 'https://example.com/photo' }] }),
+        ],
+      },
+    ],
+  },
   '11111111-1111-4111-8111-111111111111': {
     busy: false,
     messages: [

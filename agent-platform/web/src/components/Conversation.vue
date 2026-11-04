@@ -219,6 +219,7 @@ onMounted(() => {
                 <p v-if="approval.error" class="status-error" role="alert">{{ approval.error }}</p>
               </section>
             </template>
+            <p v-if="live.stopReason === 'length'" class="assistant-limit">输出已达上限，可继续</p>
             <div v-if="live.status || live.error || live.stopped" class="message-status" :class="{ 'is-error': live.error }">
               <span v-if="live.spinner && !live.error && !live.stopped" class="working-dot"></span>
               <span v-if="live.error" class="status-error">{{ live.error }}</span>

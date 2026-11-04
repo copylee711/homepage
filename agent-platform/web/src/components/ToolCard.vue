@@ -4,6 +4,7 @@ import Icon from './Icon.vue';
 import SiteIcon from './SiteIcon.vue';
 import WebToolPages from './WebToolPages.vue';
 import { formatDuration } from '../services/format';
+import { rowSiteUrl } from '../services/site-icon.mjs';
 import { useWorkspace } from '../stores/workspace';
 import { useSession } from '../stores/session';
 
@@ -258,7 +259,7 @@ function openArgFile(v: string) {
       <span v-if="list[0].state === 'running' || list[0].state === 'pending'" class="tc-dots" aria-hidden="true">
         <i></i><i></i><i></i>
       </span>
-      <SiteIcon v-else-if="isWebTool(list[0])" :url="parseArgs(list[0].args).url" />
+      <SiteIcon v-else-if="isWebTool(list[0])" :url="rowSiteUrl(list[0])" />
       <span v-else class="tc-mini-icon" aria-hidden="true">
         <Icon :name="toolIcon(list[0])" :size="13" />
       </span>
@@ -331,7 +332,7 @@ function openArgFile(v: string) {
           @click="toggleRow(b, idx)"
         >
           <span v-if="b.state === 'running' || b.state === 'pending'" class="tc-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-          <SiteIcon v-else-if="isWebTool(b)" :url="parseArgs(b.args).url" />
+          <SiteIcon v-else-if="isWebTool(b)" :url="rowSiteUrl(b)" />
           <span class="tg-row-summary" :title="summarize(b)">
             <span class="tg-row-verb">{{ actionParts(b).verb }}</span>
             <span class="tg-row-target">{{ actionParts(b).target }}</span>

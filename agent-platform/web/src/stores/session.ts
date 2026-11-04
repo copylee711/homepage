@@ -462,7 +462,7 @@ export const useSession = defineStore('session', {
         settleTools(live, live.stopped ? 'stopped' : 'interrupted');
         // fold the live view model into the transcript as a finalized message
         const durationMs = Math.max(0, Date.now() - turnStartTime);
-        streamMessages.push({ role: 'assistant', timestamp: Date.now(), durationMs, content: live.blocks, _vm: live, _fresh: true });
+        streamMessages.push({ role: 'assistant', timestamp: Date.now(), durationMs, content: live.blocks, stopReason: live.stopReason === 'length' ? 'length' : undefined, _vm: live, _fresh: true });
         this.snapshots.set(thread, { messages: streamMessages, busy: false });
         this.live = null;
         this.liveThread = null;
