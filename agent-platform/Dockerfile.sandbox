@@ -28,6 +28,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       | /usr/bin/python3 -m pip install --index-url "$PIP_INDEX_URL" --break-system-packages --no-cache-dir --no-deps --only-binary=:all: --require-hashes -r /dev/stdin
 RUN ln -s /usr/bin/python3 /usr/local/bin/python \
     && corepack enable --install-directory /usr/local/bin
+# Headless browser for project E2E tests and screenshots, with CJK font fallback.
+RUN apt-get update && apt-get install -y --no-install-recommends chromium fonts-wqy-zenhei \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install --global --ignore-scripts --fetch-retries=1 playwright-core@1.64.1 \
+    && npm cache clean --force
 # Optional language images can extend this base with rustc/cargo, golang or a JDK.
 USER 1000:1000
 COPY agent-platform/sandbox-worker.py /sandbox-worker.py

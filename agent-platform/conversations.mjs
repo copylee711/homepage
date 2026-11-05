@@ -1,11 +1,11 @@
 import { lstat, mkdir, open, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { fail } from './shared.mjs';
+import { MAX_SESSION_READ_BYTES } from './session-limits.mjs';
 
 const THREAD = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const PROJECT_ID = /^[a-zA-Z0-9_\-一-龥]{1,40}$/;
 const RESERVED_PROJECTS = new Set(['__proto__', 'constructor', 'prototype', 'lost+found', 'node_modules']);
 const MAX_TITLE = 80;
-const MAX_EXPORT = 4 * 1024 * 1024;
 export const CHAT_PAGE_DEFAULT = 50, CHAT_PAGE_MAX = 500;
 
 // Optional paging over the full, sorted chat list. Without limit or cursor every chat is
@@ -442,7 +442,7 @@ export class ChatStore {
   async export(user, thread, format, secrets = []) {
     if (format !== 'md' && format !== 'json') fail(422, '导出格式无效');
     const info = await this.assertOwned(user, thread);
-    if (info.size > MAX_EXPORT) fail(413, '此对话超过 4 MiB，无法导出');
+    if (info.size > MAX_SESSION_READ_BYTES) fail(413, '此对话超过导出上限');
     const meta = await this.loadMeta(user).catch(() => ({ chats: {} }));
     const entries = [];
     for (const line of (await readFile(this.file(user, thread), 'utf8')).split('\n')) {

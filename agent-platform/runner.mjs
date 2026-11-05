@@ -228,8 +228,9 @@ class Pi {
     this.storageCheck = setInterval(async () => {
       if (checking) return; checking = true;
       try { await sessionCapacity(`/data/sessions/${this.user}`, this.thread); }
-      catch {
-        this.publish({ type: 'gateway_error', error: '对话存储达到上限，任务已停止。请联系管理员归档。' });
+      catch (error) {
+        if (!this.busy) return;
+        this.publish({ type: 'gateway_error', error: error.status === 413 ? error.message + '。任务已停止。' : '无法检查对话存储，任务已停止，请重试。' });
         this.abortTurn();
       }
       finally { checking = false; }
