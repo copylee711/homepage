@@ -71,3 +71,21 @@ test('execution disclosure stops at each visible answer segment', () => {
     assert.deepEqual(groups.filter(block => block.type === 'execution').map(group => group.collapsed), [true, true, !streaming]);
   }
 });
+
+test('image reads preserve the returned preview in both live and reloaded transcripts', () => {
+  const call = { type: 'toolCall', id: 'photo', name: 'read', arguments: { path: 'photo.png' } };
+  const content = [{ type: 'text', text: 'Image read' }, { type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' }];
+  for (const isError of [false, true]) {
+    const live = reactiveLive();
+    handleEvent({ type: 'tool_execution_start', toolCallId: call.id, toolName: call.name, args: call.arguments }, live);
+    handleEvent({ type: 'tool_execution_end', toolCallId: call.id, isError, result: { content } }, live);
+    const history = buildTranscript([
+      { role: 'user', content: 'Read the image' },
+      { role: 'assistant', content: [call] },
+      { role: 'toolResult', toolCallId: call.id, isError, content },
+    ]);
+    const expected = isError ? undefined : 'data:image/png;base64,aW1hZ2U=';
+    assert.equal(live.blocks[0].imageUrl, expected);
+    assert.equal(history[1].content[0].imageUrl, expected);
+  }
+});

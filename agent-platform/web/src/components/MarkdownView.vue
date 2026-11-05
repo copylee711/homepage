@@ -18,13 +18,16 @@ function render() {
   const el = host.value;
   if (!el) return;
   const toggles = Array.from(el.querySelectorAll<HTMLElement>('[data-table-wrap]'));
-  const nowrap = toggles.map(button => button.getAttribute('aria-pressed') === 'false');
+  const wrap = toggles.map(button => button.getAttribute('aria-pressed') === 'true');
+  const scrollOffsets = toggles.map(button => button.closest('.md-table-wrap')?.querySelector('.md-table-scroll')?.scrollLeft ?? 0);
   const focused = toggles.indexOf(document.activeElement as HTMLElement);
   const options={sources:props.sources,project:useSession().currentProjectId,citations:props.citations};
   if (props.streaming) { writer ||= streamingMarkdown(el,document,options); writer(props.source || '', true,options); }
   else { writer = undefined; el.replaceChildren(renderMarkdown(props.source || '', document, options)); }
   el.querySelectorAll<HTMLElement>('[data-table-wrap]').forEach((button, index) => {
-    if (nowrap[index]) setTableWrap(button, false);
+    if (wrap[index]) setTableWrap(button, true);
+    const scroller = button.closest('.md-table-wrap')?.querySelector('.md-table-scroll');
+    if (scroller && scrollOffsets[index]) scroller.scrollLeft = scrollOffsets[index];
     if (index === focused && button !== toggles[index]) button.focus({ preventScroll: true });
   });
 }

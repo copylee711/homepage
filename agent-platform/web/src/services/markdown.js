@@ -352,7 +352,7 @@ function alignment(cell) {
 }
 function renderTable(lines, doc) {
   const header = splitRow(lines[0]), separator = splitRow(lines[1]);
-  const wrap = node(doc, 'div', 'md-table-wrap');
+  const wrap = node(doc, 'div', 'md-table-wrap is-nowrap');
   const scroller = node(doc, 'div', 'md-table-scroll');
   const table = doc.createElement('table');
   const thead = doc.createElement('thead'), headRow = doc.createElement('tr');
@@ -381,7 +381,7 @@ function renderTable(lines, doc) {
   const toggle = node(doc, 'button', 'md-table-wrap-toggle');
   toggle.type = 'button';
   toggle.dataset.tableWrap = '';
-  toggle.setAttribute('aria-pressed', 'true');
+  toggle.setAttribute('aria-pressed', 'false');
   toggle.setAttribute('aria-label', '单元格换行');
   toggle.title = '切换换行/单行显示';
   toggle.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M3 12h14a3 3 0 0 1 0 6h-4M16 15l-3 3 3 3"/></svg>';

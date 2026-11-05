@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed, ref } from 'vue';
+import { onMounted, computed, ref, watch } from 'vue';
 import Sidebar from './components/Sidebar.vue';
 import TopBar from './components/TopBar.vue';
 import Conversation from './components/Conversation.vue';
@@ -13,9 +13,11 @@ import SettingsDialog from './components/dialogs/SettingsDialog.vue';
 import SubordinateDialog from './components/dialogs/SubordinateDialog.vue';
 import { useSession } from './stores/session';
 import { useUi } from './stores/ui';
+import { useWorkspace } from './stores/workspace';
 
 const session = useSession();
 const ui = useUi();
+const workspace = useWorkspace();
 
 const wide = ref(window.innerWidth > 1180);
 
@@ -24,6 +26,23 @@ const shellStyle = computed(() => ({
   '--workspace-w': ui.workspaceW + 'px',
 }));
 const workspaceVisible = computed(() => session.canExecute && ui.workspaceOpen && wide.value);
+const workspacePanelOpen = computed(() => session.canExecute && (workspaceVisible.value || ui.mobileDrawer === 'workspace'));
+
+watch(workspacePanelOpen, (open, _previous, onCleanup) => {
+  if (!open) return;
+  const controller = new AbortController();
+  function refresh() {
+    if (document.visibilityState === 'visible') void workspace.refreshListing(controller.signal);
+  }
+  const timer = window.setInterval(refresh, 5000);
+  document.addEventListener('visibilitychange', refresh);
+  onCleanup(() => {
+    controller.abort();
+    window.clearInterval(timer);
+    document.removeEventListener('visibilitychange', refresh);
+  });
+  refresh();
+});
 
 function onResize() {
   wide.value = window.innerWidth > 1180;

@@ -1,4 +1,5 @@
 import { assignToolArgs, finishedPlan } from './plan-state.mjs';
+import { readToolImage } from './tool-images.mjs';
 
 // A plain reactive-friendly object describing the streaming assistant turn.
 export function reactiveLive() {
@@ -105,7 +106,12 @@ export function handleEvent(event, live) {
   }
   if (event.type === 'tool_execution_end') {
     const b = vm.blocks.find((x) => x.type === 'tool' && x.id === event.toolCallId);
-    if (b) { b.state = event.isError ? 'error' : 'success'; b.result = toolText(event.result); b.durationMs = event.durationMs || (b.started ? Date.now() - b.started : 0); }
+    if (b) {
+      b.state = event.isError ? 'error' : 'success';
+      b.result = toolText(event.result);
+      b.imageUrl = event.isError ? undefined : readToolImage(b.name, event.result);
+      b.durationMs = event.durationMs || (b.started ? Date.now() - b.started : 0);
+    }
     if (b?.name !== 'set_chat_title') vm.status = '正在整理结果…'; return;
   }
   if (event.type === 'gateway_error') throw new Error(event.error || '任务中断，请重试');

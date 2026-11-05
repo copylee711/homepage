@@ -1,4 +1,5 @@
 import { completedCount, planFromBlock, planSignature } from './plan-state.mjs';
+import { readToolImage } from './tool-images.mjs';
 
 // Normalize an assistant message's content (Pi shape or live view-model) into
 // the block list BlockList.vue renders.
@@ -13,7 +14,7 @@ export function normalizeBlocks(content, toolResults) {
     else if (part.type === 'tool') blocks.push(part);
     else if (part.type === 'toolCall') {
       const r = toolResults?.[part.id];
-      blocks.push({ type: 'tool', id: part.id, name: part.name || 'tool', args: part.arguments ? JSON.stringify(part.arguments, null, 2) : '', state: r ? (r.isError ? 'error' : 'success') : 'success', result: r ? r.text : '', durationMs: 0 });
+      blocks.push({ type: 'tool', id: part.id, name: part.name || 'tool', args: part.arguments ? JSON.stringify(part.arguments, null, 2) : '', state: r ? (r.isError ? 'error' : 'success') : 'success', result: r ? r.text : '', imageUrl: r?.isError ? undefined : readToolImage(part.name, r?.content), durationMs: 0 });
     }
   }
   return blocks;
@@ -21,7 +22,7 @@ export function normalizeBlocks(content, toolResults) {
 
 export function buildTranscript(messages) {
   const results = {};
-  for (const m of messages) if (m.role === 'toolResult') results[m.toolCallId] = { isError: m.isError === true, text: typeof m.content === 'string' ? m.content : (m.content || []).filter(p => p.type === 'text').map(p => p.text).join('\n') };
+  for (const m of messages) if (m.role === 'toolResult') results[m.toolCallId] = { isError: m.isError === true, content: m.content, text: typeof m.content === 'string' ? m.content : (m.content || []).filter(p => p.type === 'text').map(p => p.text).join('\n') };
   const items = [];
   for (const m of messages) {
     if (m.role === 'user') { items.push({ ...m }); continue; }

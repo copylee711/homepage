@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick } from 'vue';
 import Icon from './Icon.vue';
 import SiteIcon from './SiteIcon.vue';
 import WebToolPages from './WebToolPages.vue';
+import ToolImagePreview from './ToolImagePreview.vue';
 import { formatDuration } from '../services/format';
 import { rowSiteUrl } from '../services/site-icon.mjs';
 import { useWorkspace } from '../stores/workspace';
@@ -245,30 +246,38 @@ function openArgFile(v: string) {
   const proj = useSession().currentProjectId;
   void useWorkspace().locateAndOpenFile(v, proj);
 }
+
+function imageName(block: any) {
+  const args = parseArgs(block.args);
+  return String(args.path || args.file_path || '').split(/[\\/]/).pop() || '读取的图片';
+}
 </script>
 
 <template>
   <!-- Single tool call: Claude-style quiet inline row -->
   <div v-if="!isGroup && list[0]" class="tc-single" :data-state="list[0].state" :class="{ 'is-open': isRowOpen(list[0], 0) }">
-    <button
-      type="button"
-      class="tc-line"
-      :aria-expanded="isRowOpen(list[0], 0)"
-      @click="toggleRow(list[0], 0)"
-    >
-      <span v-if="list[0].state === 'running' || list[0].state === 'pending'" class="tc-dots" aria-hidden="true">
-        <i></i><i></i><i></i>
-      </span>
-      <SiteIcon v-else-if="isWebTool(list[0])" :url="rowSiteUrl(list[0])" />
-      <span v-else class="tc-mini-icon" aria-hidden="true">
-        <Icon :name="toolIcon(list[0])" :size="13" />
-      </span>
-      <span class="tc-summary" :title="summarize(list[0])">{{ summarize(list[0]) }}</span>
-      <span v-if="list[0].state === 'error'" class="tc-failed">失败</span>
-          <span v-else-if="list[0].state === 'stopped' || list[0].state === 'interrupted'" class="tc-time">{{ list[0].state === 'stopped' ? '已停止' : '已中断' }}</span>
-      <span v-if="list[0].durationMs" class="tc-dur">{{ formatDuration(list[0].durationMs) }}</span>
-      <span class="tc-chevron"><Icon name="chevron-right" :size="12" /></span>
-    </button>
+    <div class="tc-row-head">
+      <button
+        type="button"
+        class="tc-line"
+        :aria-expanded="isRowOpen(list[0], 0)"
+        @click="toggleRow(list[0], 0)"
+      >
+        <span v-if="list[0].state === 'running' || list[0].state === 'pending'" class="tc-dots" aria-hidden="true">
+          <i></i><i></i><i></i>
+        </span>
+        <SiteIcon v-else-if="isWebTool(list[0])" :url="rowSiteUrl(list[0])" />
+        <span v-else class="tc-mini-icon" aria-hidden="true">
+          <Icon :name="toolIcon(list[0])" :size="13" />
+        </span>
+        <span class="tc-summary" :title="summarize(list[0])">{{ summarize(list[0]) }}</span>
+        <span v-if="list[0].state === 'error'" class="tc-failed">失败</span>
+        <span v-else-if="list[0].state === 'stopped' || list[0].state === 'interrupted'" class="tc-time">{{ list[0].state === 'stopped' ? '已停止' : '已中断' }}</span>
+        <span v-if="list[0].durationMs" class="tc-dur">{{ formatDuration(list[0].durationMs) }}</span>
+        <span class="tc-chevron"><Icon name="chevron-right" :size="12" /></span>
+      </button>
+      <ToolImagePreview v-if="list[0].imageUrl" :url="list[0].imageUrl" :name="imageName(list[0])" />
+    </div>
     <div v-if="isRowOpen(list[0], 0)" class="tc-detail">
       <dl v-if="argRows(list[0]).length" class="tc-args">
         <template v-for="(r, ri) in argRows(list[0])" :key="ri">
@@ -325,23 +334,26 @@ function openArgFile(v: string) {
         :data-state="b.state"
         :class="{ 'is-open': isRowOpen(b, idx) }"
       >
-        <button
-          type="button"
-          class="tg-row"
-          :aria-expanded="isRowOpen(b, idx)"
-          @click="toggleRow(b, idx)"
-        >
-          <span v-if="b.state === 'running' || b.state === 'pending'" class="tc-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-          <SiteIcon v-else-if="isWebTool(b)" :url="rowSiteUrl(b)" />
-          <span class="tg-row-summary" :title="summarize(b)">
-            <span class="tg-row-verb">{{ actionParts(b).verb }}</span>
-            <span class="tg-row-target">{{ actionParts(b).target }}</span>
-          </span>
-          <span v-if="b.state === 'error'" class="tc-failed">失败</span>
-          <span v-else-if="b.state === 'stopped' || b.state === 'interrupted'" class="tc-time">{{ b.state === 'stopped' ? '已停止' : '已中断' }}</span>
-          <span v-else-if="b.durationMs" class="tc-dur">{{ formatDuration(b.durationMs) }}</span>
-          <span class="tc-chevron"><Icon name="chevron-right" :size="12" /></span>
-        </button>
+        <div class="tc-row-head">
+          <button
+            type="button"
+            class="tg-row"
+            :aria-expanded="isRowOpen(b, idx)"
+            @click="toggleRow(b, idx)"
+          >
+            <span v-if="b.state === 'running' || b.state === 'pending'" class="tc-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <SiteIcon v-else-if="isWebTool(b)" :url="rowSiteUrl(b)" />
+            <span class="tg-row-summary" :title="summarize(b)">
+              <span class="tg-row-verb">{{ actionParts(b).verb }}</span>
+              <span class="tg-row-target">{{ actionParts(b).target }}</span>
+            </span>
+            <span v-if="b.state === 'error'" class="tc-failed">失败</span>
+            <span v-else-if="b.state === 'stopped' || b.state === 'interrupted'" class="tc-time">{{ b.state === 'stopped' ? '已停止' : '已中断' }}</span>
+            <span v-else-if="b.durationMs" class="tc-dur">{{ formatDuration(b.durationMs) }}</span>
+            <span class="tc-chevron"><Icon name="chevron-right" :size="12" /></span>
+          </button>
+          <ToolImagePreview v-if="b.imageUrl" :url="b.imageUrl" :name="imageName(b)" />
+        </div>
         <div v-if="isRowOpen(b, idx)" class="tc-detail">
           <dl v-if="argRows(b).length" class="tc-args">
             <template v-for="(r, ri) in argRows(b)" :key="ri">
@@ -374,6 +386,7 @@ function openArgFile(v: string) {
   align-items: center;
   gap: 7px;
   max-width: 100%;
+  min-width: 0;
   min-height: 26px;
   padding: 2px 6px 2px 2px;
   border-radius: 7px;
@@ -454,10 +467,11 @@ function openArgFile(v: string) {
   color: var(--faint);
   transition: transform 180ms var(--ease);
 }
-.is-open > .tc-line .tc-chevron,
-.is-open > .tg-row .tc-chevron {
+.is-open > .tc-row-head .tc-chevron {
   transform: rotate(90deg);
 }
+.tc-row-head { display: flex; align-items: center; gap: 6px; }
+.tg-item .tool-image-preview { margin: 3px 8px 3px 0; }
 
 /* Grouped multi-tool block: Claude-style full summary line + box */
 .tg {
@@ -589,6 +603,7 @@ function openArgFile(v: string) {
 }
 .tg-row {
   width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;

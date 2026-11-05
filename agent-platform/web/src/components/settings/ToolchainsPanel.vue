@@ -74,7 +74,7 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer); });
 </script>
 
 <template>
-  <div class="settings-pad">
+  <div class="settings-pad toolchains-settings">
     <div class="panel-top">
       <p class="hint" style="flex: 1" role="status">{{ status }}</p>
       <button v-if="running" type="button" class="btn btn-quiet btn-sm is-danger" @click="cancelJob">
@@ -85,7 +85,7 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer); });
       </button>
     </div>
 
-    <pre v-if="output" class="tc-output">{{ output }}</pre>
+    <pre v-if="output" class="tc-output" tabindex="0" aria-label="工具链安装日志">{{ output }}</pre>
 
     <div class="pkg-list">
       <p v-if="!catalog.length && !running" class="list-empty-plain">暂无可配置工具链条目。</p>
@@ -124,9 +124,11 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer); });
   </div>
 </template>
 
-<style>
+<style scoped>
+.toolchains-settings { display: flex; flex-direction: column; gap: 12px; }
+.toolchains-settings > * { flex-shrink: 0; }
 .tc-actions { display: flex; align-items: center; gap: 6px; flex: none; flex-wrap: wrap; }
 .tc-ver-input { width: 92px; height: 32px; padding: 0 9px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface-2); color: var(--text); font-family: var(--font-mono); font-size: 12px; outline: 0; }
 .tc-ver-input:focus { border-color: var(--line-focus); background: var(--surface); }
-.tc-output { margin: 0; max-height: 150px; overflow: auto; padding: 11px 13px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--code-bg); color: var(--text-2); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; }
+.tc-output { margin: 0; max-height: 150px; overflow: auto; overflow-wrap: anywhere; padding: 11px 13px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--code-bg); color: var(--text-2); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; }
 </style>
