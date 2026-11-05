@@ -204,7 +204,7 @@ def bash(value):
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=True,
                               env={"PATH": str(cwd / '.venv/bin') + ':' + str(cwd / '.tools/bin') + ':' + str(cwd / 'node_modules/.bin') + ":/workspace/.tools/bin:/workspace/.tools/node_modules/.bin:/usr/local/bin:/usr/bin:/bin", "HOME": "/tmp",
-                                 "NODE_USE_ENV_PROXY": "1", "http_proxy": os.environ.get("HTTP_PROXY", ""), "https_proxy": os.environ.get("HTTPS_PROXY", ""), "NO_PROXY": "localhost,127.0.0.1", "no_proxy": "localhost,127.0.0.1",
+                                 "NODE_PATH": os.environ.get("NODE_PATH", ""), "NODE_USE_ENV_PROXY": "1", "http_proxy": os.environ.get("HTTP_PROXY", ""), "https_proxy": os.environ.get("HTTPS_PROXY", ""), "NO_PROXY": "localhost,127.0.0.1", "no_proxy": "localhost,127.0.0.1",
                                  "COREPACK_HOME": str(cwd / '.cache/corepack'), "PNPM_HOME": str(cwd / '.tools/bin'), "npm_config_prefix": str(cwd / '.tools'),
                                  "LANG": "C.UTF-8", "TMPDIR": str(scratch), "npm_config_cache": str(cwd / ".cache/npm"),
                                  "PIP_CACHE_DIR": str(cwd / ".cache/pip"), "PIP_DISABLE_PIP_VERSION_CHECK": "1",

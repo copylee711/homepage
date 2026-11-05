@@ -33,6 +33,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends chromium fonts-
     && rm -rf /var/lib/apt/lists/* \
     && npm install --global --ignore-scripts --fetch-retries=1 playwright-core@1.64.1 \
     && npm cache clean --force
+# Shared fonts and dependencies used by the bundled document skills.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-noto-cjk fonts-noto-color-emoji fonts-liberation2 fonts-crosextra-carlito fonts-crosextra-caladea \
+    fonts-arphic-ukai fonts-arphic-uming python3-lxml python3-pil qpdf tesseract-ocr-chi-sim \
+    && rm -rf /var/lib/apt/lists/*
+RUN /usr/bin/python3 -m pip install --index-url "$PIP_INDEX_URL" --break-system-packages --no-cache-dir --only-binary=:all: \
+    'markitdown[pptx]==0.1.9' 'pdfplumber==0.11.9' 'pdf2image==1.17.0' 'pytesseract==0.3.13' \
+    && npm install --global --ignore-scripts --fetch-retries=1 docx@9.5.1 pptxgenjs@4.0.1 \
+    && npm cache clean --force
+ENV NODE_PATH=/usr/local/lib/node_modules
 # Optional language images can extend this base with rustc/cargo, golang or a JDK.
 USER 1000:1000
 COPY agent-platform/sandbox-worker.py /sandbox-worker.py
