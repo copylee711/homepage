@@ -109,7 +109,7 @@ def run_tool(user, value, lease):
             if value.get('op') == 'image-fetch': return web_access.fetch_public(value.get('url'),image=True,use_proxy=value.get('useProxy',True))
             if value.get('op') == 'mcp-request': return web_search.mcp_request(value, web_access.fetch_public)
             if value.get('op') == 'web-search': return web_search.search_public(value, web_access.fetch_public)
-            return web_access.fetch_resilient(value.get("url"))
+            return web_access.compact_page(web_access.fetch_resilient(value.get("url")))
         finally:
             web_slots.release()
     if value.get("op") not in {"read", "write", "mkdir", "access", "bash", "list", "search-files", "file-read", "file-write", "file-manage", "toolchain-list", "toolchain-change"}:

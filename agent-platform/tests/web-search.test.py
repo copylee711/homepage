@@ -91,4 +91,42 @@ class SearchTests(unittest.TestCase):
             self.assertEqual(access.fetch_resilient('https://example.com')['text'],'verified');self.assertEqual(calls,[True,False]);calls.clear()
             with self.assertRaises(ValueError):access.fetch_resilient('https://example.com',request={'method':'POST'})
             self.assertEqual(calls,[True])
+    def test_math_page_keeps_figures_after_many_formula_images(self):
+        import json
+        spec = importlib.util.spec_from_file_location('access', Path(__file__).parents[1]/'web-access.py')
+        access = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(access)
+        url = 'https://mathworld.wolfram.com/PoissonDistribution.html'
+        parser = access.TextHTML(url)
+        parser.feed(''.join(f'<img src="/images/equations/Inline{i}.svg" alt="lambda">' for i in range(120)))
+        parser.feed('<figure><img data-src="/images/eps-svg/PoissonDistribution.svg" alt="Poisson probability mass"></figure>')
+        value = access.compact_page({'url': url, 'status': 200, 'text': '数学 "🧮"\n' * 4000,
+                                    'images': parser.ranked_images(), 'truncated': False})
+        self.assertEqual([item['url'] for item in value['images']],
+                         ['https://mathworld.wolfram.com/images/eps-svg/PoissonDistribution.svg'])
+        self.assertEqual(value['images'][0]['sourceUrl'], url)
+        self.assertTrue(value['truncated'])
+        self.assertLess(len(json.dumps(value, ensure_ascii=False).encode('utf-16-le')) // 2, 16000)
+
+    def test_auto_fuses_concurrent_engines_and_bounds_exa_highlights(self):
+        import json
+        import threading
+        barrier = threading.Barrier(2, timeout=2)
+        sources = [{'id': name, 'kind': 'json', 'enabled': True, 'format': 'auto',
+                    'endpoint': f'https://{name}.example/search'} for name in ('exa', 'second')]
+        def fetch(url, **kwargs):
+            barrier.wait()
+            suffix = '?utm_source=exa' if 'exa.example' in url else '#summary'
+            content = (f'Title: Probability chart\nURL: https://example.org/chart{suffix}\n'
+                       'Published: 2026-11-07\nAuthor: Example author\nHighlights:\n' + 'Long body ' * 2300)
+            return {'status': 200, 'text': json.dumps({'result': {'content': [{'type': 'text', 'text': content}]}})}
+        value = search.search_public({'query': 'probability chart', 'sources': sources}, fetch)
+        self.assertEqual(len(value['results']), 1)
+        row = value['results'][0]
+        self.assertEqual(row['positions'], {'exa': 1, 'second': 1})
+        self.assertEqual(row['publishedAt'], '2026-11-07')
+        self.assertEqual(row['author'], 'Example author')
+        self.assertLessEqual(len(row['snippet']), 360)
+        self.assertNotIn('Published:', row['snippet'])
+
 if __name__=='__main__':unittest.main()

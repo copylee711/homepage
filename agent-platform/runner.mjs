@@ -117,12 +117,14 @@ async function searchWeb(lease, config, input) {
   for (const page of pages) {
     if (page.status !== 'fulfilled') continue;
     for (const item of page.value.images || []) {
-      if (!item.alt?.trim() || images.has(item.url)) continue;
-      images.set(item.url, { ...item, title: item.alt, provider: 'source-page' });
+      if ((!item.alt?.trim() && item.type !== 'figure') || images.has(item.url)) continue;
+      images.set(item.url, { ...item, title: item.alt || '原网页插图', provider: 'source-page' });
     }
   }
   if (!images.size) return giveUp();
-  const candidates = [...images.values()].slice(0, count);
+  const candidates = [...images.values()].sort((a, b) => Number(b.type === 'figure') - Number(a.type === 'figure')).slice(0, count);
+  while (candidates.length && JSON.stringify(candidates).length > 6800) candidates.pop();
+  if (!candidates.length) return giveUp();
   return { engine: 'source-page', images: candidates, results: candidates,
     notice: '这些是网页中的候选图。核对图片与主题的相关性，附原网页链接。授权情况未知。' };
 }
