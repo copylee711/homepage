@@ -3,12 +3,13 @@ import { ref, computed, watch, nextTick } from 'vue';
 import Icon from './Icon.vue';
 import { fileToBase64 } from '../services/files';
 import ModelMenu from './ModelMenu.vue';
+import ContextUsageMenu from './ContextUsageMenu.vue';
 import DropMenu from './DropMenu.vue';
 import type { MenuItem } from './DropMenu.vue';
 import { useSession, readExecutionPref, type PermissionScope } from '../stores/session';
 import { useWorkspace } from '../stores/workspace';
 import { useUi } from '../stores/ui';
-import { post } from '../services/api';
+import { get, post } from '../services/api';
 import { formatBytes } from '../services/format';
 
 const session = useSession();
@@ -17,8 +18,11 @@ const ui = useUi();
 const text = ref('');
 const area = ref<HTMLTextAreaElement | null>(null);
 const chipEl = ref<HTMLElement | null>(null);
+const contextBtnEl = ref<HTMLElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const modelOpen = ref(false);
+const contextOpen = ref(false);
+const remoteContextStats = ref<any>(null);
 const uploading = ref(false);
 const dragOver = ref(false);
 
@@ -50,7 +54,147 @@ watch(() => session.currentProjectId, () => {
 }, { immediate: true });
 
 watch(() => session.chatId, () => {
+  remoteContextStats.value = null;
   void refreshGitStatus();
+  void refreshContextStats();
+});
+
+async function refreshContextStats() {
+  if (!session.canExecute || !session.chatId || !session.messages.length) return;
+  try {
+    remoteContextStats.value = await get('/api/context/stats?chat=' + encodeURIComponent(session.chatId));
+  } catch {}
+}
+
+watch(() => session.messages.length, () => {
+  void refreshContextStats();
+}, { immediate: true });
+
+const localSessionStats = computed(() => {
+  const msgs = session.messages || [];
+  const live: any = session.activeLive;
+  const rem = remoteContextStats.value;
+
+  let inputTokens = 0;
+  let cacheReadTokens = 0;
+  let outputTokens = 0;
+  let totalTokens = 0;
+  let cost = 0;
+  let userTurns = 0;
+  let assistantCalls = 0;
+  let toolCalls = 0;
+  let lastContextTokens = 0;
+  let totalChars = 0;
+  let userChars = 0;
+  let assistantChars = 0;
+  let totalGenMs = 0;
+  let timedOutTokens = 0;
+  let peakTokensPerSec = 0;
+  let prevTs = 0;
+
+  for (const m of msgs) {
+    if (!m) continue;
+    const ts = Number(m.timestamp) || 0;
+    const content = m.content;
+    let msgChars = 0;
+    if (typeof content === 'string') msgChars += content.length;
+    else if (Array.isArray(content)) {
+      for (const p of content) {
+        if (!p) continue;
+        if (typeof p.text === 'string') msgChars += p.text.length;
+        else if (typeof p.thinking === 'string') msgChars += p.thinking.length;
+        else if (p.type === 'toolCall' || p.type === 'tool') {
+          toolCalls++;
+          if (p.arguments) msgChars += JSON.stringify(p.arguments).length;
+          else if (typeof p.args === 'string') msgChars += p.args.length;
+        }
+      }
+    }
+    totalChars += msgChars;
+    if (m.role === 'user') {
+      userTurns++;
+      userChars += msgChars;
+    } else if (m.role === 'assistant') {
+      assistantCalls++;
+      assistantChars += msgChars;
+      const u = m.usage;
+      if (u) {
+        const inp = Number(u.input) || 0;
+        const cr = Number(u.cacheRead) || 0;
+        const cw = Number(u.cacheWrite) || 0;
+        const out = Number(u.output) || 0;
+        const tot = Number(u.totalTokens) || (inp + cr + cw + out);
+        inputTokens += inp + cw;
+        cacheReadTokens += cr;
+        outputTokens += out;
+        totalTokens += tot;
+        cost += Number(u.cost?.total) || 0;
+        if (inp + cr + cw + out > 1) lastContextTokens = inp + cr + cw + out;
+
+        const durMs = Number(m.durationMs) || (prevTs > 0 && ts > prevTs && (ts - prevTs) < 600000 ? (ts - prevTs) : 0);
+        if (out > 0 && durMs >= 100) {
+          const rate = out / (durMs / 1000);
+          if (rate > 0 && rate < 2500) {
+            totalGenMs += durMs;
+            timedOutTokens += out;
+            if (rate > peakTokensPerSec) peakTokensPerSec = Number(rate.toFixed(1));
+          }
+        }
+      }
+    }
+    if (ts > 0) prevTs = ts;
+  }
+
+  let liveTokensPerSec = 0;
+  if (live?.usage) {
+    inputTokens += Number(live.usage.input) || 0;
+    cacheReadTokens += Number(live.usage.cacheRead) || 0;
+    outputTokens += Number(live.usage.output) || 0;
+    totalTokens += Number(live.usage.totalTokens) || 0;
+    cost += Number(live.usage.cost) || 0;
+    assistantCalls += Number(live.usage.calls) || 0;
+    if (live.usage.lastContextTokens > 1) lastContextTokens = live.usage.lastContextTokens;
+    if (live._firstTokenAt && live.usage.streamedChars > 0) {
+      const elapsedSec = Math.max(0.2, (Date.now() - live._firstTokenAt) / 1000);
+      const estTok = Math.ceil(live.usage.streamedChars / 3.2);
+      liveTokensPerSec = Number((estTok / elapsedSec).toFixed(1));
+    }
+  }
+
+  if (lastContextTokens <= 1 && totalChars > 0) {
+    const estIn = Math.max(1, Math.ceil((userChars || totalChars * 0.4) / 3.5));
+    const estOut = Math.max(0, Math.ceil(assistantChars / 3.5));
+    lastContextTokens = estIn + estOut;
+    if (totalTokens === 0) {
+      inputTokens = estIn;
+      outputTokens = estOut;
+      totalTokens = lastContextTokens;
+    }
+  }
+
+  const contextWindow = rem?.contextUsage?.contextWindow || 128000;
+  const contextTokens = Math.max(lastContextTokens, rem?.contextUsage?.tokens || 0);
+  const percent = Math.min(100, Number(((contextTokens / contextWindow) * 100).toFixed(1)));
+  const avgTokensPerSec = totalGenMs > 0
+    ? Number((timedOutTokens / (totalGenMs / 1000)).toFixed(1))
+    : (rem?.speed?.avgTokensPerSec || 0);
+
+  return {
+    contextTokens,
+    contextWindow,
+    percent,
+    inputTokens: Math.max(inputTokens, rem?.tokens?.input || 0),
+    cacheReadTokens: Math.max(cacheReadTokens, rem?.tokens?.cacheRead || 0),
+    outputTokens: Math.max(outputTokens, rem?.tokens?.output || 0),
+    totalTokens: Math.max(totalTokens, rem?.tokens?.total || 0),
+    cost: Math.max(cost, Number(rem?.cost) || 0),
+    userTurns: Math.max(userTurns, rem?.userMessages || 0),
+    assistantCalls: Math.max(assistantCalls, rem?.assistantCalls || 0),
+    toolCalls: Math.max(toolCalls, rem?.toolCalls || 0),
+    avgTokensPerSec,
+    peakTokensPerSec: Math.max(peakTokensPerSec, rem?.speed?.peakTokensPerSec || 0),
+    liveTokensPerSec,
+  };
 });
 
 const workspaceRefs = computed(() => session.workspaceRefs || []);
@@ -791,7 +935,38 @@ watch(() => session.draftText, (val) => {
 
         <span class="composer-spacer"></span>
         <span v-if="text.length > 16000" class="composer-count">{{ text.length }} / 20000</span>
-        <button ref="chipEl" type="button" class="model-chip" title="切换模型与思考强度" @click="modelOpen = !modelOpen">
+        <button
+          v-if="session.canExecute"
+          ref="contextBtnEl"
+          type="button"
+          class="context-ring-btn"
+          :class="{
+            'is-active': contextOpen,
+            'is-warn': localSessionStats.percent >= 65 && localSessionStats.percent < 82,
+            'is-danger': localSessionStats.percent >= 82,
+          }"
+          :title="`上下文窗口 ${Math.round(localSessionStats.percent)}% · 点击查看会话用量与压缩`"
+          aria-label="上下文窗口与会话用量"
+          @click="contextOpen = !contextOpen; modelOpen = false"
+        >
+          <svg class="context-ring-svg" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+            <circle class="context-ring-track" cx="10" cy="10" r="7.2" fill="none" stroke="currentColor" stroke-width="2.1" />
+            <circle
+              class="context-ring-fill"
+              cx="10"
+              cy="10"
+              r="7.2"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.1"
+              stroke-linecap="round"
+              stroke-dasharray="45.24"
+              :stroke-dashoffset="(45.24 * (1 - Math.min(100, Math.max(localSessionStats.contextTokens > 0 ? 5 : 0, localSessionStats.percent)) / 100)).toFixed(2)"
+              transform="rotate(-90 10 10)"
+            />
+          </svg>
+        </button>
+        <button ref="chipEl" type="button" class="model-chip" title="切换模型与思考强度" @click="modelOpen = !modelOpen; contextOpen = false">
           <span class="model-chip-label">{{ session.modelLabel }}</span>
           <span v-if="effortLabel" class="model-chip-effort">{{ effortLabel }}</span>
           <Icon name="chevron-down" :size="12" />
@@ -813,6 +988,13 @@ watch(() => session.draftText, (val) => {
     </form>
     </div>
     <ModelMenu v-if="modelOpen && chipEl" :anchor="chipEl" @close="modelOpen = false" />
+    <ContextUsageMenu
+      v-if="contextOpen && contextBtnEl"
+      :anchor="contextBtnEl"
+      :local-stats="localSessionStats"
+      @close="contextOpen = false"
+      @updated="remoteContextStats = $event"
+    />
     <DropMenu v-if="projectMenu" :anchor="projectMenu.anchor" :items="projectMenu.items" label="项目空间选项" @close="projectMenu = null" />
     <DropMenu v-if="branchMenu" :anchor="branchMenu.anchor" :items="branchMenu.items" label="Git 分支" @close="branchMenu = null" />
     <DropMenu v-if="permissionMenu" :anchor="permissionMenu.anchor" :items="permissionMenu.items" label="Agent 权限" up @close="permissionMenu = null" />
@@ -1077,6 +1259,33 @@ watch(() => session.draftText, (val) => {
 .plan-ready-btn { flex: none; height: 28px; padding: 0 12px; border-radius: 999px; background: var(--ink); color: var(--surface); font-size: 12px; font-weight: 600; }
 .plan-ready-btn:hover { filter: brightness(1.12); }
 .composer-count { flex: none; color: var(--faint); font-size: 10px; font-variant-numeric: tabular-nums; }
+.context-ring-btn {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: -3px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background-color var(--fast), color var(--fast), border-color var(--fast);
+}
+.context-ring-btn:hover,
+.context-ring-btn.is-active {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  border-color: var(--line);
+  color: var(--text);
+}
+.context-ring-btn.is-warn { color: #d97706; }
+:root[data-theme='dark'] .context-ring-btn.is-warn { color: #fbbf24; }
+.context-ring-btn.is-danger { color: var(--danger); }
+.context-ring-svg { display: block; }
+.context-ring-track { opacity: 0.22; }
+.context-ring-fill { transition: stroke-dashoffset 280ms var(--ease); }
 .model-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 256px; height: 30px; padding: 0 9px 0 10px; overflow: hidden; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--text-2); font-size: 11.5px; font-weight: 520; transition: border-color var(--fast), background-color var(--fast); }
 .model-chip:hover { border-color: var(--line-2); background: color-mix(in srgb, var(--text) 4%, transparent); }
 .model-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

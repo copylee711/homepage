@@ -12,7 +12,7 @@ const now = ref(Date.now());
 const running = computed(() => !!props.started && !props.durationMs);
 let ticker: number | null = null;
 watch(running, value => {
-  if (value && ticker == null) ticker = window.setInterval(() => { now.value = Date.now(); }, 500);
+  if (value && ticker == null) ticker = window.setInterval(() => { now.value = Date.now(); }, 80);
   if (!value && ticker != null) { clearInterval(ticker); ticker = null; }
 }, { immediate: true });
 onBeforeUnmount(() => { if (ticker != null) clearInterval(ticker); });
@@ -39,9 +39,9 @@ function toggle() {
 <template>
   <div class="thinking" :class="['is-' + mode]">
     <button type="button" class="thinking-head" :aria-expanded="isOpen" @click="toggle">
-      <Icon class="thinking-icon" name="sparkle" :size="13" />
+      <Icon class="thinking-icon" :class="{ 'is-live': running }" name="sparkle" :size="13" />
       <span class="thinking-label">思考过程</span>
-      <span v-if="elapsed" class="thinking-time" :class="{ 'is-live': running }">{{ formatDuration(elapsed) }}</span>
+      <span v-if="elapsed || running" class="thinking-time" :class="{ 'is-live': running }">{{ formatDuration(elapsed, running) }}</span>
       <span class="thinking-toggle">
         <span>{{ isOpen ? '收起' : '展开' }}</span>
         <Icon class="thinking-chevron" name="chevron-right" :size="13" />
@@ -78,14 +78,21 @@ function toggle() {
   color: var(--muted);
   opacity: 0.85;
 }
+.thinking-icon.is-live {
+  color: var(--accent);
+  animation: thinking-sparkle 2.4s ease-in-out infinite;
+}
+@keyframes thinking-sparkle {
+  0%, 100% { transform: scale(0.92) rotate(0deg); opacity: 0.7; }
+  50% { transform: scale(1.1) rotate(18deg); opacity: 1; }
+}
 .thinking-time {
   color: var(--faint);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.thinking-time.is-live { color: var(--muted); animation: thinking-live 1.6s ease-in-out infinite; }
-@keyframes thinking-live { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+.thinking-time.is-live { color: var(--muted); }
 .thinking-toggle {
   display: inline-flex;
   align-items: center;

@@ -56,3 +56,185 @@ export async function usageSummary(user, titles = {}, days = 30, root = '/data/s
   const sortCost = obj => Object.entries(obj).map(([key, v]) => ({ key, ...v })).sort((a, b) => b.cost - a.cost || (b.input + b.output) - (a.input + a.output));
   return { days, since, total, byDay: Object.entries(byDay).map(([day, v]) => ({ day, ...v })).sort((a, b) => a.day.localeCompare(b.day)), byModel: sortCost(byModel), byChat: sortCost(byChat).slice(0, 20) };
 }
+
+function contentChars(content) {
+  if (typeof content === 'string') return content.length;
+  if (!Array.isArray(content)) return 0;
+  let sum = 0;
+  for (const part of content) {
+    if (!part) continue;
+    if (typeof part.text === 'string') sum += part.text.length;
+    else if (typeof part.thinking === 'string') sum += part.thinking.length;
+    else if (part.type === 'toolCall' && part.arguments) sum += JSON.stringify(part.arguments).length;
+  }
+  return sum;
+}
+
+export async function sessionUsageStats(user, thread, root = '/data/sessions') {
+  const providersData = await loadProviders();
+  const providers = providersData.providers || [];
+  const activeProv = providers.find(p => p.id === providersData.active) || providers[0];
+  const defaultLimits = activeProv ? modelLimits(activeProv, activeProv.model || '') : { contextWindow: 128000, maxTokens: 16384 };
+
+  const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+  let cost = 0;
+  let totalMessages = 0;
+  let userMessages = 0;
+  let assistantCalls = 0;
+  let toolCalls = 0;
+  let compactions = 0;
+
+  let lastContextTokens = 0;
+  let lastBreakdown = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
+  let lastModelLimits = defaultLimits;
+  let branchTextChars = 0;
+  let userTextChars = 0;
+  let assistantTextChars = 0;
+  let prevEntryTs = 0;
+
+  let totalGenMs = 0;
+  let timedOutputTokens = 0;
+  let lastTokensPerSec = 0;
+  let peakTokensPerSec = 0;
+
+  const path = `${root}/${user}/${thread}.jsonl`;
+  let raw = '';
+  try {
+    raw = await readFile(path, 'utf8');
+  } catch {
+    const cw = defaultLimits.contextWindow || 128000;
+    const autoCompactAt = Math.round(cw * 0.85);
+    return {
+      tokens,
+      cost: 0,
+      cacheHitRate: 0,
+      totalMessages: 0,
+      userMessages: 0,
+      assistantCalls: 0,
+      toolCalls: 0,
+      compactions: 0,
+      speed: { avgTokensPerSec: 0, lastTokensPerSec: 0, peakTokensPerSec: 0, totalOutputTokens: 0, totalGenMs: 0 },
+      contextUsage: {
+        tokens: 0,
+        contextWindow: cw,
+        percent: 0,
+        autoCompactThreshold: autoCompactAt,
+        remainingUntilCompact: autoCompactAt,
+        breakdown: lastBreakdown,
+      },
+    };
+  }
+
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    let entry;
+    try { entry = JSON.parse(line); } catch { continue; }
+    const entryTs = entry.timestamp ? Date.parse(entry.timestamp) : (entry.message?.timestamp ? Number(entry.message.timestamp) : 0);
+
+    if (entry.type === 'compaction') {
+      compactions++;
+      branchTextChars = String(entry.summary || '').length;
+      const after = Number(entry.tokensAfter || entry.estimatedTokensAfter) || Math.ceil(branchTextChars / 3.5);
+      if (after > 0) {
+        lastContextTokens = after;
+        lastBreakdown = { input: after, cacheRead: 0, cacheWrite: 0, output: 0 };
+      }
+      if (entryTs > 0) prevEntryTs = entryTs;
+      continue;
+    }
+
+    if (entry.type === 'message' && entry.message) {
+      totalMessages++;
+      const m = entry.message;
+      const chars = contentChars(m.content);
+      branchTextChars += chars;
+      if (Array.isArray(m.content)) {
+        for (const p of m.content) if (p?.type === 'toolCall') toolCalls++;
+      }
+      if (m.role === 'user') {
+        userMessages++;
+        userTextChars += chars;
+      } else if (m.role === 'assistant') {
+        assistantCalls++;
+        assistantTextChars += chars;
+        const provider = providers.find(p => p.id === m.provider) || activeProv;
+        if (provider) lastModelLimits = modelLimits(provider, m.model || provider.model || '');
+        if (m.usage) {
+          const inp = Number(m.usage.input) || 0;
+          const out = Number(m.usage.output) || 0;
+          const cr = Number(m.usage.cacheRead) || 0;
+          const cw = Number(m.usage.cacheWrite) || 0;
+          const tot = Number(m.usage.totalTokens) || (inp + out + cr + cw);
+          tokens.input += inp;
+          tokens.output += out;
+          tokens.cacheRead += cr;
+          tokens.cacheWrite += cw;
+          tokens.total += tot;
+          cost += priced(provider, m.model, m.usage);
+          const ctx = inp + cr + cw + out;
+          if (ctx > 1) {
+            lastContextTokens = ctx;
+            lastBreakdown = { input: inp, cacheRead: cr, cacheWrite: cw, output: out };
+          }
+          const durMs = Number(m.durationMs) || (prevEntryTs > 0 && entryTs > prevEntryTs && (entryTs - prevEntryTs) < 600000 ? (entryTs - prevEntryTs) : 0);
+          if (out > 0 && durMs >= 100) {
+            const rate = out / (durMs / 1000);
+            if (rate > 0 && rate < 2500) {
+              totalGenMs += durMs;
+              timedOutputTokens += out;
+              lastTokensPerSec = Number(rate.toFixed(1));
+              if (lastTokensPerSec > peakTokensPerSec) peakTokensPerSec = lastTokensPerSec;
+            }
+          }
+        }
+      }
+      if (entryTs > 0) prevEntryTs = entryTs;
+    }
+  }
+
+  if (lastContextTokens <= 1 && branchTextChars > 0) {
+    const estIn = Math.max(1, Math.ceil((userTextChars || branchTextChars * 0.4) / 3.5));
+    const estOut = Math.max(0, Math.ceil(assistantTextChars / 3.5));
+    lastContextTokens = estIn + estOut;
+    if (tokens.total === 0) {
+      tokens.input = estIn;
+      tokens.output = estOut;
+      tokens.total = lastContextTokens;
+    }
+    lastBreakdown = { input: estIn, cacheRead: 0, cacheWrite: 0, output: estOut };
+  }
+
+  const contextWindow = lastModelLimits.contextWindow || 128000;
+  const percent = Math.min(100, Number(((lastContextTokens / contextWindow) * 100).toFixed(1)));
+  const autoCompactThreshold = Math.round(contextWindow * 0.85);
+  const remainingUntilCompact = Math.max(0, autoCompactThreshold - lastContextTokens);
+  const avgTokensPerSec = totalGenMs > 0 ? Number((timedOutputTokens / (totalGenMs / 1000)).toFixed(1)) : lastTokensPerSec;
+  const promptTotal = tokens.input + tokens.cacheRead + tokens.cacheWrite;
+  const cacheHitRate = promptTotal > 0 ? Number(((tokens.cacheRead / promptTotal) * 100).toFixed(1)) : 0;
+
+  return {
+    tokens,
+    cost,
+    cacheHitRate,
+    totalMessages,
+    userMessages,
+    assistantCalls,
+    toolCalls,
+    compactions,
+    speed: {
+      avgTokensPerSec,
+      lastTokensPerSec,
+      peakTokensPerSec,
+      totalOutputTokens: tokens.output,
+      totalGenMs,
+    },
+    contextUsage: {
+      tokens: lastContextTokens,
+      contextWindow,
+      percent,
+      autoCompactThreshold,
+      remainingUntilCompact,
+      breakdown: lastBreakdown,
+    },
+  };
+}

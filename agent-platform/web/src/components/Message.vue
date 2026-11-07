@@ -167,7 +167,7 @@ function copyMsg() {
     if (ok) {
       copied.value = true;
       setTimeout(() => { copied.value = false; }, 2000);
-      ui.toast('已复制回答', { tone: 'success' });
+      ui.toast(isUser.value ? '已复制消息' : '已复制回答', { tone: 'success' });
     } else {
       ui.toast('复制失败', { tone: 'error' });
     }
@@ -262,7 +262,7 @@ function onContext(e: MouseEvent) {
     return;
   }
   ui.openContext(e, [
-    { icon: 'copy', label: '复制完整回答', action: copyMsg },
+    { icon: 'copy', label: isUser.value ? '复制消息' : '复制完整回答', action: copyMsg },
     {
       icon: 'corner-down-left',
       label: '引用整条消息到输入框',
@@ -350,6 +350,18 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
         </div>
 
         <MarkdownView v-if="userDisplayText" :source="userDisplayText" />
+      </div>
+      <div v-if="isUser" class="user-actions">
+        <button
+          type="button"
+          class="msg-action-btn"
+          :title="copied ? '已复制' : '复制消息'"
+          :aria-label="copied ? '已复制' : '复制消息'"
+          @click="copyMsg"
+        >
+          <Icon :name="copied ? 'check' : 'copy'" :size="13" />
+          <span v-if="copied" class="msg-action-label">已复制</span>
+        </button>
       </div>
       <div v-if="!isUser" class="assistant-body">
         <div ref="contentRef" class="message-content"><BlockList :blocks="blocks" /></div>
@@ -570,8 +582,21 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
   opacity: 0;
   transition: opacity var(--fast);
 }
+.user-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  margin-top: 2px;
+  margin-right: 2px;
+  min-height: 24px;
+  opacity: 0;
+  transition: opacity var(--fast);
+}
 .message:hover .assistant-actions,
-.message:focus-within .assistant-actions {
+.message:focus-within .assistant-actions,
+.message-user:hover .user-actions,
+.message-user:focus-within .user-actions {
   opacity: 1;
 }
 .msg-action-btn {
@@ -619,7 +644,8 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
 }
 
 @media (max-width: 860px) {
-  .assistant-actions { opacity: 0.85; }
+  .assistant-actions,
+  .user-actions { opacity: 0.85; }
 }
 @media (max-width: 640px) {
   .message { gap: 0; }

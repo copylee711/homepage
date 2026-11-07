@@ -18,7 +18,7 @@ import { publicProviders, saveProvider, deleteProvider, activeProvider, activate
 import { sandbox, sandboxTool } from './sandbox-client.mjs';
 import { sessionCapacity } from './session-limits.mjs';
 import { prepareSessionCwd } from './session-cwd.mjs';
-import { usageSummary } from './usage.mjs';
+import { usageSummary, sessionUsageStats } from './usage.mjs';
 import { ChatStore, normalizeProjectId, paginateChats, safeFilename, sanitizePermission } from './conversations.mjs';
 import { createZip } from './zip.mjs';
 import { SearchSettings, publicSearch } from './search.mjs';
@@ -78,14 +78,14 @@ async function exportBundle(user, thread) {
     revision: process.env.REVISION || '', model: modelLabel(process.env.PI_MODEL || ''), pid: process.pid,
   }, null, 2) });
   files.push({ name: 'README.txt', data: [
-    'Iris 会话排查包', '',
-    'chat.md / chat.json   对话全文（Markdown 与结构化 JSON）',
-    'session.jsonl         模型会话原始记录（含工具调用参数）',
-    'turn.ndjson           本轮任务的原始流式事件（时间顺序，用于定位卡顿与中断）',
-    'turn-notes.json       各轮异常结束原因（如有）',
-    'chat-meta.json        会话元数据（项目、权限、标题）',
-    'runtime.json          runner 运行环境与版本信息',
-    '', '所有内容均已遮蔽已知的供应商密钥。发给我排查时可直接使用此 zip。',
+    'Iris 会话诊断数据包', '',
+    'chat.md / chat.json   对话全文记录（Markdown 与结构化 JSON）',
+    'session.jsonl         模型会话原始日志（含工具调用参数与返回）',
+    'turn.ndjson           本轮任务流式事件时间线（用于定位延迟与中断）',
+    'turn-notes.json       任务中止或异常结束记录（如有）',
+    'chat-meta.json        会话元数据（所属项目、权限策略、标题）',
+    'runtime.json          运行环境与版本信息',
+    '', '数据包内已自动脱敏已知的供应商密钥，可直接用于问题复现与故障诊断。',
   ].join('\n') });
   let total = files.reduce((sum, file) => sum + Buffer.byteLength(file.data), 0);
   if (total > BUNDLE_MAX_BYTES) fail(413, '此对话日志超过 24 MB，无法打包导出');
@@ -527,11 +527,33 @@ export const server = createServer(async (req, res) => {
         return json(res, 200, await features.tools(input.user, server.id, tools, server.url));
       } finally { clearInterval(renewal); }
     }
-    if (req.url === '/context/stats' || req.url === '/context/compact') {
+    if (req.url === '/context/stats') {
+      if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(input.thread || '')) fail(422, '对话标识无效');
+      const stats = await sessionUsageStats(input.user, input.thread);
+      const live = sessions.get(input.user + ':' + input.thread);
+      if (live && !live.initializing && !live.pi.busy && !live.pi.maintenance) {
+        try {
+          const data = await live.pi.command('get_session_stats');
+          if (data?.contextUsage?.tokens > 0) {
+            const cw = data.contextUsage.contextWindow || stats.contextUsage.contextWindow;
+            const autoCompactAt = Math.round(cw * 0.85);
+            stats.contextUsage = {
+              ...stats.contextUsage,
+              tokens: data.contextUsage.tokens,
+              contextWindow: cw,
+              percent: Number((data.contextUsage.percent ?? ((data.contextUsage.tokens / cw) * 100)).toFixed(1)),
+              autoCompactThreshold: autoCompactAt,
+              remainingUntilCompact: Math.max(0, autoCompactAt - data.contextUsage.tokens),
+            };
+          }
+        } catch {}
+      }
+      return json(res, 200, stats);
+    }
+    if (req.url === '/context/compact') {
       await chats.assertOwned(input.user, input.thread);
-      if (req.url.endsWith('/compact')) assertUserIdle(input.user);
+      assertUserIdle(input.user);
       const pi = await instance(input.user, input.thread);
-      if (req.url.endsWith('/stats')) { const data = await pi.command('get_session_stats'); return json(res, 200, { tokens: data.tokens, cost: data.cost, contextUsage: data.contextUsage || null, totalMessages: data.totalMessages, toolCalls: data.toolCalls }); }
       pi.maintenance = true;
       try { const result = await pi.command('compact', { customInstructions: String(input.instructions || '').slice(0,2000) }, 180000); snapshots.forget(input.user, input.thread); return json(res, 200, { ok:true, tokensBefore:result.tokensBefore, estimatedTokensAfter:result.estimatedTokensAfter }); }
       catch (error) { if (/Nothing to compact|session too small/i.test(error.message)) return json(res, 200, { ok:true, skipped:true, reason:'当前上下文较短，暂不需要压缩' }); throw error; }

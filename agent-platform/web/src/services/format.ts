@@ -21,11 +21,17 @@ export function formatBytes(value: number) {
   if (size < 1024 * 1024) return (size / 1024).toFixed(size < 10 * 1024 ? 1 : 0) + ' KB';
   return (size / 1024 / 1024).toFixed(1) + ' MB';
 }
-export function formatDuration(ms: number) {
-  const v = Number(ms) || 0;
-  if (v < 1000) return Math.max(0, Math.round(v)) + ' ms';
-  if (v < 60000) return (v / 1000).toFixed(v < 10000 ? 1 : 0) + ' s';
-  return Math.floor(v / 60000) + ' 分 ' + Math.round((v % 60000) / 1000) + ' 秒';
+export function formatDuration(ms: number, live = false) {
+  const v = Math.max(0, Number(ms) || 0);
+  if (live) {
+    if (v < 60000) return (v / 1000).toFixed(1) + 's';
+    const mins = Math.floor(v / 60000);
+    const secs = ((v % 60000) / 1000).toFixed(1);
+    return `${mins}分 ${secs}秒`;
+  }
+  if (v < 100) return Math.round(v) + 'ms';
+  if (v < 60000) return (v / 1000).toFixed(1) + 's';
+  return Math.floor(v / 60000) + '分 ' + Math.round((v % 60000) / 1000) + '秒';
 }
 export function grantDate(seconds?: number) { return seconds ? new Date(seconds * 1000).toLocaleDateString('zh-CN') : ''; }
 

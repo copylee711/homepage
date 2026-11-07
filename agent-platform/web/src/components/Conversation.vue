@@ -41,12 +41,14 @@ onBeforeUnmount(()=>{if(flashTimer)clearTimeout(flashTimer);});
 // Clearance between the latest text and the composer stack. Overlap (the
 // project/branch row or composer covering the scroller) is added on top of a
 // small resting gap so "at bottom" means the last line is fully visible.
-const END_SLACK = 8;
+// Note: --thread-end-gap is already part of .conversation padding-bottom (and
+// therefore included in el.scrollHeight), so distanceFromEnd(el) is 0 at bottom.
+const END_SLACK = 16;
 let chromeObserver: ResizeObserver | undefined;
-let detachTimer: ReturnType<typeof setTimeout> | undefined;
 let jumping = false;
 let scrollGen = 0;
 let touchY = 0;
+let lastScrollTop = 0;
 
 function endGap(el: HTMLElement) {
   const raw = parseFloat(getComputedStyle(el).getPropertyValue('--thread-end-gap'));
@@ -66,35 +68,34 @@ function distanceFromEnd(el: HTMLElement) {
 }
 function nearBottom() {
   const el = scroller.value; if (!el) return true;
-  return distanceFromEnd(el) <= endGap(el) + END_SLACK;
+  return distanceFromEnd(el) <= END_SLACK;
 }
 function hasThread() { return session.messages.length > 0 || !!live.value; }
-// The end-gap padding is clearance, not content. A short transcript must not
-// summon the jump button just because that padding exists.
+function canScroll() {
+  const el = scroller.value;
+  if (!el) return false;
+  return el.scrollHeight - el.clientHeight > 4;
+}
 function scrollable() {
   const el = scroller.value;
   if (!el) return false;
-  return el.scrollHeight - el.clientHeight > endGap(el) + 24;
+  return el.scrollHeight - el.clientHeight > 48;
 }
 // Upward intent detaches auto-follow before the scroll position catches up, so
-// a streaming tick cannot yank the reader. Re-check shortly after: a touch or
-// keyboard nudge that never leaves the end gap must not leave the jump button up.
-// Over-scrolling a short transcript is not intent.
+// a streaming tick cannot yank the reader back to the bottom.
 function leaveBottom() {
   const el = scroller.value;
-  if (!el || !scrollable() || el.scrollTop <= 0) return;
+  if (!el || !canScroll()) return;
   if (jumping) el.scrollTop = el.scrollTop;
   scrollGen++;
   jumping = false;
   follow.value = false;
-  if (detachTimer) clearTimeout(detachTimer);
-  detachTimer = setTimeout(() => {
-    detachTimer = undefined;
-    const at = nearBottom();
-    if (at) follow.value = true;
-    showJump.value = !at && hasThread() && scrollable();
-    updateActiveTurn();
-  }, 90);
+  if (followFrame) {
+    cancelAnimationFrame(followFrame);
+    followFrame = 0;
+  }
+  showJump.value = !nearBottom() && hasThread() && scrollable();
+  updateActiveTurn();
 }
 function onWheel(event: WheelEvent) { if (event.deltaY < 0) leaveBottom(); }
 function onKeydown(event: KeyboardEvent) { if (['PageUp', 'ArrowUp', 'Home'].includes(event.key)) leaveBottom(); }
@@ -105,15 +106,23 @@ function onTouchMove(event: TouchEvent) {
   touchY = y;
 }
 function onScroll() {
+  const el = scroller.value;
+  if (!el) return;
+  const curTop = el.scrollTop;
+  const movedUp = curTop < lastScrollTop - 1;
+  lastScrollTop = curTop;
   const at = nearBottom();
-  if (!jumping) follow.value = at;
-  else if (at) jumping = false;
+  if (!jumping) {
+    if (movedUp && !at) follow.value = false;
+    else if (at) follow.value = true;
+  } else if (at) {
+    jumping = false;
+  }
   showJump.value = !at && !jumping && hasThread() && scrollable();
   updateActiveTurn();
 }
 function toBottom(smooth = true) {
   const el = scroller.value; if (!el) return;
-  if (detachTimer) { clearTimeout(detachTimer); detachTimer = undefined; }
   jumping = true;
   follow.value = true;
   showJump.value = false;
@@ -123,6 +132,7 @@ function toBottom(smooth = true) {
   const dest = () => Math.max(0, el.scrollHeight - el.clientHeight);
   const gen = ++scrollGen;
   if (distanceFromEnd(el) <= 1) {
+    lastScrollTop = el.scrollTop;
     jumping = false;
     onScroll();
     return;
@@ -134,6 +144,7 @@ function toBottom(smooth = true) {
     settled = true;
     if (gen !== scrollGen || scroller.value !== el) { if (gen === scrollGen) jumping = false; return; }
     if (follow.value && distanceFromEnd(el) > 1) el.scrollTop = el.scrollHeight;
+    lastScrollTop = el.scrollTop;
     jumping = false;
     onScroll();
   };
@@ -159,15 +170,43 @@ function autoFollow() {
     followFrame = 0;
     nextTick(() => {
       observeChrome();
-      if (!scrollable()) { follow.value = true; showJump.value = false; }
+      if (!canScroll()) { follow.value = true; showJump.value = false; }
       if (follow.value) toBottom(false);
       else updateActiveTurn();
     });
   });
 }
+
+// Live countdown for auto_retry_start so "X 秒后自动重试" ticks smoothly.
+const retryNow = ref(Date.now());
+let retryTicker: ReturnType<typeof setInterval> | undefined;
+watch(
+  () => live.value?.retry?.until,
+  (until) => {
+    if (retryTicker) { clearInterval(retryTicker); retryTicker = undefined; }
+    if (until) {
+      retryNow.value = Date.now();
+      retryTicker = setInterval(() => { retryNow.value = Date.now(); }, 100);
+    }
+  },
+  { immediate: true }
+);
+const liveStatusText = computed(() => {
+  const cur = live.value;
+  if (!cur) return '';
+  if (cur.retry?.until) {
+    const remMs = Math.max(0, cur.retry.until - retryNow.value);
+    const secs = (remMs / 1000).toFixed(1);
+    return remMs > 0
+      ? `模型调用失败，${secs} 秒后自动重试（${cur.retry.attempt}/${cur.retry.maxAttempts}）…`
+      : `正在自动重试（${cur.retry.attempt}/${cur.retry.maxAttempts}）…`;
+  }
+  return cur.status || '';
+});
+
 onBeforeUnmount(() => {
   cancelAnimationFrame(followFrame);
-  if (detachTimer) clearTimeout(detachTimer);
+  if (retryTicker) clearInterval(retryTicker);
   chromeObserver?.disconnect();
 });
 
@@ -178,8 +217,8 @@ onMounted(() => {
   if (typeof ResizeObserver !== 'undefined') {
     chromeObserver = new ResizeObserver(() => {
       syncEndGap();
-      if (!scrollable()) { follow.value = true; showJump.value = false; return; }
-      if (follow.value && scroller.value && distanceFromEnd(scroller.value) > endGap(scroller.value) + END_SLACK) toBottom(false);
+      if (!canScroll()) { follow.value = true; showJump.value = false; return; }
+      if (follow.value && scroller.value && distanceFromEnd(scroller.value) > 2) toBottom(false);
     });
   }
   nextTick(() => { syncEndGap(); observeChrome(); toBottom(false); });
@@ -220,11 +259,11 @@ onMounted(() => {
               </section>
             </template>
             <p v-if="live.stopReason === 'length'" class="assistant-limit">输出已达上限，可继续</p>
-            <div v-if="live.status || live.error || live.stopped" class="message-status" :class="{ 'is-error': live.error }">
+            <div v-if="liveStatusText || live.error || live.stopped" class="message-status" :class="{ 'is-error': live.error }">
               <span v-if="live.spinner && !live.error && !live.stopped" class="working-dot"></span>
               <span v-if="live.error" class="status-error">{{ live.error }}</span>
               <span v-else-if="live.stopped">已停止生成</span>
-              <span v-else>{{ live.status }}</span>
+              <span v-else class="status-text">{{ liveStatusText }}</span>
             </div>
           </div>
         </article>
@@ -267,7 +306,7 @@ onMounted(() => {
   .messages { gap: 22px; padding-top: calc(var(--header-h) + 8px); }
 }
 .conversation-state { padding: 40px 0; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: 12.5px; }
-.message-status { min-height: 18px; display: flex; align-items: center; gap: 8px; margin-top: 9px; color: var(--muted); font-size: 11.5px; }
+.message-status { min-height: 18px; display: flex; align-items: center; gap: 8px; margin-top: 9px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .message-status.is-error { color: var(--danger); }
 .tool-approval { margin-top: 14px; padding: 14px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-2); }
 .tool-approval strong { font-size: 13px; }

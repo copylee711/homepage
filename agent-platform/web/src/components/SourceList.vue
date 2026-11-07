@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import SiteIcon from './SiteIcon.vue';
+import SiteIconStack from './SiteIconStack.vue';
 import Icon from './Icon.vue';
 defineProps<{ sources: any[] }>();
 </script>
 <template>
   <details v-if="sources.length" class="citation-sources">
     <summary>
-      <span class="source-icons"><SiteIcon v-for="source in sources.slice(0, 3)" :key="source.url" :url="source.url" /></span>
+      <SiteIconStack :urls="sources.map((s: any) => s.url)" :max="4" />
       <span>参考来源 · {{ sources.length }}</span>
       <Icon name="chevron-right" :size="11" class="sources-chevron" />
     </summary>

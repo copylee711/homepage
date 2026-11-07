@@ -5,7 +5,7 @@ import SiteIconStack from './SiteIconStack.vue';
 import WebToolPages from './WebToolPages.vue';
 import ToolImagePreview from './ToolImagePreview.vue';
 import { formatDuration } from '../services/format';
-import { rowSiteUrls, siteHost } from '../services/site-icon.mjs';
+import { rowSiteUrls, siteKey } from '../services/site-icon.mjs';
 import { useWorkspace } from '../stores/workspace';
 import { useSession } from '../stores/session';
 import { useUi } from '../stores/ui';
@@ -245,18 +245,37 @@ function fileIcon(path: string): string {
   return 'file';
 }
 
+function bashIcon(cmdText: string): string {
+  const s = cmdText.toLowerCase();
+  if (/\b(git|gh)\b/.test(s)) return 'git';
+  if (/\b(chromium|chrome|playwright|puppeteer|headless)\b/.test(s)) return 'compass';
+  if (/\b(python3?|pip3?|pytest|uv|conda|jupyter)\b/.test(s)) return 'cpu';
+  if (/\b(curl|wget|http|ssh|scp|rsync|ping|dig|nslookup)\b/.test(s)) return 'globe';
+  if (/\b(zip|unzip|tar|gzip|7z)\b/.test(s)) return 'package';
+  if (/\b(rg|grep|find|fd|ag)\b/.test(s)) return 'search';
+  if (/\b(sqlite3?|psql|mysql|duckdb|redis)\b/.test(s)) return 'database';
+  if (/\b(npm|npx|pnpm|yarn|bun|node|tsx|tsc|vite|vitest|jest|cargo|go|make|cmake|gcc|clang|rustc)\b/.test(s)) return 'zap';
+  return 'terminal';
+}
+
 function toolIcon(b: any): string {
   const k = String(b?.name || '').toLowerCase();
   const a = parseArgs(b?.args);
   const path = String(a.path || a.file_path || a.filePath || a.file || a.destination || a.target || '');
-  if (['read', 'write', 'edit', 'multi_edit', 'read_file', 'write_file', 'apply_patch'].includes(k)) return fileIcon(path);
-  if (k === 'bash' || k === 'shell') return 'terminal';
-  if (['ls', 'list_dir', 'list_directory'].includes(k)) return 'folder';
+  if (k === 'write' || k === 'write_file') {
+    const fi = fileIcon(path);
+    return fi === 'file' || fi === 'file-code' || fi === 'file-text' ? 'file-plus' : fi;
+  }
+  if (['edit', 'multi_edit', 'apply_patch'].includes(k)) return 'file-edit';
+  if (k === 'read' || k === 'read_file') return fileIcon(path);
+  if (k === 'bash' || k === 'shell') return bashIcon(`${a.command || ''} ${a.cmd || ''} ${a.description || ''}`);
+  if (['ls', 'list_dir', 'list_directory'].includes(k)) return 'folder-open';
   if (['glob', 'find', 'search_files', 'grep', 'search'].includes(k)) return 'search';
-  if (k === 'web_search' || k === 'image_search') return 'search';
+  if (k === 'web_search') return 'search';
+  if (k === 'image_search') return 'image';
   if (k === 'web_fetch' || k === 'fetch') return 'globe';
   if (k.startsWith('memory_')) return 'sparkle';
-  if (k === 'update_plan') return 'list';
+  if (k === 'update_plan') return 'list-checks';
   if (k === 'ask_user') return 'message';
   if (k.startsWith('background_')) return 'activity';
   if (k === 'set_chat_title') return 'edit';
@@ -265,16 +284,26 @@ function toolIcon(b: any): string {
 }
 
 // Per-command animation while a tool runs, so the row says what it is doing
-// (writing, searching, fetching) rather than a generic pulsing dot cluster.
+// (writing, searching, fetching, computing) rather than a generic pulsing dot cluster.
 function runClass(b: any): string {
   const k = String(b?.name || '').toLowerCase();
+  const icon = toolIcon(b);
+  if (icon === 'compass' || icon === 'globe') return 'run-web';
+  if (icon === 'zap' || icon === 'cpu') return 'run-compute';
   if (k === 'bash' || k === 'shell') return 'run-bash';
-  if (['write', 'edit', 'multi_edit', 'apply_patch'].includes(k)) return 'run-edit';
+  if (['write', 'write_file', 'edit', 'multi_edit', 'apply_patch'].includes(k)) return 'run-edit';
   if (['read', 'read_file'].includes(k)) return 'run-read';
   if (['web_fetch', 'fetch'].includes(k)) return 'run-web';
   if (['web_search', 'image_search', 'grep', 'search', 'glob', 'find', 'search_files'].includes(k)) return 'run-search';
   return 'run-default';
 }
+
+const activeRunningTool = computed(() => {
+  for (let i = list.value.length - 1; i >= 0; i--) {
+    if (list.value[i]?.state === 'running' || list.value[i]?.state === 'pending') return list.value[i];
+  }
+  return list.value[list.value.length - 1] || null;
+});
 
 function isFilePathArg(k: string, v: string) {
   if (k === 'path' || k === 'file' || k === 'destination') return true;
@@ -293,7 +322,7 @@ let ticker: number | null = null;
 watch(
   () => list.value.some(b => b?.state === 'running'),
   running => {
-    if (running && ticker == null) ticker = window.setInterval(() => { now.value = Date.now(); }, 500);
+    if (running && ticker == null) ticker = window.setInterval(() => { now.value = Date.now(); }, 80);
     if (!running && ticker != null) { clearInterval(ticker); ticker = null; }
   },
   { immediate: true }
@@ -326,17 +355,16 @@ const groupImages = computed(() => list.value
 const visibleImages = computed(() => groupImages.value.slice(-3));
 const extraImages = computed(() => Math.max(0, groupImages.value.length - visibleImages.value.length));
 
-// Sites visited by this group, deduplicated by host and stacked on the summary.
-// A search that ranked eight sites contributes up to eight icons, not one.
+// Sites visited by this group, deduplicated by normalized host and stacked on the left of the summary.
 const allSites = computed(() => {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const block of list.value) {
     if (!isWebTool(block)) continue;
     for (const url of rowSiteUrls(block)) {
-      const host = siteHost(url);
-      if (!host || seen.has(host)) continue;
-      seen.add(host);
+      const key = siteKey(url);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
       out.push(url);
     }
   }
@@ -372,7 +400,7 @@ const allSites = computed(() => {
         <span class="tc-summary" :title="summarize(list[0])">{{ summarize(list[0]) }}</span>
         <span v-if="list[0].state === 'error'" class="tc-failed">失败</span>
         <span v-else-if="list[0].state === 'stopped' || list[0].state === 'interrupted'" class="tc-time">{{ list[0].state === 'stopped' ? '已停止' : '已中断' }}</span>
-        <span v-if="durationOf(list[0])" class="tc-dur" :class="{ 'is-live': list[0].state === 'running' }">{{ formatDuration(durationOf(list[0])) }}</span>
+        <span v-if="durationOf(list[0]) || list[0].state === 'running'" class="tc-dur" :class="{ 'is-live': list[0].state === 'running' }">{{ formatDuration(durationOf(list[0]), list[0].state === 'running') }}</span>
         <span class="tc-chevron"><Icon name="chevron-right" :size="12" /></span>
       </button>
       <ToolImagePreview v-if="imageUrlFor(list[0])" :url="imageUrlFor(list[0]) || ''" :name="imageName(list[0])" />
@@ -405,10 +433,20 @@ const allSites = computed(() => {
         @click="toggleGroup"
       >
         <div class="tg-head-left">
-          <span v-if="runningCount > 0" class="tc-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span
+            v-if="runningCount > 0 && activeRunningTool"
+            class="tc-mini-icon is-live"
+            :class="runClass(activeRunningTool)"
+            aria-hidden="true"
+          >
+            <Icon :name="toolIcon(activeRunningTool)" :size="13" />
+          </span>
+          <!-- Visited sites sit on the left of the summary text, one icon per host. -->
+          <SiteIconStack v-if="allSites.length" :urls="allSites" :max="4" size="sm" />
+          <span v-else-if="runningCount === 0 && list[0]" class="tc-mini-icon" aria-hidden="true">
+            <Icon :name="toolIcon(list[0])" :size="13" />
+          </span>
           <span class="tg-summary-head">{{ claudeSummary.headText }}</span>
-          <!-- Visited sites follow the summary text, one icon per host. -->
-          <SiteIconStack v-if="allSites.length" :urls="allSites" :max="4" size="md" />
         </div>
         <div class="tg-head-right">
           <span v-if="claudeSummary.moreText" class="tg-summary-more">{{ claudeSummary.moreText }}</span>
@@ -463,13 +501,16 @@ const allSites = computed(() => {
               <Icon :name="toolIcon(b)" :size="13" />
             </span>
             <SiteIconStack v-else-if="isWebTool(b) && rowSiteUrls(b).length" :urls="rowSiteUrls(b)" :max="3" />
+            <span v-else class="tc-mini-icon" aria-hidden="true">
+              <Icon :name="toolIcon(b)" :size="13" />
+            </span>
             <span class="tg-row-summary" :title="summarize(b)">
               <span class="tg-row-verb">{{ actionParts(b).verb }}</span>
               <span class="tg-row-target">{{ actionParts(b).target }}</span>
             </span>
             <span v-if="b.state === 'error'" class="tc-failed">失败</span>
             <span v-else-if="b.state === 'stopped' || b.state === 'interrupted'" class="tc-time">{{ b.state === 'stopped' ? '已停止' : '已中断' }}</span>
-            <span v-else-if="durationOf(b)" class="tc-dur" :class="{ 'is-live': b.state === 'running' }">{{ formatDuration(durationOf(b)) }}</span>
+            <span v-else-if="durationOf(b) || b.state === 'running'" class="tc-dur" :class="{ 'is-live': b.state === 'running' }">{{ formatDuration(durationOf(b), b.state === 'running') }}</span>
             <span class="tc-chevron"><Icon name="chevron-right" :size="12" /></span>
           </button>
           <ToolImagePreview v-if="imageUrlFor(b)" :url="imageUrlFor(b) || ''" :name="imageName(b)" />
@@ -557,22 +598,38 @@ const allSites = computed(() => {
   50% { opacity: 0.92; transform: scale(1.12); }
 }
 
-/* Running tool: the category glyph itself animates, so the row reads as
-   "writing" / "searching" / "fetching" instead of a generic pulse. */
-.tc-mini-icon.is-live { color: var(--text-2); }
+/* Running tool: the category glyph itself animates with a soft accent halo, so
+   the row reads as "writing" / "searching" / "fetching" / "computing" at a glance. */
+.tc-mini-icon.is-live {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+  animation: tc-live-halo 1.8s ease-in-out infinite;
+}
 .tc-mini-icon.is-live .icon { transform-origin: 50% 50%; }
-.tc-mini-icon.run-bash.is-live .icon { animation: tc-run-bash 1.05s ease-in-out infinite; }
-.tc-mini-icon.run-edit.is-live .icon { animation: tc-run-edit 1.25s ease-in-out infinite; }
-.tc-mini-icon.run-read.is-live .icon { animation: tc-run-read 1.5s ease-in-out infinite; }
-.tc-mini-icon.run-search.is-live .icon { animation: tc-run-search 1.35s ease-in-out infinite; }
-.tc-mini-icon.run-web.is-live .icon { animation: tc-run-web 3.2s linear infinite; }
+.tc-mini-icon.run-bash.is-live .icon { animation: tc-run-bash 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+.tc-mini-icon.run-compute.is-live .icon { animation: tc-run-compute 1.3s ease-in-out infinite; }
+.tc-mini-icon.run-edit.is-live .icon { animation: tc-run-edit 1.2s ease-in-out infinite; }
+.tc-mini-icon.run-read.is-live .icon { animation: tc-run-read 1.4s ease-in-out infinite; }
+.tc-mini-icon.run-search.is-live .icon { animation: tc-run-search 1.3s ease-in-out infinite; }
+.tc-mini-icon.run-web.is-live .icon { animation: tc-run-web 2.6s linear infinite; }
 .tc-mini-icon.run-default.is-live .icon { animation: tc-run-read 1.4s ease-in-out infinite; }
-@keyframes tc-run-bash { 0%, 100% { transform: translateY(0); opacity: 0.72; } 50% { transform: translateY(-1.5px); opacity: 1; } }
-@keyframes tc-run-edit { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg); } }
-@keyframes tc-run-read { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
-@keyframes tc-run-search { 0%, 100% { transform: translate(0, 0) scale(0.94); opacity: 0.6; } 50% { transform: translate(1px, -1px) scale(1.06); opacity: 1; } }
+@keyframes tc-live-halo {
+  0%, 100% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent), 0 0 0 0 color-mix(in srgb, var(--accent) 14%, transparent); }
+  50% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent), 0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent); }
+}
+@keyframes tc-run-bash { 0%, 100% { transform: translateX(-0.8px); opacity: 0.8; } 50% { transform: translateX(1px); opacity: 1; } }
+@keyframes tc-run-compute { 0%, 100% { transform: scale(0.9); opacity: 0.75; } 50% { transform: scale(1.1); opacity: 1; } }
+@keyframes tc-run-edit { 0%, 100% { transform: rotate(-9deg) translateY(0.5px); } 50% { transform: rotate(9deg) translateY(-0.5px); } }
+@keyframes tc-run-read { 0%, 100% { transform: translateY(0.8px); opacity: 0.65; } 50% { transform: translateY(-0.8px); opacity: 1; } }
+@keyframes tc-run-search { 0%, 100% { transform: translate(-0.8px, 0.6px) scale(0.93); opacity: 0.72; } 50% { transform: translate(1px, -0.8px) scale(1.07); opacity: 1; } }
 @keyframes tc-run-web { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
+  .tc-mini-icon.is-live,
   .tc-mini-icon.is-live .icon { animation: none; }
 }
 
@@ -600,10 +657,8 @@ const allSites = computed(() => {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-/* Still running: the counter keeps moving and breathes so a long call never
-   looks stuck. */
-.tc-dur.is-live { color: var(--muted); animation: tc-live 1.6s ease-in-out infinite; }
-@keyframes tc-live { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+/* Still running: the counter ticks smoothly at 0.1s resolution. */
+.tc-dur.is-live { color: var(--muted); }
 .tc-chevron {
   flex: none;
   display: inline-flex;

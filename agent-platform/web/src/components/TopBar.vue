@@ -64,10 +64,10 @@ function toggleWorkspace() {
 </script>
 
 <template>
-  <header class="topbar" :class="{ 'is-glass': ui.sidebarOpen }">
+  <header class="topbar">
     <button v-if="!ui.sidebarOpen" class="icon-button" aria-label="显示导航" title="显示导航" @click="ui.setSidebarOpen(true)"><Icon name="panel-left" /></button>
     <button class="icon-button only-mobile" aria-label="显示导航" @click="ui.mobileDrawer = 'sidebar'"><Icon name="menu" /></button>
-    <div class="chat-heading">
+    <div class="chat-heading" :class="{ 'is-dimmed': ui.sidebarOpen && !isEditing }">
       <div class="chat-heading-row">
         <form novalidate v-if="isEditing" class="chat-title-form" @submit.prevent="commitRename">
           <input
@@ -124,18 +124,15 @@ function toggleWorkspace() {
   z-index: 10;
   pointer-events: none;
 }
-/* With the sidebar open the bar floats over scrolled conversation content, so
-   it needs its own translucent backdrop; with the sidebar closed the page
-   background already shows through and the blur would just be noise. */
-.topbar.is-glass {
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
 .topbar > * {
   pointer-events: auto;
 }
-.chat-heading { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 2px; }
+.chat-heading { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 2px; transition: opacity var(--fast); }
+/* With the sidebar open the title text sits next to the sidebar border and over
+   scrolled content; dim the title text itself while keeping the topbar chrome transparent. */
+.chat-heading.is-dimmed { opacity: 0.42; }
+.chat-heading.is-dimmed:hover,
+.chat-heading.is-dimmed:focus-within { opacity: 1; }
 .chat-heading-row { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
 
 .chat-title-form { display: flex; align-items: center; margin-left: -5px; }

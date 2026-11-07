@@ -42,20 +42,25 @@ export function bindWidgetFrame(frame) {
 }
 export function widget(doc, html, label) {
   const wrap=doc.createElement('section');wrap.className='md-widget';wrap.dataset.widgetSource=html;
-  const heading=doc.createElement('div');heading.className='md-widget-head';
-  const title=doc.createElement('strong');title.textContent=widgetTitle(html, label);heading.append(title);
+  const titleText=widgetTitle(html, label);
   const refresh=doc.createElement('button');refresh.type='button';refresh.className='md-widget-refresh';refresh.dataset.widgetAction='refresh';
   refresh.title='刷新组件';refresh.setAttribute('aria-label','刷新组件');
-  refresh.innerHTML='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3v5h-5M3 21v-5h5M3 12a9 9 0 0 1 15.7-6L21 8M21 12a9 9 0 0 1-15.7 6L3 16"/></svg>';
-  heading.append(refresh);
-  const frame=doc.createElement('iframe');frame.title=title.textContent;
+  refresh.innerHTML='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3v5h-5M3 21v-5h5M3 12a9 9 0 0 1 15.7-6L21 8M21 12a9 9 0 0 1-15.7 6L3 16"/></svg>';
+  const frame=doc.createElement('iframe');frame.title=titleText;
   // A short placeholder. A tall floor becomes the document viewport, and a
   // scrollHeight report of that viewport then locks in a tall empty card.
   frame.style.height='120px';
   bindWidgetFrame(frame);
-  wrap.append(heading,frame);
+  wrap.append(refresh,frame);
   queueMicrotask(()=>{if(frame.isConnected)void runWidget(frame,html);});
   return wrap;
+}
+export function broadcastWidgetTheme(theme) {
+  if (typeof document === 'undefined') return;
+  const t = theme === 'dark' ? 'dark' : 'light';
+  document.querySelectorAll('iframe[data-widget-frame]').forEach((frame) => {
+    try { frame.contentWindow?.postMessage({ type: 'iris-theme', theme: t }, '*'); } catch {}
+  });
 }
 export async function runWidget(frame,html) {
   try {

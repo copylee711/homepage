@@ -3,7 +3,20 @@ import { readToolImage } from './tool-images.mjs';
 
 // A plain reactive-friendly object describing the streaming assistant turn.
 export function reactiveLive() {
-  return { blocks: [], approvals: [], questions: [], status: '正在连接模型…', spinner: true, finished: false, error: '', stopped: false, stopReason: '', tools: {} };
+  return {
+    blocks: [],
+    approvals: [],
+    questions: [],
+    status: '正在连接模型…',
+    spinner: true,
+    finished: false,
+    error: '',
+    stopped: false,
+    stopReason: '',
+    tools: {},
+    retry: null,
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0, calls: 0, genMs: 0, streamedChars: 0 },
+  };
 }
 
 // Reduce a runner stream event into the live view model's block list.
@@ -31,13 +44,20 @@ export function handleEvent(event, live) {
     return;
   }
   if (event.type === 'message_start' && event.message?.role === 'user') return;
-  if (event.type === 'message_start' && event.message?.role === 'assistant') { vm.messageSequence = (vm.messageSequence || 0) + 1; return; }
+  if (event.type === 'message_start' && event.message?.role === 'assistant') {
+    vm.retry = null;
+    vm._callStartedAt = Date.now();
+    vm._firstTokenAt = 0;
+    vm.messageSequence = (vm.messageSequence || 0) + 1;
+    return;
+  }
   const ensureBlock = (index, type) => {
     let b = vm.blocks.find((x) => x.index === index && x.sequence === (vm.messageSequence || 0));
     if (!b) { b = { index, sequence: vm.messageSequence || 0, type, text: '', fresh: true }; vm.blocks.push(b); }
     return b;
   };
   if (event.type === 'message_end' && event.message?.role === 'assistant') {
+    vm.retry = null;
     for (const [index, part] of (event.message.content || []).entries()) {
       if (part.type === 'text' || part.type === 'thinking') {
         const b = ensureBlock(index, part.type); b.type = part.type; b.text = part.type === 'text' ? part.text || '' : part.thinking || '';
@@ -51,6 +71,27 @@ export function handleEvent(event, live) {
         if (!b.state) b.state = 'pending';
       }
     }
+    if (event.message.usage && vm.usage) {
+      const u = event.message.usage;
+      const inp = Number(u.input) || 0;
+      const out = Number(u.output) || 0;
+      const cr = Number(u.cacheRead) || 0;
+      const cw = Number(u.cacheWrite) || 0;
+      vm.usage.input += inp;
+      vm.usage.output += out;
+      vm.usage.cacheRead += cr;
+      vm.usage.cacheWrite += cw;
+      vm.usage.totalTokens += Number(u.totalTokens) || (inp + out + cr + cw);
+      vm.usage.cost += Number(u.cost?.total) || 0;
+      vm.usage.calls += 1;
+      vm.usage.lastContextTokens = inp + cr + cw + out;
+    }
+    if (vm._callStartedAt && vm.usage) {
+      const start = vm._firstTokenAt || vm._callStartedAt;
+      vm.usage.genMs += Math.max(50, Date.now() - start);
+      vm._callStartedAt = 0;
+      vm._firstTokenAt = 0;
+    }
     // Pi sends stopReason on the assistant message. "length" means this reply
     // stopped because the output token budget was used up.
     if (event.message.stopReason === 'length') vm.stopReason = 'length';
@@ -58,6 +99,13 @@ export function handleEvent(event, live) {
   }
   if (event.type === 'message_update') {
     const u = event.assistantMessageEvent; if (!u) return;
+    if (vm.retry) vm.retry = null;
+    if (!vm._firstTokenAt && (u.type === 'text_delta' || u.type === 'thinking_delta' || u.type === 'toolcall_delta')) {
+      vm._firstTokenAt = Date.now();
+    }
+    if (vm.usage && (u.type === 'text_delta' || u.type === 'thinking_delta' || u.type === 'toolcall_delta')) {
+      vm.usage.streamedChars += String(u.delta || '').length;
+    }
     switch (u.type) {
       case 'text_start': ensureBlock(u.contentIndex, 'text'); break;
       case 'text_delta': { const b = ensureBlock(u.contentIndex, 'text'); b.text += u.delta || ''; break; }
@@ -120,11 +168,23 @@ export function handleEvent(event, live) {
     if (b?.name !== 'set_chat_title') vm.status = '正在整理结果…'; return;
   }
   if (event.type === 'gateway_error') throw new Error(event.error || '任务中断，请重试');
-  if (event.type === 'auto_retry_start') { vm.status = `模型调用失败，${Math.round((event.delayMs || 0) / 1000)} 秒后自动重试（${event.attempt}/${event.maxAttempts}）…`; vm.spinner = true; return; }
-  if (event.type === 'auto_retry_end') { vm.status = event.success ? '重试成功，继续执行…' : '多次重试仍失败：' + (event.finalError || '模型服务不可用'); return; }
+  if (event.type === 'auto_retry_start') {
+    const delayMs = Math.max(0, Number(event.delayMs) || 0);
+    const attempt = event.attempt || 1;
+    const maxAttempts = event.maxAttempts || 1;
+    vm.retry = { until: Date.now() + delayMs, delayMs, attempt, maxAttempts };
+    vm.status = `模型调用失败，${Math.max(1, Math.round(delayMs / 1000))} 秒后自动重试（${attempt}/${maxAttempts}）…`;
+    vm.spinner = true;
+    return;
+  }
+  if (event.type === 'auto_retry_end') {
+    vm.retry = null;
+    vm.status = event.success ? '重试成功，继续执行…' : '多次重试仍失败：' + (event.finalError || '模型服务不可用');
+    return;
+  }
   if (event.type === 'goal_progress') { vm.goal = { continues: event.continues, max: event.max }; vm.status = `长目标自动续跑 ${event.continues}/${event.max}…`; vm.spinner = true; return; }
   if (event.type === 'compaction_start') { vm.status = '上下文接近上限，正在自动压缩…'; vm.spinner = true; return; }
-  if (event.type === 'agent_settled') { if (event.aborted) vm.stopped = true; settleTools(vm, vm.stopped ? 'stopped' : 'interrupted'); vm.status = ''; vm.spinner = false; }
+  if (event.type === 'agent_settled') { vm.retry = null; if (event.aborted) vm.stopped = true; settleTools(vm, vm.stopped ? 'stopped' : 'interrupted'); vm.status = ''; vm.spinner = false; }
 }
 
 export function settleTools(vm, state) {

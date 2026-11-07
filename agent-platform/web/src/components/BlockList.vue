@@ -6,7 +6,17 @@ import { segmentBlocks, groupExecution } from '../services/transcript.mjs';
 import PlanCard from './PlanCard.vue';
 import ToolCard from './ToolCard.vue';
 import SourceList from './SourceList.vue';
+import SiteIconStack from './SiteIconStack.vue';
+import { rowSiteUrls } from '../services/site-icon.mjs';
 import { collectSources, splitSourceBlocks } from '../services/markdown.js';
+
+function execSiteUrls(items: any[]): string[] {
+  const out: string[] = [];
+  for (const item of items || []) {
+    if (item?.type === 'tool') out.push(...rowSiteUrls(item));
+  }
+  return out;
+}
 
 // Accepts normalized blocks: { type:'text'|'thinking'|'tool', text?, ...tool fields }
 const props = defineProps<{ blocks: any[]; streaming?: boolean; nested?:boolean; references?:any[] }>();
@@ -29,7 +39,10 @@ const citations=computed(()=>{
   <div class="blocks">
     <template v-for="(seg, i) in segments" :key="seg.type === 'tools' ? seg.items[0]?.id || i : i">
       <details v-if="seg.type === 'execution'" :open="!seg.collapsed" class="work-prelude" :class="{ 'has-body': seg.collapsed }">
-        <summary>查看执行过程 · {{ seg.items.length }} 项</summary>
+        <summary class="work-prelude-summary">
+          <SiteIconStack v-if="execSiteUrls(seg.items).length" :urls="execSiteUrls(seg.items)" :size="14" :max="5" />
+          <span>查看执行过程 · {{ seg.items.length }} 项</span>
+        </summary>
         <BlockList :blocks="seg.items" :streaming="streaming" nested :references="citations" />
       </details>
       <MarkdownView v-else-if="seg.type === 'text'" :source="seg.text" :citations="citations" :streaming="streaming && i === segments.length - 1" />
@@ -43,6 +56,6 @@ const citations=computed(()=>{
 
 <style>
 .blocks { min-width: 0; }
-.work-prelude{margin:2px 0 16px;color:var(--muted)}.work-prelude>summary{cursor:pointer;padding:6px 0;font-size:12px;user-select:none}.work-prelude[open]>.blocks{margin:10px 0 20px;padding-left:12px;border-left:1px solid var(--line)}
+.work-prelude{margin:2px 0 16px;color:var(--muted)}.work-prelude>summary{cursor:pointer;padding:6px 0;font-size:12px;user-select:none}.work-prelude>summary.work-prelude-summary{display:inline-flex;align-items:center;gap:6px}.work-prelude>summary.work-prelude-summary::before{content:'▸';font-size:11px;line-height:1;color:var(--faint);transition:transform var(--fast)}.work-prelude[open]>summary.work-prelude-summary::before{transform:rotate(90deg)}.work-prelude>summary::-webkit-details-marker{display:none}.work-prelude[open]>.blocks{margin:10px 0 20px;padding-left:12px;border-left:1px solid var(--line)}
 .work-prelude:not(.has-body)>summary{display:none}.work-prelude:not(.has-body)[open]>.blocks{margin:0;padding:0;border:0}
 </style>

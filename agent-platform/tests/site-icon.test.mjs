@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  faviconCandidates, noteFaviconError, noteFaviconLoad, resetFaviconCache, rowSiteUrl, rowSiteUrls, siteHost, watchFavicon,
+  faviconCandidates, noteFaviconError, noteFaviconLoad, resetFaviconCache, rowSiteUrl, rowSiteUrls, siteHost, siteKey, watchFavicon,
 } from '../web/src/services/site-icon.mjs';
 
 test('page URLs become a host, never the path or a full URL', () => {
@@ -101,4 +101,22 @@ test('a search row yields one URL per distinct result host, in rank order', () =
   assert.deepEqual(rowSiteUrls({ name: 'web_fetch', args: { url: 'https://example.com/a' }, result: { results: [{ url: 'https://cdn.example.net/b' }] } }),
     ['https://example.com/a', 'https://cdn.example.net/b']);
   assert.deepEqual(rowSiteUrls({ name: 'image_search', args: { query: 'x' } }), []);
+  // www. and bare host deduplicate to a single siteKey so icon stacks never show duplicates.
+  assert.equal(siteKey('https://www.news.cn/politics/2026'), 'news.cn');
+  assert.equal(siteKey('https://news.cn/world/2026'), 'news.cn');
+  assert.deepEqual(rowSiteUrls({
+    name: 'web_search',
+    args: { query: 'news' },
+    result: {
+      results: [
+        { url: 'https://www.news.cn/politics/1.htm' },
+        { url: 'https://news.cn/world/2.htm' },
+        { url: 'https://m.thepaper.cn/newsDetail_1' },
+        { url: 'https://www.thepaper.cn/newsDetail_2' },
+      ],
+    },
+  }), [
+    'https://www.news.cn/politics/1.htm',
+    'https://m.thepaper.cn/newsDetail_1',
+  ]);
 });

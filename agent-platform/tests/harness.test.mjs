@@ -11,7 +11,9 @@ process.env.OPENCODE_API_KEY = 'test-only-provider-key';
 const { presets, saveProvider, modelLimits, syncAgentSettings } = await import('../providers.mjs');
 const { requiresApproval, blockedInPlan } = await import('../execution-policy.mjs');
 const { ChatStore, sanitizePermission } = await import('../conversations.mjs');
-const { usageSummary } = await import('../usage.mjs');
+const { usageSummary, sessionUsageStats } = await import('../usage.mjs');
+const { widgetDocument } = await import('../widget-document.mjs');
+const { reactiveLive, handleEvent } = await import('../web/src/services/live.mjs');
 
 test('plan mode is read-only: reads pass, writes and shell are blocked before any approval', () => {
   for (const tool of ['read', 'search_files', 'web_fetch', 'update_plan', 'ask_user']) assert.equal(blockedInPlan('plan', tool), false);
@@ -74,4 +76,55 @@ test('usage totals come from session files and price unpriced calls from configu
   assert.equal(summary.total.input, 1e6 + 10);
   assert.ok(Math.abs(summary.total.cost - (0.27 + 1.1 + 2)) < 1e-9);
   assert.equal(summary.byChat[0].title, '测试对话');
+
+  // Verify per-session usage stats (tokens, cost, context window, and tokens/s speed)
+  const sThread = randomUUID();
+  const t0 = Date.now() - 10000;
+  await writeFile(join(root, user, sThread + '.jsonl'), [
+    JSON.stringify({ type: 'session', id: sThread }),
+    JSON.stringify({ type: 'message', timestamp: new Date(t0).toISOString(), message: { role: 'user', content: '你好' } }),
+    JSON.stringify({
+      type: 'message',
+      timestamp: new Date(t0 + 4000).toISOString(),
+      message: {
+        role: 'assistant',
+        provider: 'deepseek',
+        model: 'deepseek-chat',
+        content: [{ type: 'text', text: '世界' }],
+        usage: { input: 2000, cacheRead: 1000, output: 200, totalTokens: 3200, cost: { total: 0.012 } },
+      },
+    }),
+  ].join('\n'));
+  const stats = await sessionUsageStats(user, sThread, root);
+  assert.equal(stats.tokens.total, 3200);
+  assert.equal(stats.tokens.input, 2000);
+  assert.equal(stats.tokens.cacheRead, 1000);
+  assert.equal(stats.tokens.output, 200);
+  assert.equal(stats.userMessages, 1);
+  assert.equal(stats.assistantCalls, 1);
+  assert.equal(stats.contextUsage.tokens, 3200);
+  assert.ok(stats.contextUsage.autoCompactThreshold > 0);
+  assert.equal(stats.speed.avgTokensPerSec, 50);
+  assert.equal(stats.cacheHitRate, 33.3);
 });
+
+test('widget document supports frameless transparent background, dark mode variables, and live theme sync', () => {
+  const doc = widgetDocument('<div style="background:#ffffff;color:#111111">Widget</div>');
+  assert.match(doc, /html\[data-theme=dark\]/);
+  assert.match(doc, /background:transparent/);
+  assert.match(doc, /e\.data\.type==="iris-theme"/);
+});
+
+test('live state tracks dynamic retry countdown target and streaming usage metrics', () => {
+  const vm = reactiveLive();
+  handleEvent({ type: 'auto_retry_start', attempt: 2, maxAttempts: 5, delayMs: 4000 }, vm);
+  assert.ok(vm.retry && vm.retry.attempt === 2 && vm.retry.maxAttempts === 5);
+  assert.ok(vm.retry.until > Date.now());
+  handleEvent({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Hello world from streaming model' } }, vm);
+  assert.ok(vm.usage.streamedChars > 0);
+  assert.equal(vm.retry, null);
+  handleEvent({ type: 'message_end', message: { role: 'assistant', usage: { input: 500, output: 120, cacheRead: 300, totalTokens: 920, cost: { total: 0.005 } } } }, vm);
+  assert.equal(vm.usage.totalTokens, 920);
+  assert.equal(vm.usage.lastContextTokens, 920);
+});
+

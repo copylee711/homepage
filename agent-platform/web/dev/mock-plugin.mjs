@@ -350,7 +350,37 @@ export function devMock() {
         if(path==='/api/features')return send(publicFeatures(featureConfig));
         if(path==='/api/features/save'){const next=body.config;featureConfig={...next,revision:featureConfig.revision+1,mcpServers:next.mcpServers.map(s=>({...s,token:s.token||featureConfig.mcpServers.find(o=>o.id===s.id)?.token||''}))};return send(publicFeatures(featureConfig));}
         if(path==='/api/features/mcp/test'){const server=featureConfig.mcpServers.find(s=>s.id===body.id);if(server)server.tools=[{name:'echo',inputSchema:{type:'object'}}];featureConfig.revision++;return send(publicFeatures(featureConfig));}
-        if(path==='/api/context/stats')return send({tokens:{total:1024},totalMessages:8,toolCalls:2,contextUsage:{tokens:1024,contextWindow:128000,percent:.8}});
+        if(path==='/api/context/stats'){
+          const cid = q.get('chat') || '';
+          const list = sessions[cid]?.messages || [];
+          const cw = 128000;
+          const autoCompactAt = Math.round(cw * 0.85);
+          const tokUsed = list.length ? 18420 + list.length * 1240 : 0;
+          const pct = Number(((tokUsed / cw) * 100).toFixed(1));
+          const inTok = Math.round(tokUsed * 0.55);
+          const crTok = Math.round(tokUsed * 0.32);
+          const outTok = Math.round(tokUsed * 0.13);
+          const promptTot = inTok + crTok;
+          return send({
+            tokens: { input: inTok, cacheRead: crTok, cacheWrite: 0, output: outTok, total: Math.round(tokUsed * 1.4) },
+            cost: list.length ? Number((tokUsed * 0.0000018).toFixed(4)) : 0,
+            cacheHitRate: promptTot > 0 ? Number(((crTok / promptTot) * 100).toFixed(1)) : 0,
+            totalMessages: list.length || 0,
+            userMessages: list.filter(m => m.role === 'user').length,
+            assistantCalls: list.filter(m => m.role === 'assistant').length,
+            toolCalls: list.length ? 3 : 0,
+            compactions: 0,
+            speed: { avgTokensPerSec: list.length ? 54.6 : 0, lastTokensPerSec: list.length ? 58.2 : 0, peakTokensPerSec: list.length ? 64.0 : 0, totalOutputTokens: Math.round(tokUsed * 0.13), totalGenMs: 4200 },
+            contextUsage: {
+              tokens: tokUsed,
+              contextWindow: cw,
+              percent: pct,
+              autoCompactThreshold: autoCompactAt,
+              remainingUntilCompact: Math.max(0, autoCompactAt - tokUsed),
+              breakdown: { input: Math.round(tokUsed * 0.55), cacheRead: Math.round(tokUsed * 0.32), cacheWrite: 0, output: Math.round(tokUsed * 0.13) },
+            },
+          });
+        }
         if(path==='/api/context/compact')return send({ok:true,skipped:true,reason:'当前上下文较短，暂不需要压缩'});
         if(path==='/api/widgets'){globalThis.__irisQaWidgets ||= new Map();const id=String(globalThis.__irisQaWidgets.size);globalThis.__irisQaWidgets.set(id,body.html);return send({url:'/api/widget-document?id='+id});}
         if(path==='/api/widget-document'){res.setHeader('Content-Type','text/html; charset=utf-8');res.setHeader('Content-Security-Policy',WIDGET_CSP);res.end(widgetDocument(globalThis.__irisQaWidgets?.get(q.get('id'))||''));return;}

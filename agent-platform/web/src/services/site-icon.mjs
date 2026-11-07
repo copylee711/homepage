@@ -18,6 +18,11 @@ export function siteHost(raw) {
   }
 }
 
+export function siteKey(raw) {
+  const host = siteHost(raw);
+  return host ? host.replace(/^(www|m)\./, '') : '';
+}
+
 export function faviconCandidates(host) {
   if (!host) return [];
   const domain = encodeURIComponent(host);
@@ -50,8 +55,8 @@ export function rowSiteUrls(block) {
   const out = [];
   const add = value => {
     const page = httpUrl(value);
-    const host = page ? siteHost(page) : '';
-    if (!host || out.some(item => siteHost(item) === host)) return;
+    const key = page ? siteKey(page) : '';
+    if (!key || out.some(item => siteKey(item) === key)) return;
     out.push(page);
   };
   if (name !== 'web_search') add(args.url);
