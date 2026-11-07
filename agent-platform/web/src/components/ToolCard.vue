@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
 import Icon from './Icon.vue';
-import SiteIcon from './SiteIcon.vue';
+import SiteIconStack from './SiteIconStack.vue';
 import WebToolPages from './WebToolPages.vue';
 import ToolImagePreview from './ToolImagePreview.vue';
 import { formatDuration } from '../services/format';
-import { rowSiteUrl, siteHost } from '../services/site-icon.mjs';
+import { rowSiteUrls, siteHost } from '../services/site-icon.mjs';
 import { useWorkspace } from '../stores/workspace';
 import { useSession } from '../stores/session';
 import { useUi } from '../stores/ui';
@@ -227,13 +227,53 @@ function argRows(b: any): Array<{ k: string; v: string }> {
   return keys.map(k => ({ k, v: typeof a[k] === 'string' ? a[k] : JSON.stringify(a[k]) }));
 }
 
+// File-type glyphs: a read/write row shows what kind of file it touched.
+const FILE_ICONS: Array<[RegExp, string]> = [
+  [/\.(ts|tsx|js|jsx|mjs|cjs|vue|svelte|py|go|rs|java|kt|c|h|cpp|hpp|cs|rb|php|swift|sh|bash|zsh|fish|ps1|lua|sql|json|jsonc|ya?ml|toml|ini|cfg|conf|env|xml|html?|css|scss|sass|less|astro)$/i, 'file-code'],
+  [/\.(csv|tsv|xlsx?|ods|xlsm)$/i, 'file-sheet'],
+  [/\.(pptx?|odp|key)$/i, 'file-slide'],
+  [/\.pdf$/i, 'file-pdf'],
+  [/\.(png|jpe?g|gif|webp|svg|bmp|ico|tiff?|avif|heic)$/i, 'file-image'],
+  [/\.(zip|tar|t?gz|bz2|xz|7z|rar|zst)$/i, 'file-archive'],
+  [/\.(db|sqlite3?|parquet|duckdb)$/i, 'database'],
+  [/\.(md|markdown|mdx|txt|log|rst|adoc|tex)$/i, 'file-text'],
+  [/\.(docx?|odt|rtf|pages)$/i, 'file-text'],
+];
+function fileIcon(path: string): string {
+  if (!path) return 'file';
+  for (const [pattern, icon] of FILE_ICONS) if (pattern.test(path)) return icon;
+  return 'file';
+}
+
 function toolIcon(b: any): string {
   const k = String(b?.name || '').toLowerCase();
+  const a = parseArgs(b?.args);
+  const path = String(a.path || a.file_path || a.filePath || a.file || a.destination || a.target || '');
+  if (['read', 'write', 'edit', 'multi_edit', 'read_file', 'write_file', 'apply_patch'].includes(k)) return fileIcon(path);
   if (k === 'bash' || k === 'shell') return 'terminal';
-  if (k === 'read' || k === 'ls' || k === 'list_dir' || k === 'glob' || k === 'find') return 'file';
-  if (k === 'grep' || k === 'search' || k === 'web_search') return 'search';
+  if (['ls', 'list_dir', 'list_directory'].includes(k)) return 'folder';
+  if (['glob', 'find', 'search_files', 'grep', 'search'].includes(k)) return 'search';
+  if (k === 'web_search' || k === 'image_search') return 'search';
   if (k === 'web_fetch' || k === 'fetch') return 'globe';
-  return 'edit';
+  if (k.startsWith('memory_')) return 'sparkle';
+  if (k === 'update_plan') return 'list';
+  if (k === 'ask_user') return 'message';
+  if (k.startsWith('background_')) return 'activity';
+  if (k === 'set_chat_title') return 'edit';
+  if (k.includes('git')) return 'git';
+  return 'file';
+}
+
+// Per-command animation while a tool runs, so the row says what it is doing
+// (writing, searching, fetching) rather than a generic pulsing dot cluster.
+function runClass(b: any): string {
+  const k = String(b?.name || '').toLowerCase();
+  if (k === 'bash' || k === 'shell') return 'run-bash';
+  if (['write', 'edit', 'multi_edit', 'apply_patch'].includes(k)) return 'run-edit';
+  if (['read', 'read_file'].includes(k)) return 'run-read';
+  if (['web_fetch', 'fetch'].includes(k)) return 'run-web';
+  if (['web_search', 'image_search', 'grep', 'search', 'glob', 'find', 'search_files'].includes(k)) return 'run-search';
+  return 'run-default';
 }
 
 function isFilePathArg(k: string, v: string) {
@@ -287,30 +327,21 @@ const visibleImages = computed(() => groupImages.value.slice(-3));
 const extraImages = computed(() => Math.max(0, groupImages.value.length - visibleImages.value.length));
 
 // Sites visited by this group, deduplicated by host and stacked on the summary.
-const visibleSites = computed(() => {
+// A search that ranked eight sites contributes up to eight icons, not one.
+const allSites = computed(() => {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const block of list.value) {
     if (!isWebTool(block)) continue;
-    const url = rowSiteUrl(block);
-    const host = url ? siteHost(url) : '';
-    if (!host || seen.has(host)) continue;
-    seen.add(host);
-    out.push(url);
+    for (const url of rowSiteUrls(block)) {
+      const host = siteHost(url);
+      if (!host || seen.has(host)) continue;
+      seen.add(host);
+      out.push(url);
+    }
   }
-  return out.slice(0, 4);
+  return out;
 });
-const siteTotal = computed(() => {
-  const hosts = new Set<string>();
-  for (const block of list.value) {
-    if (!isWebTool(block)) continue;
-    const url = rowSiteUrl(block);
-    const host = url ? siteHost(url) : '';
-    if (host) hosts.add(host);
-  }
-  return hosts.size;
-});
-const extraSites = computed(() => Math.max(0, siteTotal.value - visibleSites.value.length));
 </script>
 
 <template>
@@ -323,10 +354,18 @@ const extraSites = computed(() => Math.max(0, siteTotal.value - visibleSites.val
         :aria-expanded="isRowOpen(list[0], 0)"
         @click="toggleRow(list[0], 0)"
       >
-        <span v-if="list[0].state === 'running' || list[0].state === 'pending'" class="tc-dots" aria-hidden="true">
+        <span v-if="list[0].state === 'pending'" class="tc-dots" aria-hidden="true">
           <i></i><i></i><i></i>
         </span>
-        <SiteIcon v-else-if="isWebTool(list[0])" :url="rowSiteUrl(list[0])" />
+        <span
+          v-else-if="list[0].state === 'running'"
+          class="tc-mini-icon is-live"
+          :class="runClass(list[0])"
+          aria-hidden="true"
+        >
+          <Icon :name="toolIcon(list[0])" :size="13" />
+        </span>
+        <SiteIconStack v-else-if="isWebTool(list[0]) && rowSiteUrls(list[0]).length" :urls="rowSiteUrls(list[0])" :max="3" />
         <span v-else class="tc-mini-icon" aria-hidden="true">
           <Icon :name="toolIcon(list[0])" :size="13" />
         </span>
@@ -368,6 +407,8 @@ const extraSites = computed(() => Math.max(0, siteTotal.value - visibleSites.val
         <div class="tg-head-left">
           <span v-if="runningCount > 0" class="tc-dots" aria-hidden="true"><i></i><i></i><i></i></span>
           <span class="tg-summary-head">{{ claudeSummary.headText }}</span>
+          <!-- Visited sites follow the summary text, one icon per host. -->
+          <SiteIconStack v-if="allSites.length" :urls="allSites" :max="4" size="md" />
         </div>
         <div class="tg-head-right">
           <span v-if="claudeSummary.moreText" class="tg-summary-more">{{ claudeSummary.moreText }}</span>
@@ -381,11 +422,6 @@ const extraSites = computed(() => Math.max(0, siteTotal.value - visibleSites.val
           </span>
         </div>
       </button>
-      <!-- Visited sites, one icon per host, overlapping like the desktop client. -->
-      <div v-if="visibleSites.length" class="tg-sites">
-        <span v-if="extraSites" class="tg-sites-more">+{{ extraSites }}</span>
-        <SiteIcon v-for="(url, i) in visibleSites" :key="url + i" :url="url" />
-      </div>
       <!-- Read images stay visible on the summary line, newest last. -->
       <div v-if="visibleImages.length" class="tg-thumbs">
         <span v-if="extraImages" class="tg-thumbs-more">+{{ extraImages }}</span>
@@ -422,8 +458,11 @@ const extraSites = computed(() => Math.max(0, siteTotal.value - visibleSites.val
             :aria-expanded="isRowOpen(b, idx)"
             @click="toggleRow(b, idx)"
           >
-            <span v-if="b.state === 'running' || b.state === 'pending'" class="tc-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-            <SiteIcon v-else-if="isWebTool(b)" :url="rowSiteUrl(b)" />
+            <span v-if="b.state === 'pending'" class="tc-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span v-else-if="b.state === 'running'" class="tc-mini-icon is-live" :class="runClass(b)" aria-hidden="true">
+              <Icon :name="toolIcon(b)" :size="13" />
+            </span>
+            <SiteIconStack v-else-if="isWebTool(b) && rowSiteUrls(b).length" :urls="rowSiteUrls(b)" :max="3" />
             <span class="tg-row-summary" :title="summarize(b)">
               <span class="tg-row-verb">{{ actionParts(b).verb }}</span>
               <span class="tg-row-target">{{ actionParts(b).target }}</span>
@@ -518,6 +557,25 @@ const extraSites = computed(() => Math.max(0, siteTotal.value - visibleSites.val
   50% { opacity: 0.92; transform: scale(1.12); }
 }
 
+/* Running tool: the category glyph itself animates, so the row reads as
+   "writing" / "searching" / "fetching" instead of a generic pulse. */
+.tc-mini-icon.is-live { color: var(--text-2); }
+.tc-mini-icon.is-live .icon { transform-origin: 50% 50%; }
+.tc-mini-icon.run-bash.is-live .icon { animation: tc-run-bash 1.05s ease-in-out infinite; }
+.tc-mini-icon.run-edit.is-live .icon { animation: tc-run-edit 1.25s ease-in-out infinite; }
+.tc-mini-icon.run-read.is-live .icon { animation: tc-run-read 1.5s ease-in-out infinite; }
+.tc-mini-icon.run-search.is-live .icon { animation: tc-run-search 1.35s ease-in-out infinite; }
+.tc-mini-icon.run-web.is-live .icon { animation: tc-run-web 3.2s linear infinite; }
+.tc-mini-icon.run-default.is-live .icon { animation: tc-run-read 1.4s ease-in-out infinite; }
+@keyframes tc-run-bash { 0%, 100% { transform: translateY(0); opacity: 0.72; } 50% { transform: translateY(-1.5px); opacity: 1; } }
+@keyframes tc-run-edit { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg); } }
+@keyframes tc-run-read { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+@keyframes tc-run-search { 0%, 100% { transform: translate(0, 0) scale(0.94); opacity: 0.6; } 50% { transform: translate(1px, -1px) scale(1.06); opacity: 1; } }
+@keyframes tc-run-web { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .tc-mini-icon.is-live .icon { animation: none; }
+}
+
 .tc-summary {
   flex: 1 1 auto;
   min-width: 0;
@@ -594,10 +652,6 @@ const extraSites = computed(() => Math.max(0, siteTotal.value - visibleSites.val
   background: color-mix(in srgb, var(--text) 3.5%, transparent);
   color: var(--text);
 }
-.tg-sites { display: flex; align-items: center; flex: none; }
-.tg-sites .site-icon { width: 18px; height: 18px; border-radius: 50%; background: var(--surface); box-shadow: 0 0 0 2px var(--surface); }
-.tg-sites .site-icon + .site-icon { margin-left: -7px; }
-.tg-sites-more { margin-right: 3px; color: var(--muted); font-size: 12px; }
 .tg-thumbs { display: flex; align-items: center; gap: 4px; flex: none; }
 .tg-thumbs-more { color: var(--muted); font-size: 12px; }
 .tg-thumb {

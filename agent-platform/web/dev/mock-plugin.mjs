@@ -119,6 +119,15 @@ const sessions = {
           ] }),
           { type: 'text', text: '打不开的地址回到地球图标。' },
           webTool('web-miss', 'web_fetch', { url: 'https://this-domain-does-not-exist-9d22.example/' }, { url: 'https://this-domain-does-not-exist-9d22.example/', status: 0, text: '无法连接' }),
+          { type: 'text', text: '连续多次搜索时，站点图标跟在概要文字后面：' },
+          webTool('web-a', 'web_search', { query: 'multivariate normal' }, { query: 'multivariate normal', results: [
+            { url: 'https://en.wikipedia.org/wiki/Multivariate_normal_distribution' },
+            { url: 'https://www.zhihu.com/question/2' },
+            { url: 'https://mathworld.wolfram.com/MultinormalDistribution.html' },
+            { url: 'https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.multivariate_normal.html' },
+            { url: 'https://www.stat.umn.edu/geyer/old/5101/multinorm.pdf' },
+          ] }),
+          webTool('web-b', 'web_fetch', { url: 'https://stackoverflow.com/questions/1' }, { url: 'https://stackoverflow.com/questions/1', status: 200, text: 'SO' }),
           { type: 'text', text: '图片搜索没有具体站点。' },
           webTool('web-img', 'image_search', { query: 'mountain lake' }, { query: 'mountain lake', engine: 'demo', results: [{ title: 'Lake', url: 'https://images.example/lake.jpg', sourceUrl: 'https://example.com/photo' }] }),
         ],
@@ -127,6 +136,8 @@ const sessions = {
   },
   '11111111-1111-4111-8111-111111111111': {
     busy: false,
+    // Exercises the interrupted-turn banner and its retry button.
+    notes: [{ at: now, kind: 'error', message: '模型与工具已长时间没有任何输出，任务已停止。' }],
     messages: [
       { role: 'user', timestamp: now - 6e5, content: '给我一个数学与代码混排的示例，并写入一个文件。' },
       sampleAssistant,

@@ -89,3 +89,61 @@ test('image reads preserve the returned preview in both live and reloaded transc
     assert.equal(history[1].content[0].imageUrl, expected);
   }
 });
+
+test('an interrupted turn keeps its reason on the last assistant message after reload', () => {
+  const messages = [
+    { role: 'user', content: 'first' },
+    { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+    { role: 'user', content: 'second' },
+    { role: 'assistant', content: [{ type: 'toolCall', id: 'a', name: 'bash', arguments: { command: 'sleep 1' } }] },
+    { role: 'toolResult', toolCallId: 'a', isError: false, content: [{ type: 'text', text: 'done' }] },
+  ];
+  const failed = buildTranscript(messages, { at: Date.now(), kind: 'error', message: '模型与工具已长时间没有任何输出，任务已停止。' });
+  assert.equal(failed[1].error, undefined);
+  assert.equal(failed[3].error, '模型与工具已长时间没有任何输出，任务已停止。');
+  assert.equal(failed[3].stopped, undefined);
+
+  const stopped = buildTranscript(messages, { at: Date.now(), kind: 'stopped', message: '任务已由你停止。' });
+  assert.equal(stopped[3].stopped, true);
+  assert.equal(stopped[3].error, undefined);
+
+  const quiet = buildTranscript(messages, null);
+  assert.equal(quiet[3].error, undefined);
+  assert.equal(buildTranscript([{ role: 'user', content: 'only' }], { kind: 'error', message: 'x' })[0].error, undefined);
+
+  // Several notes stay attached to their own turn, in timestamp order.
+  const stamped = [
+    { role: 'user', timestamp: 1000, content: 'first' },
+    { role: 'assistant', timestamp: 2000, content: [{ type: 'text', text: 'ok' }] },
+    { role: 'user', timestamp: 3000, content: 'second' },
+    { role: 'assistant', timestamp: 4000, content: [{ type: 'text', text: 'again' }] },
+  ];
+  const many = buildTranscript(stamped, [
+    { at: 2500, kind: 'error', message: 'first turn failed' },
+    { at: 4500, kind: 'stopped', message: 'second turn stopped' },
+  ]);
+  assert.equal(many[1].error, 'first turn failed');
+  assert.equal(many[1].stopped, undefined);
+  assert.equal(many[3].stopped, true);
+  assert.equal(many[3].error, undefined);
+});
+
+test('a thinking block times itself while streaming and freezes when it ends', () => {
+  const live = reactiveLive();
+  handleEvent({ type: 'message_start', message: { role: 'assistant' } }, live);
+  handleEvent({ type: 'message_update', assistantMessageEvent: { type: 'thinking_start', contentIndex: 0 } }, live);
+  assert.equal(Number.isFinite(live.blocks[0].started), true);
+  handleEvent({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', contentIndex: 0, delta: 'reason' } }, live);
+  assert.equal(live.blocks[0].durationMs, undefined);
+  handleEvent({ type: 'message_update', assistantMessageEvent: { type: 'thinking_end', contentIndex: 0, content: 'reason' } }, live);
+  assert.equal(typeof live.blocks[0].durationMs, 'number');
+  assert.ok(live.blocks[0].durationMs >= 0);
+  const frozen = live.blocks[0].durationMs;
+
+  const cut = reactiveLive();
+  handleEvent({ type: 'message_start', message: { role: 'assistant' } }, cut);
+  handleEvent({ type: 'message_update', assistantMessageEvent: { type: 'thinking_start', contentIndex: 0 } }, cut);
+  handleEvent({ type: 'agent_settled', aborted: false }, cut);
+  assert.equal(typeof cut.blocks[0].durationMs, 'number');
+  assert.equal(frozen >= 0, true);
+});

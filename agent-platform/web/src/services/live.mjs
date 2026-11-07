@@ -62,9 +62,14 @@ export function handleEvent(event, live) {
       case 'text_start': ensureBlock(u.contentIndex, 'text'); break;
       case 'text_delta': { const b = ensureBlock(u.contentIndex, 'text'); b.text += u.delta || ''; break; }
       case 'text_end': { const b = ensureBlock(u.contentIndex, 'text'); if (typeof u.content === 'string') b.text = u.content; break; }
-      case 'thinking_start': ensureBlock(u.contentIndex, 'thinking'); break;
-      case 'thinking_delta': { const b = ensureBlock(u.contentIndex, 'thinking'); b.text += u.delta || ''; break; }
-      case 'thinking_end': { const b = ensureBlock(u.contentIndex, 'thinking'); if (typeof u.content === 'string') b.text = u.content; break; }
+      case 'thinking_start': { const b = ensureBlock(u.contentIndex, 'thinking'); if (!b.started) b.started = Date.now(); break; }
+      case 'thinking_delta': { const b = ensureBlock(u.contentIndex, 'thinking'); if (!b.started) b.started = Date.now(); b.text += u.delta || ''; break; }
+      case 'thinking_end': {
+        const b = ensureBlock(u.contentIndex, 'thinking');
+        if (typeof u.content === 'string') b.text = u.content;
+        if (b.started && !b.durationMs) b.durationMs = Date.now() - b.started;
+        break;
+      }
       case 'toolcall_start': {
         const b = ensureBlock(u.contentIndex, 'tool');
         if (!finishedPlan(b)) {
@@ -123,8 +128,11 @@ export function handleEvent(event, live) {
 }
 
 export function settleTools(vm, state) {
+  const now = Date.now();
   for (const block of vm.blocks) {
     if (block.type === 'tool' && ['pending', 'running'].includes(block.state)) block.state = state;
+    // A reasoning block cut short by a stop still reports how long it ran.
+    if (block.type === 'thinking' && block.started && !block.durationMs) block.durationMs = now - block.started;
   }
 }
 

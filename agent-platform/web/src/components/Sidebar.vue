@@ -175,6 +175,9 @@ async function rename(c: Chat) {
 async function togglePin(c: Chat) { try { await post('/api/chats/pin', { thread: c.id, pinned: !c.pinned }); await session.loadChats(); } catch (e: any) { ui.toast(e.message, { tone: 'error' }); } }
 async function toggleArchive(c: Chat) { try { await post('/api/chats/archive', { thread: c.id, archived: !c.archived }); await session.loadChats(); ui.toast(c.archived ? '已恢复对话' : '已归档对话', { tone: 'success' }); } catch (e: any) { ui.toast(e.message, { tone: 'error' }); } }
 function exportChat(c: Chat, format: string) { const a = document.createElement('a'); a.href = '/api/chats/export?chat=' + encodeURIComponent(c.id) + '&format=' + format; a.click(); ui.toast('已开始导出 ' + (format === 'json' ? 'JSON' : 'Markdown'), { tone: 'success' }); }
+// Admin-only: the full diagnostic bundle (session, turn events, runtime) for
+// sending a bad turn back for investigation.
+function exportBundle(c: Chat) { const a = document.createElement('a'); a.href = '/api/chats/export-bundle?chat=' + encodeURIComponent(c.id); a.click(); ui.toast('已开始导出完整日志包', { tone: 'success' }); }
 async function removeChat(c: Chat) {
   if (!(await ui.confirm({ title: '删除任务', message: `删除“${c.title || '新任务'}”？此操作无法撤销，但会保留工作区文件。`, confirmText: '删除', danger: true }))) return;
   try { await post('/api/chats/delete', { thread: c.id }); session.chats = session.chats.filter(x => x.id !== c.id); if (session.chatId === c.id) session.startNew(); ui.toast('任务已删除', { tone: 'success' }); }
@@ -187,6 +190,7 @@ function chatItems(c: Chat): MenuItem[] {
     { icon: 'pin', label: c.pinned ? '取消置顶' : '置顶对话', action: () => togglePin(c) },
     { icon: 'download', label: '导出 Markdown', action: () => exportChat(c, 'md') },
     { icon: 'download', label: '导出 JSON', action: () => exportChat(c, 'json') },
+    ...(session.isAdmin ? [{ icon: 'package', label: '导出完整日志 (ZIP)', action: () => exportBundle(c) }] : []),
     { icon: 'archive', label: c.archived ? '取消归档' : '归档对话', action: () => toggleArchive(c) },
     { icon: 'trash', label: '删除对话', danger: true, action: () => removeChat(c) },
   ];

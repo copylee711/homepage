@@ -7,8 +7,9 @@ import { MemoryStore, memoryContext } from './memory.mjs';
 import { requiresApproval, EXECUTION_MODES } from './execution-policy.mjs';
 import { streamEvent } from './stream-wire.mjs';
 import { createServer } from 'node:http';
+import os from 'node:os';
 import { spawn } from 'node:child_process';
-import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { body, equal, fail, json, modelLabel, required } from './shared.mjs';
@@ -18,7 +19,8 @@ import { sandbox, sandboxTool } from './sandbox-client.mjs';
 import { sessionCapacity } from './session-limits.mjs';
 import { prepareSessionCwd } from './session-cwd.mjs';
 import { usageSummary } from './usage.mjs';
-import { ChatStore, normalizeProjectId, paginateChats, sanitizePermission } from './conversations.mjs';
+import { ChatStore, normalizeProjectId, paginateChats, safeFilename, sanitizePermission } from './conversations.mjs';
+import { createZip } from './zip.mjs';
 import { SearchSettings, publicSearch } from './search.mjs';
 import { ToolApprovals, UserQuestions } from './tool-approvals.mjs';
 import { SessionSnapshots, projectSession } from './session-snapshot.mjs';
@@ -44,6 +46,51 @@ function sameScope(a, b) { return (a?.scope || 'project_only') === (b?.scope || 
 async function secretValues() {
   return [(process.env.OPENCODE_API_KEY || ''), ...(await loadProviders()).providers.map(item => item.apiKey || '')]
     .filter(key => key.length >= 8);
+}
+// Admin-only diagnostic bundle: everything needed to reproduce a slow or broken
+// turn without shipping the sandbox. Secrets are masked exactly like the normal
+// exports, and the raw session/turn files are capped so the archive stays small.
+const BUNDLE_MAX_BYTES = 24 * 1024 * 1024;
+async function exportBundle(user, thread) {
+  const info = await chats.assertOwned(user, thread);
+  const secrets = await secretValues();
+  const mask = text => secrets.reduce((value, key) => value.split(key).join('[REDACTED]'), String(text ?? ''));
+  const title = (await chats.loadMeta(user).catch(() => ({ chats: {} }))).chats[thread]?.title || '对话';
+  const files = [];
+  const push = (name, data, limit = 6 * 1024 * 1024) => {
+    const text = mask(data);
+    if (!text) return;
+    files.push({ name, data: text.length > limit ? text.slice(0, limit) + `\n…[已截断，原始 ${text.length} 字符]` : text });
+  };
+  const md = await chats.export(user, thread, 'md', secrets);
+  const js = await chats.export(user, thread, 'json', secrets);
+  files.push({ name: 'chat.md', data: md.content });
+  files.push({ name: 'chat.json', data: js.content });
+  try { push('session.jsonl', await readFile(chats.file(user, thread), 'utf8'), 10 * 1024 * 1024); } catch {}
+  try { push('turn.ndjson', await readFile(`/data/turns/${user}/${thread}.ndjson`, 'utf8'), 8 * 1024 * 1024); } catch {}
+  const notes = await readTurnNotes(user, thread);
+  if (notes.length) files.push({ name: 'turn-notes.json', data: JSON.stringify(notes, null, 2) });
+  const meta = await chats.loadMeta(user).catch(() => ({}));
+  files.push({ name: 'chat-meta.json', data: JSON.stringify({ chat: meta.chats?.[thread] || {}, exportedAt: new Date().toISOString(), sessionBytes: info.size }, null, 2) });
+  files.push({ name: 'runtime.json', data: JSON.stringify({
+    node: process.version, platform: process.platform, arch: process.arch, cpus: os.cpus().length,
+    totalMemoryMiB: Math.round(os.totalmem() / 1048576), uptimeSec: Math.round(process.uptime()),
+    revision: process.env.REVISION || '', model: modelLabel(process.env.PI_MODEL || ''), pid: process.pid,
+  }, null, 2) });
+  files.push({ name: 'README.txt', data: [
+    'Iris 会话排查包', '',
+    'chat.md / chat.json   对话全文（Markdown 与结构化 JSON）',
+    'session.jsonl         模型会话原始记录（含工具调用参数）',
+    'turn.ndjson           本轮任务的原始流式事件（时间顺序，用于定位卡顿与中断）',
+    'turn-notes.json       各轮异常结束原因（如有）',
+    'chat-meta.json        会话元数据（项目、权限、标题）',
+    'runtime.json          runner 运行环境与版本信息',
+    '', '所有内容均已遮蔽已知的供应商密钥。发给我排查时可直接使用此 zip。',
+  ].join('\n') });
+  let total = files.reduce((sum, file) => sum + Buffer.byteLength(file.data), 0);
+  if (total > BUNDLE_MAX_BYTES) fail(413, '此对话日志超过 24 MB，无法打包导出');
+  const zip = createZip(files);
+  return { filename: safeFilename(title, thread) + '-debug.zip', contentType: 'application/zip', base64: zip.toString('base64') };
 }
 const hasResults = value => Boolean(value?.results?.length || value?.images?.length);
 async function searchWeb(lease, config, input) {
@@ -146,7 +193,11 @@ class Pi {
       }
     });
     this.proc.on('error', () => this.stop());
-    this.proc.on('exit', () => this.stop());
+    this.proc.on('exit', code => {
+      // A crash or an external kill ends the turn without agent_settled.
+      if (this.busy && !this.stopping) this.recordNote('error', `执行进程意外退出（退出码 ${code ?? '未知'}），任务已中断。`);
+      this.stop();
+    });
     await this.command('get_state');
     await this.command('set_auto_compaction', { enabled: (await features.get(this.user)).autoCompaction });
   }
@@ -156,8 +207,17 @@ class Pi {
     this.pending.clear();
   }
   mask(text) { for (const key of this.secrets || []) text = text.split(key).join('[REDACTED]'); return text; }
+  // The failure that ended a turn must outlive the browser stream: the UI shows
+  // the same reason after a reload and offers a retry. First reason wins.
+  recordNote(kind, message) {
+    const text = String(message || '').replace(/\s+/g, ' ').trim().slice(0, 400);
+    if (!text || this.turnNote) return;
+    this.turnNote = { at: Date.now(), kind: kind === 'stopped' ? 'stopped' : 'error', message: text };
+    void writeTurnNote(this.user, this.thread, this.turnNote).catch(() => {});
+  }
   publish(event) {
     if (!this.fanout || !event) return;
+    if (event.type === 'gateway_error') this.recordNote('error', event.error);
     const line = this.mask(JSON.stringify(event, (_key, value) =>
       value?.type === 'image' && typeof value.data === 'string'
         ? { type: 'text', text: '[图片已交给模型]' } : value)) + '\n';
@@ -170,9 +230,10 @@ class Pi {
     const file = this.turnFile;
     this.disk = this.disk.then(() => appendFile(file, line)).catch(() => {});
   }
-  abortTurn() {
+  abortTurn(reason = '任务已被系统停止，请重试。') {
     // Policy stop: silent turn, storage cap, or lost renew. Not a browser disconnect.
     if (!this.busy || this.stopping) return;
+    this.recordNote('error', reason);
     this.stopping = true;
     void cancel(this.user, { stopInstalls: true }).catch(() => { try { this.proc?.kill(); } catch { /* already gone */ } });
   }
@@ -207,6 +268,7 @@ class Pi {
       this.execution = permission.execution;
     }
     this.busy = true; this.webSession = new WebSession(); this.stopping = false; this.lastRenew = Date.now();
+    this.turnNote = null;
     // Goal mode keeps continuing across settle points until the goal reports done.
     this.goal = goal ? { continues: 0, max: 20 } : null;
     this.fanout = new TurnFanout(); this.persisted = 0; this.disk = Promise.resolve();
@@ -227,7 +289,7 @@ class Pi {
     // Gateway heartbeats renew the lease. If that stops, the lease is already
     // dead and this turn must not keep running on a stale authorization.
     this.renewWatch = setInterval(() => {
-      if (this.busy && Date.now() - (this.lastRenew || 0) > 30000) this.abortTurn();
+      if (this.busy && Date.now() - (this.lastRenew || 0) > 30000) this.abortTurn('页面已离线，执行授权未续期，任务已停止。');
     }, 5000);
     let checking = false;
     this.storageCheck = setInterval(async () => {
@@ -316,6 +378,34 @@ async function resetTurnLog(user, thread) {
     return file;
   } catch { return undefined; }
 }
+// One note per abnormal turn end, appended beside the session file so the
+// reason survives a reload. Old notes are kept (a failed turn stays failed
+// even after a successful retry) and trimmed to the newest few dozen.
+function turnNoteFile(user, thread) { return `/data/sessions/${user}/${thread}.notes.jsonl`; }
+async function writeTurnNote(user, thread, note) {
+  const file = turnNoteFile(user, thread);
+  try {
+    await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+    let text = '';
+    try { text = await readFile(file, 'utf8'); } catch {}
+    const lines = [...text.split('\n').filter(Boolean), JSON.stringify(note)].slice(-50);
+    await writeFile(file, lines.join('\n') + '\n', { mode: 0o600 });
+  } catch {}
+}
+async function readTurnNotes(user, thread) {
+  try {
+    const notes = [];
+    for (const line of (await readFile(turnNoteFile(user, thread), 'utf8')).split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const value = JSON.parse(line);
+        if (!value || typeof value.message !== 'string' || !value.message.trim()) continue;
+        notes.push({ at: Number(value.at) || 0, kind: value.kind === 'stopped' ? 'stopped' : 'error', message: value.message });
+      } catch {}
+    }
+    return notes;
+  } catch { return []; }
+}
 async function savedTurn(user, thread) {
   const file = `/data/turns/${user}/${thread}.ndjson`;
   try {
@@ -330,7 +420,11 @@ async function cancel(user, extra) {
   cancelToolchain(user);
   // Kill model generation AND every tool descendant, including detached processes.
   for (const [key, entry] of sessions) {
-    if (entry.pi.user === user) { sessions.delete(key); entry.pi.proc?.kill(); }
+    if (entry.pi.user !== user) continue;
+    // A deliberate stop must not look like a crash to the exit handler.
+    entry.pi.stopping = true;
+    sessions.delete(key);
+    entry.pi.proc?.kill();
   }
   await sandbox('/cancel', user, undefined, undefined, extra);
 }
@@ -688,8 +782,13 @@ export const server = createServer(async (req, res) => {
     if (req.url === '/chats/rename') return json(res, 200, await chats.rename(input.user, input.thread, input.title));
     if (req.url === '/chats/pin') return json(res, 200, await chats.setPinned(input.user, input.thread, input.pinned));
     if (req.url === '/chats/archive') return json(res, 200, await chats.setArchived(input.user, input.thread, input.archived));
-    if (req.url === '/chats/delete') return json(res, 200, await deleteChat(input.user, input.thread));
+    if (req.url === '/chats/delete') {
+      const result = await deleteChat(input.user, input.thread);
+      await unlink(turnNoteFile(input.user, input.thread)).catch(() => {});
+      return json(res, 200, result);
+    }
     if (req.url === '/chats/export') return json(res, 200, await chats.export(input.user, input.thread, input.format, await secretValues()));
+    if (req.url === '/chats/export-bundle') return json(res, 200, await exportBundle(input.user, input.thread));
     if (req.url === '/chats/fork') {
       assertUserIdle(input.user);
       const target = input.targetThread || randomUUID();
@@ -700,6 +799,8 @@ export const server = createServer(async (req, res) => {
       assertUserIdle(input.user);
       const result = await chats.truncate(input.user, input.thread, Number(input.keepMessages) || 0, input.keepUserTurns);
       snapshots.forget(input.user, input.thread);
+      // Rewind/retry drops the turns those notes described.
+      await unlink(turnNoteFile(input.user, input.thread)).catch(() => {});
       const live = sessions.get(input.user + ':' + input.thread);
       if (live) {
         live.pi.proc?.kill();
@@ -721,9 +822,14 @@ export const server = createServer(async (req, res) => {
       const messages = busy ? (await live.pi.command('get_messages')).messages || [] : await snapshots.read(input.user, input.thread);
       let text = JSON.stringify(messages);
       for (const key of await secretValues()) text = text.split(key).join('[REDACTED]');
-      return json(res, 200, { messages: JSON.parse(text), busy });
+      return json(res, 200, { messages: JSON.parse(text), busy, notes: await readTurnNotes(input.user, input.thread) });
     }
-    if (req.url === '/abort') { await cancel(input.user, { stopInstalls: true }); return json(res, 200, { ok: true }); }
+    if (req.url === '/abort') {
+      const stopThread = input.thread || [...sessions.values()].find(entry => entry.pi.user === input.user && entry.pi.busy)?.pi.thread;
+      await cancel(input.user, { stopInstalls: true });
+      if (stopThread) await writeTurnNote(input.user, stopThread, { at: Date.now(), kind: 'stopped', message: '任务已由你停止。' });
+      return json(res, 200, { ok: true });
+    }
     if (req.url === '/turns/status') {
       const pi = sessions.get(input.user + ':' + input.thread)?.pi;
       if (pi?.fanout) return json(res, 200, { thread: input.thread, busy: pi.busy === true, settled: pi.busy !== true && pi.fanout.cursor > 0, cursor: pi.fanout.cursor });

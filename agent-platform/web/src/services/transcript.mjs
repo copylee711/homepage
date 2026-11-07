@@ -20,7 +20,11 @@ export function normalizeBlocks(content, toolResults) {
   return blocks;
 }
 
-export function buildTranscript(messages) {
+// `notes` record why turns ended abnormally. They live beside the session
+// file, so a reload still shows the reason and the retry affordance instead of
+// a silently truncated answer. Each note belongs to the last assistant turn
+// that finished before it.
+export function buildTranscript(messages, notes) {
   const results = {};
   for (const m of messages) if (m.role === 'toolResult') results[m.toolCallId] = { isError: m.isError === true, content: m.content, text: typeof m.content === 'string' ? m.content : (m.content || []).filter(p => p.type === 'text').map(p => p.text).join('\n') };
   const items = [];
@@ -36,6 +40,21 @@ export function buildTranscript(messages) {
       if (m.stopReason === 'length') last.stopReason = 'length';
     }
     else items.push({ ...m, content: [...blocks] });
+  }
+  const list = (Array.isArray(notes) ? notes : notes ? [notes] : [])
+    .filter(note => note && typeof note.message === 'string' && note.message.trim());
+  for (const note of list) {
+    const at = Number(note.at) || 0;
+    // The turn that ended at `at` is the last assistant bubble created before it.
+    let target = null;
+    for (const item of items) {
+      if (item.role !== 'assistant') continue;
+      if (at && item.timestamp && item.timestamp > at) break;
+      target = item;
+    }
+    if (!target) continue;
+    if (note.kind === 'stopped') target.stopped = true;
+    else target.error = note.message;
   }
   return items;
 }

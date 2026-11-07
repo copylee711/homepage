@@ -50,10 +50,12 @@ function openChatMenu(e: MouseEvent) {
     { icon: 'edit', label: '重命名', action: startRename },
     { icon: 'download', label: '导出 Markdown', action: () => exp(c.id, 'md') },
     { icon: 'download', label: '导出 JSON', action: () => exp(c.id, 'json') },
+    ...(session.isAdmin ? [{ icon: 'package', label: '导出完整日志 (ZIP)', action: () => expBundle(c.id) }] : []),
     { icon: 'archive', label: c.archived ? '取消归档' : '归档对话', action: () => arch(c.id, !c.archived) },
   ] };
 }
 function exp(id: string, format: string) { const a = document.createElement('a'); a.href = '/api/chats/export?chat=' + encodeURIComponent(id) + '&format=' + format; a.click(); }
+function expBundle(id: string) { const a = document.createElement('a'); a.href = '/api/chats/export-bundle?chat=' + encodeURIComponent(id); a.click(); ui.toast('已开始导出完整日志包', { tone: 'success' }); }
 async function arch(id: string, archived: boolean) { try { await post('/api/chats/archive', { thread: id, archived }); await session.loadChats(); } catch (e: any) { ui.toast(e.message, { tone: 'error' }); } }
 function toggleWorkspace() {
   if (window.innerWidth <= 1180) ui.mobileDrawer = 'workspace';

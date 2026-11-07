@@ -33,7 +33,7 @@ const citations=computed(()=>{
         <BlockList :blocks="seg.items" :streaming="streaming" nested :references="citations" />
       </details>
       <MarkdownView v-else-if="seg.type === 'text'" :source="seg.text" :citations="citations" :streaming="streaming && i === segments.length - 1" />
-      <ThinkingBlock v-else-if="seg.type === 'thinking'" :text="seg.text" />
+      <ThinkingBlock v-else-if="seg.type === 'thinking'" :text="seg.text" :started="seg.started" :duration-ms="seg.durationMs" />
       <PlanCard v-else-if="seg.type === 'plan'" :block="seg.block" />
       <ToolCard v-else-if="seg.type === 'tools'" :tools="seg.items" />
     </template>

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  faviconCandidates, noteFaviconError, noteFaviconLoad, resetFaviconCache, rowSiteUrl, siteHost, watchFavicon,
+  faviconCandidates, noteFaviconError, noteFaviconLoad, resetFaviconCache, rowSiteUrl, rowSiteUrls, siteHost, watchFavicon,
 } from '../web/src/services/site-icon.mjs';
 
 test('page URLs become a host, never the path or a full URL', () => {
@@ -76,4 +76,29 @@ test('web and search rows use a page URL; image search stays without a site', ()
     result: { results: [{ url: 'https://images.example/a.jpg', sourceUrl: 'https://example.com/photo' }] },
   }), '');
   assert.equal(rowSiteUrl({ name: 'read', args: { path: '/workspace/a.txt' } }), '');
+});
+
+test('a search row yields one URL per distinct result host, in rank order', () => {
+  const block = {
+    name: 'web_search',
+    args: { query: '第二类曲线积分' },
+    result: {
+      results: [
+        { url: 'https://zh.wikipedia.org/wiki/曲线积分' },
+        { url: 'https://www.zhihu.com/question/1' },
+        { url: 'https://zh.wikipedia.org/wiki/格林公式' },
+        { url: 'https://mathworld.wolfram.com/LineIntegral.html' },
+      ],
+    },
+  };
+  assert.deepEqual(rowSiteUrls(block), [
+    'https://zh.wikipedia.org/wiki/曲线积分',
+    'https://www.zhihu.com/question/1',
+    'https://mathworld.wolfram.com/LineIntegral.html',
+  ]);
+  assert.equal(rowSiteUrl(block), 'https://zh.wikipedia.org/wiki/曲线积分');
+  // A fetch keeps its direct page first, then any pages its result mentions.
+  assert.deepEqual(rowSiteUrls({ name: 'web_fetch', args: { url: 'https://example.com/a' }, result: { results: [{ url: 'https://cdn.example.net/b' }] } }),
+    ['https://example.com/a', 'https://cdn.example.net/b']);
+  assert.deepEqual(rowSiteUrls({ name: 'image_search', args: { query: 'x' } }), []);
 });

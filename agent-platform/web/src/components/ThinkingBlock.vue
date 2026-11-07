@@ -1,9 +1,26 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
 import Icon from './Icon.vue';
+import { formatDuration } from '../services/format';
 
-const props = defineProps<{ text: string }>();
+const props = defineProps<{ text: string; started?: number; durationMs?: number }>();
 const body = ref<HTMLElement | null>(null);
+
+// Reasoning blocks tick while the model thinks, then freeze on the elapsed
+// time the way tool rows do.
+const now = ref(Date.now());
+const running = computed(() => !!props.started && !props.durationMs);
+let ticker: number | null = null;
+watch(running, value => {
+  if (value && ticker == null) ticker = window.setInterval(() => { now.value = Date.now(); }, 500);
+  if (!value && ticker != null) { clearInterval(ticker); ticker = null; }
+}, { immediate: true });
+onBeforeUnmount(() => { if (ticker != null) clearInterval(ticker); });
+const elapsed = computed(() => {
+  if (props.durationMs) return props.durationMs;
+  if (!props.started) return 0;
+  return Math.max(0, now.value - props.started);
+});
 const follow = ref(true);
 function onScroll() { const el = body.value; if (el) follow.value = el.scrollHeight - el.scrollTop - el.clientHeight < 24; }
 watch(() => props.text, async () => { if (!follow.value) return; await nextTick(); if (body.value && mode.value === 'preview') body.value.scrollTop = body.value.scrollHeight; }, { immediate: true });
@@ -24,6 +41,7 @@ function toggle() {
     <button type="button" class="thinking-head" :aria-expanded="isOpen" @click="toggle">
       <Icon class="thinking-icon" name="sparkle" :size="13" />
       <span class="thinking-label">思考过程</span>
+      <span v-if="elapsed" class="thinking-time" :class="{ 'is-live': running }">{{ formatDuration(elapsed) }}</span>
       <span class="thinking-toggle">
         <span>{{ isOpen ? '收起' : '展开' }}</span>
         <Icon class="thinking-chevron" name="chevron-right" :size="13" />
@@ -60,6 +78,14 @@ function toggle() {
   color: var(--muted);
   opacity: 0.85;
 }
+.thinking-time {
+  color: var(--faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.thinking-time.is-live { color: var(--muted); animation: thinking-live 1.6s ease-in-out infinite; }
+@keyframes thinking-live { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
 .thinking-toggle {
   display: inline-flex;
   align-items: center;

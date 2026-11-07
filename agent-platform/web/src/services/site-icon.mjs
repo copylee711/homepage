@@ -39,21 +39,29 @@ function httpUrl(value) {
 }
 
 // web_fetch carries the page on args.url. web_search only has a query; the
-// pages are on the result list. image_search has no single site.
-export function rowSiteUrl(block) {
+// pages are its ranked result list, so one icon per distinct result host.
+// image_search has no single site.
+export function rowSiteUrls(block) {
   const name = String(block?.name || '').toLowerCase();
-  if (name === 'image_search') return '';
-  if (name !== 'web_fetch' && name !== 'fetch' && name !== 'web_search') return '';
+  if (name !== 'web_fetch' && name !== 'fetch' && name !== 'web_search') return [];
   const args = readJson(block?.args) || {};
-  const direct = httpUrl(args.url);
-  if (direct && name !== 'web_search') return direct;
   const result = readJson(block?.result);
   const entries = Array.isArray(result?.results) && result.results.length ? result.results : result?.url ? [result] : [];
-  for (const entry of entries) {
-    const page = httpUrl(entry?.sourceUrl) || httpUrl(entry?.url);
-    if (page) return page;
-  }
-  return direct;
+  const out = [];
+  const add = value => {
+    const page = httpUrl(value);
+    const host = page ? siteHost(page) : '';
+    if (!host || out.some(item => siteHost(item) === host)) return;
+    out.push(page);
+  };
+  if (name !== 'web_search') add(args.url);
+  for (const entry of entries) add(entry?.sourceUrl || entry?.url);
+  if (!out.length) add(args.url);
+  return out.slice(0, 8);
+}
+
+export function rowSiteUrl(block) {
+  return rowSiteUrls(block)[0] || '';
 }
 
 function snapshot(state) {

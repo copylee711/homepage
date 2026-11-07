@@ -15,6 +15,10 @@ const isUser = computed(() => props.message.role === 'user');
 const userRawText = computed(() => textContent(props.message.content));
 const blocks = computed(() => normalizeBlocks(props.message.content, props.toolResults));
 const turnState = computed(() => props.message._vm || null);
+// An interrupted turn keeps its reason on the message (live view-model while
+// streaming, note attached from the server after a reload). Never silent.
+const failure = computed(() => String(props.message.error || turnState.value?.error || ''));
+const stopped = computed(() => props.message.stopped === true || turnState.value?.stopped === true);
 const outputLimited = computed(() => props.message.stopReason === 'length' || turnState.value?.stopReason === 'length');
 const time = computed(() => formatClock(props.message.timestamp || Date.now()));
 
@@ -349,8 +353,21 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
       </div>
       <div v-if="!isUser" class="assistant-body">
         <div ref="contentRef" class="message-content"><BlockList :blocks="blocks" /></div>
-        <p v-if="turnState?.error" class="assistant-note is-error" role="alert">{{ turnState.error }}</p>
-        <p v-else-if="!blocks.length && turnState?.stopped" class="assistant-note">已停止生成</p>
+        <div v-if="failure" class="assistant-failure" role="alert">
+          <Icon class="assistant-failure-icon" name="alert-circle" :size="14" />
+          <span class="assistant-failure-text">{{ failure }}</span>
+          <button
+            type="button"
+            class="assistant-retry"
+            :disabled="session.busy"
+            title="重新生成本轮回答"
+            @click="retryMsg"
+          >
+            <Icon name="refresh" :size="12" />
+            <span>重试</span>
+          </button>
+        </div>
+        <p v-else-if="!blocks.length && stopped" class="assistant-note">已停止生成</p>
         <p v-else-if="!blocks.length" class="assistant-note">这次没有收到模型回复。如果发送了图片或附件，可能是当前模型不支持这类输入，换一个模型或补充文字说明后再试。</p>
         <p v-if="outputLimited" class="assistant-limit">输出已达上限，可继续</p>
         <footer class="assistant-footer">
@@ -504,6 +521,38 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
 /* Assistant footer: quiet action row plus a single muted meta line */
 .assistant-note { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
 .assistant-note.is-error { color: var(--danger); }
+/* Interrupted turn: reason + the retry that used to hide in the hover footer. */
+.assistant-failure {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 26%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  color: var(--danger);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.assistant-failure-icon { flex: none; margin-top: 1px; }
+.assistant-failure-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.assistant-retry {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
+  color: var(--danger);
+  font-size: 11.5px;
+  font-weight: 560;
+  transition: background-color var(--fast), opacity var(--fast);
+}
+.assistant-retry:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 22%, transparent); }
+.assistant-retry:disabled { opacity: 0.45; }
 .assistant-limit { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; font-weight: 400; }
 .assistant-footer {
   display: flex;

@@ -141,6 +141,13 @@ function sendFile(res, file, inline = false) {
   res.writeHead(200, headers);
   res.end(buffer);
 }
+function sendBinary(res, value) {
+  const name = downloadName(value.filename);
+  const content = Buffer.from(String(value.base64 || ''), 'base64');
+  res.writeHead(200, { 'Content-Type': value.contentType || 'application/octet-stream',
+    'Content-Length': content.length, 'Cache-Control': 'no-store', 'Content-Disposition': attachment(name) });
+  res.end(content);
+}
 function sendExport(res, value) {
   const name = downloadName(value.filename);
   const content = Buffer.from(String(value.content || ''), 'utf8');
@@ -280,6 +287,11 @@ export const server = createServer(async (req, res) => {
         const response = await runner('/chats/export', auth.user.id, { thread: url.searchParams.get('chat'),
           format: url.searchParams.get('format') === 'json' ? 'json' : 'md' });
         return sendExport(res, await response.json());
+      }
+      if (url.pathname === '/api/chats/export-bundle' && req.method === 'GET') {
+        if (!auth.admin) fail(403, '仅管理员可导出完整日志');
+        const response = await runner('/chats/export-bundle', auth.user.id, { thread: url.searchParams.get('chat') });
+        return sendBinary(res, await response.json());
       }
       if (url.pathname === '/api/files' && req.method === 'GET') {
         const response = await runner('/files/list', auth.user.id, { path: filePath(url), fresh: url.searchParams.get('fresh') === '1' }); return json(res, 200, await response.json());

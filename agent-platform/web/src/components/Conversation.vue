@@ -20,7 +20,7 @@ const showJump = ref(false);
 
 // Build the display list: user/assistant messages, with toolResult messages
 // folded into a lookup so tool cards show their results.
-const display = computed(() => buildTranscript(session.messages));
+const display = computed(() => buildTranscript(session.messages, session.turnNotes));
 const userTurns = computed(() => display.value.flatMap((message:any,index:number) => message.role === 'user' ? [{index,label:String(message._rawPrompt || textContent(message.content) || '文件与引用消息').replace(/\s+/g,' ').slice(0,180)}] : []));
 const activeTurn = ref(-1), flashTurn = ref(-1);
 let flashTimer: ReturnType<typeof setTimeout> | undefined;

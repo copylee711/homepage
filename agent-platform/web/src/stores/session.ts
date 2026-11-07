@@ -108,6 +108,9 @@ export const useSession = defineStore('session', {
     // chat's transcript while the reader browses elsewhere.
     liveThread: null as string | null,
     liveMessages: [] as any[],
+    // Every abnormal turn end of the open chat, served beside the transcript so
+    // the reason survives a reload and older failures stay visible.
+    turnNotes: [] as any[],
     lastUserText: '',
     // live streaming assistant view model (null when idle)
     live: null as any,
@@ -332,6 +335,7 @@ export const useSession = defineStore('session', {
       this.workspaceRefs = [];
       this.textQuotes = [];
       this.chatError = '';
+      this.turnNotes = [];
       // Returning to the thread that is still streaming: restore its in-flight
       // transcript (the server copy lacks the current turn) and let the live
       // view render on top.
@@ -342,13 +346,14 @@ export const useSession = defineStore('session', {
         return;
       }
       const cached = this.snapshots.get(id);
-      if (cached) { this.messages = cached.messages || []; }
+      if (cached) { this.messages = cached.messages || []; this.turnNotes = cached.notes || []; }
       else { this.messages = []; this.loadingChat = true; }
       try {
         const value = await get('/api/session?chat=' + encodeURIComponent(id));
         if (this.chatId !== id) return;
         this.snapshots.set(id, value);
         this.messages = value.messages || [];
+        this.turnNotes = value.notes || [];
         // A stream running for another thread owns the global task flag; only
         // trust this thread's own server state when nothing is streaming here.
         if (!this.live) {
@@ -393,7 +398,7 @@ export const useSession = defineStore('session', {
         try { snapshot = await get('/api/session?chat=' + encodeURIComponent(thread)); } catch {}
         if (snapshot && !snapshot.busy) {
           this.snapshots.set(thread, snapshot);
-          if (this.chatId === thread) this.messages = snapshot.messages || [];
+          if (this.chatId === thread) { this.messages = snapshot.messages || []; this.turnNotes = snapshot.notes || []; }
         }
         this.live = null;
         this.liveThread = null;
@@ -478,6 +483,7 @@ export const useSession = defineStore('session', {
       });
       this.lastUserText = rawText || message;
       this.stopping = false;
+      this.turnNotes = [];
       // Tab hide, pagehide and beforeunload must not abort this request.
       // The gateway renews the sandbox lease; only stop() cancels the prompt.
       const controller = new AbortController();
@@ -511,7 +517,10 @@ export const useSession = defineStore('session', {
         // fold the live view model into the transcript as a finalized message
         const durationMs = Math.max(0, Date.now() - turnStartTime);
         streamMessages.push({ role: 'assistant', timestamp: Date.now(), durationMs, content: live.blocks, stopReason: live.stopReason === 'length' ? 'length' : undefined, _vm: live, _fresh: true });
-        this.snapshots.set(thread, { messages: streamMessages, busy: false });
+        const notes = live.error ? [{ at: Date.now(), kind: 'error', message: live.error }]
+          : live.stopped ? [{ at: Date.now(), kind: 'stopped', message: '任务已由你停止。' }] : [];
+        if (this.chatId === thread) this.turnNotes = [...this.turnNotes, ...notes];
+        this.snapshots.set(thread, { messages: streamMessages, busy: false, notes });
         this.live = null;
         this.liveThread = null;
         this.liveMessages = [];
