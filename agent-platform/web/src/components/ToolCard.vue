@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
 import Icon from './Icon.vue';
 import SiteIcon from './SiteIcon.vue';
 import WebToolPages from './WebToolPages.vue';
 import ToolImagePreview from './ToolImagePreview.vue';
 import { formatDuration } from '../services/format';
-import { rowSiteUrl } from '../services/site-icon.mjs';
+import { rowSiteUrl, siteHost } from '../services/site-icon.mjs';
 import { useWorkspace } from '../stores/workspace';
 import { useSession } from '../stores/session';
 import { useUi } from '../stores/ui';
@@ -246,6 +246,26 @@ function openArgFile(v: string) {
   void useWorkspace().locateAndOpenFile(v, proj);
 }
 
+// A running tool ticks its own elapsed time, like the desktop client, so a
+// long call never looks frozen.
+const now = ref(Date.now());
+let ticker: number | null = null;
+watch(
+  () => list.value.some(b => b?.state === 'running'),
+  running => {
+    if (running && ticker == null) ticker = window.setInterval(() => { now.value = Date.now(); }, 500);
+    if (!running && ticker != null) { clearInterval(ticker); ticker = null; }
+  },
+  { immediate: true }
+);
+onBeforeUnmount(() => { if (ticker != null) clearInterval(ticker); });
+
+function durationOf(block: any) {
+  if (!block) return 0;
+  if (block.state === 'running') return block.started ? Math.max(0, now.value - block.started) : 0;
+  return block.durationMs || 0;
+}
+
 function imageName(block: any) {
   const args = parseArgs(block.args);
   return String(args.path || args.file_path || '').split(/[\\/]/).pop() || '读取的图片';
@@ -265,6 +285,32 @@ const groupImages = computed(() => list.value
   .filter(Boolean) as Array<{ url: string; name: string }>);
 const visibleImages = computed(() => groupImages.value.slice(-3));
 const extraImages = computed(() => Math.max(0, groupImages.value.length - visibleImages.value.length));
+
+// Sites visited by this group, deduplicated by host and stacked on the summary.
+const visibleSites = computed(() => {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const block of list.value) {
+    if (!isWebTool(block)) continue;
+    const url = rowSiteUrl(block);
+    const host = url ? siteHost(url) : '';
+    if (!host || seen.has(host)) continue;
+    seen.add(host);
+    out.push(url);
+  }
+  return out.slice(0, 4);
+});
+const siteTotal = computed(() => {
+  const hosts = new Set<string>();
+  for (const block of list.value) {
+    if (!isWebTool(block)) continue;
+    const url = rowSiteUrl(block);
+    const host = url ? siteHost(url) : '';
+    if (host) hosts.add(host);
+  }
+  return hosts.size;
+});
+const extraSites = computed(() => Math.max(0, siteTotal.value - visibleSites.value.length));
 </script>
 
 <template>
@@ -287,7 +333,7 @@ const extraImages = computed(() => Math.max(0, groupImages.value.length - visibl
         <span class="tc-summary" :title="summarize(list[0])">{{ summarize(list[0]) }}</span>
         <span v-if="list[0].state === 'error'" class="tc-failed">失败</span>
         <span v-else-if="list[0].state === 'stopped' || list[0].state === 'interrupted'" class="tc-time">{{ list[0].state === 'stopped' ? '已停止' : '已中断' }}</span>
-        <span v-if="list[0].durationMs" class="tc-dur">{{ formatDuration(list[0].durationMs) }}</span>
+        <span v-if="durationOf(list[0])" class="tc-dur" :class="{ 'is-live': list[0].state === 'running' }">{{ formatDuration(durationOf(list[0])) }}</span>
         <span class="tc-chevron"><Icon name="chevron-right" :size="12" /></span>
       </button>
       <ToolImagePreview v-if="imageUrlFor(list[0])" :url="imageUrlFor(list[0]) || ''" :name="imageName(list[0])" />
@@ -335,6 +381,11 @@ const extraImages = computed(() => Math.max(0, groupImages.value.length - visibl
           </span>
         </div>
       </button>
+      <!-- Visited sites, one icon per host, overlapping like the desktop client. -->
+      <div v-if="visibleSites.length" class="tg-sites">
+        <span v-if="extraSites" class="tg-sites-more">+{{ extraSites }}</span>
+        <SiteIcon v-for="(url, i) in visibleSites" :key="url + i" :url="url" />
+      </div>
       <!-- Read images stay visible on the summary line, newest last. -->
       <div v-if="visibleImages.length" class="tg-thumbs">
         <span v-if="extraImages" class="tg-thumbs-more">+{{ extraImages }}</span>
@@ -379,7 +430,7 @@ const extraImages = computed(() => Math.max(0, groupImages.value.length - visibl
             </span>
             <span v-if="b.state === 'error'" class="tc-failed">失败</span>
             <span v-else-if="b.state === 'stopped' || b.state === 'interrupted'" class="tc-time">{{ b.state === 'stopped' ? '已停止' : '已中断' }}</span>
-            <span v-else-if="b.durationMs" class="tc-dur">{{ formatDuration(b.durationMs) }}</span>
+            <span v-else-if="durationOf(b)" class="tc-dur" :class="{ 'is-live': b.state === 'running' }">{{ formatDuration(durationOf(b)) }}</span>
             <span class="tc-chevron"><Icon name="chevron-right" :size="12" /></span>
           </button>
           <ToolImagePreview v-if="imageUrlFor(b)" :url="imageUrlFor(b) || ''" :name="imageName(b)" />
@@ -491,6 +542,10 @@ const extraImages = computed(() => Math.max(0, groupImages.value.length - visibl
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+/* Still running: the counter keeps moving and breathes so a long call never
+   looks stuck. */
+.tc-dur.is-live { color: var(--muted); animation: tc-live 1.6s ease-in-out infinite; }
+@keyframes tc-live { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
 .tc-chevron {
   flex: none;
   display: inline-flex;
@@ -539,14 +594,18 @@ const extraImages = computed(() => Math.max(0, groupImages.value.length - visibl
   background: color-mix(in srgb, var(--text) 3.5%, transparent);
   color: var(--text);
 }
+.tg-sites { display: flex; align-items: center; flex: none; }
+.tg-sites .site-icon { width: 18px; height: 18px; border-radius: 50%; background: var(--surface); box-shadow: 0 0 0 2px var(--surface); }
+.tg-sites .site-icon + .site-icon { margin-left: -7px; }
+.tg-sites-more { margin-right: 3px; color: var(--muted); font-size: 12px; }
 .tg-thumbs { display: flex; align-items: center; gap: 4px; flex: none; }
 .tg-thumbs-more { color: var(--muted); font-size: 12px; }
 .tg-thumb {
-  width: 38px;
-  height: 28px;
+  width: 27px;
+  height: 18px;
   padding: 0;
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: 5px;
   overflow: hidden;
   background: var(--surface-2);
   cursor: zoom-in;
