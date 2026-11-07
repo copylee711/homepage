@@ -748,7 +748,9 @@ export const server = createServer(async (req, res) => {
     }
     if (req.url === '/prompt') {
       const prompt=promptInput(input);
-      await chats.initialize(input.user, input.thread, input.projectId, input.permission);
+      // The first message doubles as the provisional title until the agent
+      // names the conversation; attachment-only messages keep the generic one.
+      await chats.initialize(input.user, input.thread, input.projectId, input.permission, prompt.message);
       const pi = await instance(input.user, input.thread);
       return await pi.prompt(res, prompt.message, input.thinking, prompt.images, input.permission, input.goal === true);
     }

@@ -8,8 +8,12 @@ import { formatDuration } from '../services/format';
 import { rowSiteUrl } from '../services/site-icon.mjs';
 import { useWorkspace } from '../stores/workspace';
 import { useSession } from '../stores/session';
+import { useUi } from '../stores/ui';
+import { workspaceImageUrl } from '../services/markdown-image.mjs';
+import { toolImagePath } from '../services/tool-images.mjs';
 
 const props = defineProps<{ block?: any; tools?: any[] }>();
+const ui = useUi();
 
 const list = computed<any[]>(() => {
   if (Array.isArray(props.tools) && props.tools.length) return props.tools;
@@ -246,6 +250,21 @@ function imageName(block: any) {
   const args = parseArgs(block.args);
   return String(args.path || args.file_path || '').split(/[\\/]/).pop() || '读取的图片';
 }
+
+// Image payloads never reach the browser, so a read-image row shows the file
+// from the workspace instead of an inline copy.
+function imageUrlFor(block: any): string | undefined {
+  if (block?.imageUrl) return block.imageUrl;
+  const path = toolImagePath(block);
+  if (!path) return undefined;
+  return workspaceImageUrl(path, useSession().currentProjectId || 'default');
+}
+
+const groupImages = computed(() => list.value
+  .map(block => { const url = imageUrlFor(block); return url ? { url, name: imageName(block) } : null; })
+  .filter(Boolean) as Array<{ url: string; name: string }>);
+const visibleImages = computed(() => groupImages.value.slice(-3));
+const extraImages = computed(() => Math.max(0, groupImages.value.length - visibleImages.value.length));
 </script>
 
 <template>
@@ -271,7 +290,7 @@ function imageName(block: any) {
         <span v-if="list[0].durationMs" class="tc-dur">{{ formatDuration(list[0].durationMs) }}</span>
         <span class="tc-chevron"><Icon name="chevron-right" :size="12" /></span>
       </button>
-      <ToolImagePreview v-if="list[0].imageUrl" :url="list[0].imageUrl" :name="imageName(list[0])" />
+      <ToolImagePreview v-if="imageUrlFor(list[0])" :url="imageUrlFor(list[0]) || ''" :name="imageName(list[0])" />
     </div>
     <div v-if="isRowOpen(list[0], 0)" class="tc-detail">
       <dl v-if="argRows(list[0]).length" class="tc-args">
@@ -293,28 +312,45 @@ function imageName(block: any) {
 
   <!-- Consecutive multi-tool group: Claude-style header + 3-state auto-scrolling list -->
   <div v-else-if="isGroup" class="tg" :data-mode="mode">
-    <button
-      type="button"
-      class="tg-head"
-      :aria-expanded="mode !== 'collapsed'"
-      @click="toggleGroup"
-    >
-      <div class="tg-head-left">
-        <span v-if="runningCount > 0" class="tc-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span class="tg-summary-head">{{ claudeSummary.headText }}</span>
+    <div class="tg-head">
+      <button
+        type="button"
+        class="tg-head-btn"
+        :aria-expanded="mode !== 'collapsed'"
+        @click="toggleGroup"
+      >
+        <div class="tg-head-left">
+          <span v-if="runningCount > 0" class="tc-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="tg-summary-head">{{ claudeSummary.headText }}</span>
+        </div>
+        <div class="tg-head-right">
+          <span v-if="claudeSummary.moreText" class="tg-summary-more">{{ claudeSummary.moreText }}</span>
+          <span v-if="claudeSummary.failedText" class="tg-failed-note">{{ claudeSummary.failedText }}</span>
+          <span v-if="claudeSummary.diffAdd || claudeSummary.diffDel" class="tg-diff-badge">
+            <span v-if="claudeSummary.diffAdd" class="tg-diff-add">+{{ claudeSummary.diffAdd }}</span>
+            <span v-if="claudeSummary.diffDel" class="tg-diff-del">-{{ claudeSummary.diffDel }}</span>
+          </span>
+          <span class="tg-view-action" :title="mode === 'collapsed' ? '展开操作明细' : '收起操作明细'">
+            <Icon name="chevron-right" :size="13" />
+          </span>
+        </div>
+      </button>
+      <!-- Read images stay visible on the summary line, newest last. -->
+      <div v-if="visibleImages.length" class="tg-thumbs">
+        <span v-if="extraImages" class="tg-thumbs-more">+{{ extraImages }}</span>
+        <button
+          v-for="(img, i) in visibleImages"
+          :key="img.url + i"
+          type="button"
+          class="tg-thumb"
+          :aria-label="'预览图片 ' + img.name"
+          :title="img.name"
+          @click.stop="ui.openLightbox({ url: img.url, name: img.name })"
+        >
+          <img :src="img.url" alt="" loading="lazy" decoding="async">
+        </button>
       </div>
-      <div class="tg-head-right">
-        <span v-if="claudeSummary.moreText" class="tg-summary-more">{{ claudeSummary.moreText }}</span>
-        <span v-if="claudeSummary.failedText" class="tg-failed-note">{{ claudeSummary.failedText }}</span>
-        <span v-if="claudeSummary.diffAdd || claudeSummary.diffDel" class="tg-diff-badge">
-          <span v-if="claudeSummary.diffAdd" class="tg-diff-add">+{{ claudeSummary.diffAdd }}</span>
-          <span v-if="claudeSummary.diffDel" class="tg-diff-del">-{{ claudeSummary.diffDel }}</span>
-        </span>
-        <span class="tg-view-action" :title="mode === 'collapsed' ? '展开操作明细' : '收起操作明细'">
-          <Icon name="chevron-right" :size="13" />
-        </span>
-      </div>
-    </button>
+    </div>
     <div
       v-show="mode !== 'collapsed'"
       ref="listEl"
@@ -346,7 +382,7 @@ function imageName(block: any) {
             <span v-else-if="b.durationMs" class="tc-dur">{{ formatDuration(b.durationMs) }}</span>
             <span class="tc-chevron"><Icon name="chevron-right" :size="12" /></span>
           </button>
-          <ToolImagePreview v-if="b.imageUrl" :url="b.imageUrl" :name="imageName(b)" />
+          <ToolImagePreview v-if="imageUrlFor(b)" :url="imageUrlFor(b) || ''" :name="imageName(b)" />
         </div>
         <div v-if="isRowOpen(b, idx)" class="tc-detail">
           <dl v-if="argRows(b).length" class="tc-args">
@@ -475,8 +511,7 @@ function imageName(block: any) {
   width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   padding: 4px 6px;
   border-radius: 8px;
   color: var(--muted);
@@ -485,10 +520,40 @@ function imageName(block: any) {
   user-select: none;
   transition: background-color var(--fast), color var(--fast);
 }
+.tg-head-btn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
 .tg-head:hover {
   background: color-mix(in srgb, var(--text) 3.5%, transparent);
   color: var(--text);
 }
+.tg-thumbs { display: flex; align-items: center; gap: 4px; flex: none; }
+.tg-thumbs-more { color: var(--muted); font-size: 12px; }
+.tg-thumb {
+  width: 38px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-2);
+  cursor: zoom-in;
+  transition: border-color var(--fast), transform var(--fast);
+}
+.tg-thumb:hover { border-color: var(--accent); transform: translateY(-1px); }
+.tg-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .tg-head-left {
   display: flex;
   align-items: center;

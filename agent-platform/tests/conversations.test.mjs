@@ -163,6 +163,12 @@ test('model labels hide provider routes and remain readable', () => {
 
 test('new task metadata is immediately listed; model titles apply once and never overwrite user rename',async()=>{
  const id='66666666-6666-4666-8666-666666666666';await store.initialize(a,id,'default');assert.equal((await store.list(a)).find(c=>c.id===id).title,'新任务');
+ // The first message is the provisional title until the agent names the chat.
+ const seeded='88888888-8888-4888-8888-888888888888';
+ await store.initialize(a,seeded,'default',undefined,'  帮我  整理这个\n表格  ');
+ assert.equal((await store.list(a)).find(c=>c.id===seeded).title,'帮我 整理这个 表格');
+ assert.equal((await store.autoTitle(a,seeded,'表格整理')).title,'表格整理');
+ await store.delete(a,seeded);
  await store.autoTitle(a,id,'四阶图的同构分类');assert.equal((await store.list(a)).find(c=>c.id===id).title,'四阶图的同构分类');assert.equal((await store.autoTitle(a,id,'重复命名')).skipped,true);
  await writeFile(store.file(a,id),session('user text'));await store.rename(a,id,'我的标题');await store.autoTitle(a,id,'覆盖企图');assert.equal((await store.loadMeta(a)).chats[id].title,'我的标题');await store.delete(a,id);
  const pending='77777777-7777-4777-8777-777777777777';await store.initialize(a,pending);await store.delete(a,pending);assert.equal((await store.loadMeta(a)).chats[pending],undefined);

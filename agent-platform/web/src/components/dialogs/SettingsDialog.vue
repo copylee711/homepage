@@ -332,12 +332,14 @@ async function remove(c: any) {
 
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
 .setting-row:last-child { border-bottom: 0; }
-.setting-info { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.setting-info { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .setting-info strong { font-size: 13.5px; font-weight: 600; }
 .setting-info span { color: var(--muted); font-size: 12px; }
 
-.seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: color-mix(in srgb, var(--text) 4.8%, transparent); }
-.seg button { height: 28px; padding: 0 12px; border-radius: 7px; color: var(--muted); font-size: 12px; font-weight: 540; transition: background-color var(--fast), color var(--fast); }
+/* The group keeps its natural width so labels never break across two lines;
+   the label column next to it absorbs the squeeze instead. */
+.seg { display: inline-flex; flex: 0 0 auto; max-width: 100%; gap: 2px; padding: 3px; border-radius: 10px; background: color-mix(in srgb, var(--text) 4.8%, transparent); }
+.seg button { flex: none; white-space: nowrap; height: 28px; padding: 0 12px; border-radius: 7px; color: var(--muted); font-size: 12px; font-weight: 540; transition: background-color var(--fast), color var(--fast); }
 .seg button.is-on { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
 
 .archive-list { display: flex; flex-direction: column; }

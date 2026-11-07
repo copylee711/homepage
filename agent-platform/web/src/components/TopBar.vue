@@ -62,7 +62,7 @@ function toggleWorkspace() {
 </script>
 
 <template>
-  <header class="topbar">
+  <header class="topbar" :class="{ 'is-glass': ui.sidebarOpen }">
     <button v-if="!ui.sidebarOpen" class="icon-button" aria-label="显示导航" title="显示导航" @click="ui.setSidebarOpen(true)"><Icon name="panel-left" /></button>
     <button class="icon-button only-mobile" aria-label="显示导航" @click="ui.mobileDrawer = 'sidebar'"><Icon name="menu" /></button>
     <div class="chat-heading">
@@ -121,6 +121,14 @@ function toggleWorkspace() {
   background: transparent;
   z-index: 10;
   pointer-events: none;
+}
+/* With the sidebar open the bar floats over scrolled conversation content, so
+   it needs its own translucent backdrop; with the sidebar closed the page
+   background already shows through and the blur would just be noise. */
+.topbar.is-glass {
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 .topbar > * {
   pointer-events: auto;

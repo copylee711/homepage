@@ -436,11 +436,14 @@ export const useSession = defineStore('session', {
       if (!opts.replay) { this.workspaceRefs = []; this.textQuotes = []; }
 
       // Show the chat in the sidebar as soon as the first turn starts, instead
-      // of waiting for the server list refresh after the stream ends.
+      // of waiting for the server list refresh after the stream ends. The first
+      // message is a better label than a "naming…" placeholder; an attachment-
+      // only message still falls back to the generic label until the agent
+      // calls set_chat_title.
       if (!this.chats.some(c => c.id === thread)) {
-        const seedTitle = '正在命名…';
+        const seedTitle = rawText.replace(/\s+/g, ' ').trim().slice(0, 60) || '新任务';
         this.pendingChatIds.push(thread);
-        this.chats.unshift({ id: thread, title: seedTitle || '新任务', updated: Date.now(), projectId: this.currentProjectId, permission: this.currentChatPermission });
+        this.chats.unshift({ id: thread, title: seedTitle, updated: Date.now(), projectId: this.currentProjectId, permission: this.currentChatPermission });
       }
 
       const images: ImagePart[] = opts.replay?.images ?? [];

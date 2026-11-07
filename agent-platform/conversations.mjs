@@ -238,15 +238,23 @@ export class ChatStore {
       chatCount: counts[p.id] || 0,
     })).sort((a, b) => (a.id === 'default' ? -1 : (b.id === 'default' ? 1 : a.createdAt - b.createdAt)));
   }
-  initialize(user, thread, projectId = 'default', permission) {
+  initialize(user, thread, projectId = 'default', permission, seedTitle) {
     if (!validThread(thread)) fail(422, '对话标识无效');
     return this.serialize(user, async () => {
       const meta = await this.loadMeta(user);
       const existing = meta.chats[thread];
+      // A chat keeps its first message as a provisional title until the agent
+      // names it, so the sidebar never shows a bare "新任务" or "naming…" row.
+      const seed = typeof seedTitle === 'string'
+        ? seedTitle.replace(/[\s\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 60)
+        : '';
       if (existing) {
         if (!existing.titleSource && (!existing.title || /^正在命名(?:…|\.\.\.)$/.test(existing.title))) {
           existing.titleSource = 'pending';
-          existing.title = '新任务';
+          existing.title = seed || '新任务';
+          await this.saveMeta(user, meta);
+        } else if (seed && existing.titleSource === 'pending' && (!existing.title || existing.title === '新任务')) {
+          existing.title = seed;
           await this.saveMeta(user, meta);
         }
         return;
@@ -260,7 +268,7 @@ export class ChatStore {
       });
       const pid = exists ? 'default' : normalizeProjectId(projectId);
       if (!meta.projects[pid]) fail(404, '目标项目空间不存在');
-      meta.chats[thread] = { projectId: pid, permission: sanitizePermission(exists ? undefined : permission, pid),...(!exists?{title:'新任务',titleSource:'pending',createdAt:Date.now()}:{} ) };
+      meta.chats[thread] = { projectId: pid, permission: sanitizePermission(exists ? undefined : permission, pid),...(!exists?{title:seed || '新任务',titleSource:'pending',createdAt:Date.now()}:{} ) };
       await this.saveMeta(user, meta);
     });
   }
