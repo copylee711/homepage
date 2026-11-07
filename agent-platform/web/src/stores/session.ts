@@ -483,7 +483,7 @@ export const useSession = defineStore('session', {
       });
       this.lastUserText = rawText || message;
       this.stopping = false;
-      this.turnNotes = [];
+      // Earlier notes stay: they belong to their own (older) turns.
       // Tab hide, pagehide and beforeunload must not abort this request.
       // The gateway renews the sandbox lease; only stop() cancels the prompt.
       const controller = new AbortController();
@@ -575,6 +575,8 @@ export const useSession = defineStore('session', {
         catch (error: any) { useUi().toast(error.message || '重试失败，历史已保留', { tone: 'error' }); return; }
       }
       this.messages = this.messages.slice(0, userIdx);
+      // The truncated turns took their failure notes with them.
+      this.turnNotes = [];
       await this.send(rawPrompt, { replay: { images, refs: userMsg.refs || [], quotes: userMsg.quotes || [] } });
     },
     async rewindFromMessage(msg: any) {
@@ -594,6 +596,7 @@ export const useSession = defineStore('session', {
         catch (error: any) { useUi().toast(error.message || '回退失败，历史已保留', { tone: 'error' }); return; }
       }
       this.messages = this.messages.slice(0, userIdx);
+      this.turnNotes = [];
       this.draftText = rawPrompt;
     },
     async forkFromMessage(msg: any) {
