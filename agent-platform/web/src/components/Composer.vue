@@ -5,7 +5,7 @@ import { fileToBase64 } from '../services/files';
 import ModelMenu from './ModelMenu.vue';
 import DropMenu from './DropMenu.vue';
 import type { MenuItem } from './DropMenu.vue';
-import { useSession, type PermissionScope } from '../stores/session';
+import { useSession, readExecutionPref, type PermissionScope } from '../stores/session';
 import { useWorkspace } from '../stores/workspace';
 import { useUi } from '../stores/ui';
 import { post } from '../services/api';
@@ -74,7 +74,56 @@ const effortLabel = computed(() => ({ off: '', low: '低', medium: '中', high: 
 
 const currentScope = computed(() => session.currentChatPermission.scope || 'project_only');
 const executionMode = computed(() => session.currentChatPermission.execution || 'ask');
-const executionLabel = computed(() => executionMode.value === 'auto' ? '自动执行' : executionMode.value === 'edit' ? '允许编辑' : '需要审批');
+const executionLabel = computed(() => executionMode.value === 'auto' ? '自动执行' : executionMode.value === 'edit' ? '允许编辑' : executionMode.value === 'plan' ? '计划模式' : '需要审批');
+const executionIcon = computed(() => executionMode.value === 'auto' ? 'play' : executionMode.value === 'plan' ? 'list' : 'shield');
+
+// Slash commands: client-side actions or prompt templates, discoverable by typing "/".
+interface SlashCommand { name: string; hint: string; args?: string; run: (rest: string) => void | Promise<void> }
+const INIT_PROMPT = '请分析当前项目空间的结构、技术栈、构建/测试/运行命令和代码约定，然后在项目根目录创建或更新 AGENTS.md（简洁、可执行，面向后续 agent）。已有 AGENTS.md 时保留仍然正确的内容，只补充和修正。';
+const slashCommands: SlashCommand[] = [
+  { name: 'plan', hint: '计划模式：只读调研并给出方案，确认后再执行', args: '[任务]', run: async rest => { await setExecution('plan'); if (rest) await session.send(rest); } },
+  { name: 'init', hint: '分析项目并生成 / 更新 AGENTS.md', run: () => session.send(INIT_PROMPT) },
+  { name: 'goal', hint: '长目标：持续自动推进直到完成或需要你决定', args: '<目标>', run: rest => rest ? session.send(rest, { goal: true }) : ui.toast('用法：/goal 你的长期目标', { tone: 'info' }) },
+  { name: 'compact', hint: '压缩当前对话上下文', run: compactNow },
+  { name: 'usage', hint: '查看 token 用量与费用', run: () => ui.openDialog('usage') },
+  { name: 'new', hint: '开始新任务', run: () => session.startNew() },
+  { name: 'model', hint: '切换模型与思考强度', run: () => { modelOpen.value = true; } },
+  { name: 'ask', hint: '执行方式：需要审批', run: () => setExecution('ask') },
+  { name: 'edit', hint: '执行方式：允许编辑', run: () => setExecution('edit') },
+  { name: 'auto', hint: '执行方式：自动执行', run: () => setExecution('auto') },
+];
+const slashIndex = ref(0);
+const slashMatches = computed(() => {
+  const m = /^\/([\w-]*)$/.exec(text.value);
+  if (!m || session.busyHere) return [];
+  return slashCommands.filter(c => c.name.startsWith(m[1].toLowerCase()));
+});
+watch(slashMatches, () => { slashIndex.value = 0; });
+function pickSlash(cmd: SlashCommand) {
+  text.value = '/' + cmd.name + (cmd.args ? ' ' : '');
+  nextTick(() => { area.value?.focus(); autosize(); });
+  if (!cmd.args) void runSlash();
+}
+async function runSlash() {
+  const m = /^\/([\w-]+)(?:\s+([\s\S]*))?$/.exec(text.value.trim());
+  const cmd = m && slashCommands.find(c => c.name === m[1].toLowerCase());
+  if (!cmd) return false;
+  text.value = ''; await nextTick(); autosize();
+  try { await cmd.run((m![2] || '').trim()); } catch (e: any) { ui.toast(e.message || '命令执行失败', { tone: 'error' }); }
+  return true;
+}
+async function compactNow() {
+  if (!session.currentChat) { ui.toast('打开已有对话后才能压缩', { tone: 'info' }); return; }
+  if (!await ui.confirm({ title: '压缩当前对话上下文', message: '将调用模型整理摘要，减少后续上下文用量。原始记录仍保留。', confirmText: '开始压缩' })) return;
+  const result = await post('/api/context/compact', { thread: session.currentChat.id });
+  ui.toast(result.skipped ? result.reason : '上下文已压缩', { tone: result.skipped ? 'info' : 'success' });
+}
+// After a plan-mode reply, one click returns to the user's usual mode and starts.
+const planReady = computed(() => executionMode.value === 'plan' && !session.busy && !!session.currentChat && session.messages.length > 0);
+async function executePlan() {
+  if (!await setExecution(readExecutionPref() || 'ask', true)) return;
+  await session.send('按上面的计划开始执行。每完成并验证一步就更新计划进度。');
+}
 
 function autosize() {
   const el = area.value; if (!el) return;
@@ -89,6 +138,7 @@ async function submit() {
     return;
   }
   if (!canSend.value) return;
+  if (!session.busyHere && text.value.trim().startsWith('/') && !text.value.trim().startsWith('/skill:') && await runSlash()) return;
   const value = text.value;
   if (session.busyHere) {
     try { await session.steer(value); text.value = ''; await nextTick(); autosize(); }
@@ -101,6 +151,16 @@ async function submit() {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  if (slashMatches.value.length && !e.isComposing) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const n = slashMatches.value.length;
+      slashIndex.value = (slashIndex.value + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+      return;
+    }
+    if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); pickSlash(slashMatches.value[slashIndex.value]); return; }
+    if (e.key === 'Escape') { e.preventDefault(); text.value += ' '; return; }
+  }
   if (e.key === 'Backspace' && !text.value) {
     if (session.workspaceRefs && session.workspaceRefs.length > 0) {
       session.workspaceRefs.pop();
@@ -473,19 +533,22 @@ function openPermissionMenu(e: MouseEvent) {
       label: '自动执行 · 在已授权范围内运行',
       action: () => setExecution('auto'),
     },
+    { divider: true },
+    { icon: executionMode.value === 'plan' ? 'check' : 'list', label: '计划模式 · 只读调研，先出方案再执行', action: () => setExecution('plan') },
   ];
   permissionMenu.value = { anchor: e.currentTarget as HTMLElement, items };
 }
-async function setExecution(execution: 'ask' | 'edit' | 'auto') {
-  if (execution === executionMode.value) return;
-  if (execution === 'auto' && !await ui.confirm({ title: '启用自动执行', message: '后续工具调用将在已选项目范围内直接执行，不再逐次询问。你仍可随时停止任务。', confirmText: '启用自动执行' })) return;
+async function setExecution(execution: 'ask' | 'edit' | 'auto' | 'plan', quiet = false) {
+  if (execution === executionMode.value) return true;
+  if (execution === 'auto' && !quiet && !await ui.confirm({ title: '启用自动执行', message: '后续工具调用将在已选项目范围内直接执行，不再逐次询问。你仍可随时停止任务。', confirmText: '启用自动执行' })) return false;
   const next = { ...session.currentChatPermission, execution };
   session.rememberExecution(execution);
   try {
     if (session.chatId && (!isNewSession.value || session.busy)) await session.setChatPermission(session.chatId, next);
     else session.newChatPermission = next;
-    ui.toast(execution === 'auto' ? '已启用自动执行' : execution === 'edit' ? '已允许文件编辑，Bash 仍需审批' : '已启用风险操作审批', { tone: 'success' });
-  } catch (error: any) { ui.toast(error.message || '更新执行方式失败', { tone: 'error' }); }
+    if (!quiet) ui.toast(execution === 'auto' ? '已启用自动执行' : execution === 'edit' ? '已允许文件编辑，Bash 仍需审批' : execution === 'plan' ? '计划模式：只读调研，方案确认后再执行' : '已启用风险操作审批', { tone: 'success' });
+    return true;
+  } catch (error: any) { ui.toast(error.message || '更新执行方式失败', { tone: 'error' }); return false; }
 }
 
 async function setScope(scope: PermissionScope) {
@@ -661,6 +724,29 @@ watch(() => session.draftText, (val) => {
         </div>
       </div>
 
+      <div v-if="slashMatches.length" class="slash-menu" role="listbox" aria-label="斜杠命令">
+        <button
+          v-for="(c, i) in slashMatches"
+          :key="c.name"
+          type="button"
+          role="option"
+          class="slash-item"
+          :class="{ 'is-active': i === slashIndex }"
+          :aria-selected="i === slashIndex"
+          @mousedown.prevent="pickSlash(c)"
+          @mouseenter="slashIndex = i"
+        >
+          <span class="slash-name">/{{ c.name }}<small v-if="c.args">{{ c.args }}</small></span>
+          <span class="slash-hint">{{ c.hint }}</span>
+        </button>
+      </div>
+
+      <div v-if="planReady" class="plan-ready-bar">
+        <Icon name="list" :size="13" />
+        <span>计划模式 · 只读。确认方案后开始执行，或继续补充要求。</span>
+        <button type="button" class="plan-ready-btn" @click="executePlan">执行计划</button>
+      </div>
+
       <textarea style="resize: none"
         ref="area"
         v-model="text"
@@ -697,7 +783,7 @@ watch(() => session.draftText, (val) => {
           :title="'工具执行方式：' + executionLabel"
           @click="openPermissionMenu"
         >
-          <Icon :name="executionMode === 'auto' ? 'play' : 'shield'" :size="12" />
+          <Icon :name="executionIcon" :size="12" />
           <span class="composer-project-label">{{ executionLabel }}</span>
           <Icon name="chevron-down" :size="10" class="composer-project-arrow" />
         </button>
@@ -978,6 +1064,16 @@ watch(() => session.draftText, (val) => {
   }
 }
 
+.slash-menu { position: absolute; left: 10px; right: 10px; bottom: calc(100% + 6px); z-index: 6; display: flex; flex-direction: column; gap: 1px; max-height: 300px; overflow-y: auto; padding: 5px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-lg); animation: comp-tab-in 120ms var(--ease); }
+.slash-item { display: flex; align-items: baseline; gap: 12px; padding: 7px 10px; border-radius: 9px; text-align: left; color: var(--text-2); }
+.slash-item.is-active { background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--text); }
+.slash-name { flex: none; min-width: 92px; font-family: var(--font-mono); font-size: 12.5px; font-weight: 600; color: var(--text); }
+.slash-name small { margin-left: 5px; color: var(--faint); font-weight: 500; }
+.slash-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--muted); }
+.plan-ready-bar { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 7px 8px 7px 11px; border-radius: 12px; background: color-mix(in srgb, var(--text) 4%, transparent); color: var(--text-2); font-size: 12.5px; }
+.plan-ready-bar span { flex: 1; min-width: 0; }
+.plan-ready-btn { flex: none; height: 28px; padding: 0 12px; border-radius: 999px; background: var(--ink); color: var(--surface); font-size: 12px; font-weight: 600; }
+.plan-ready-btn:hover { filter: brightness(1.12); }
 .composer-count { flex: none; color: var(--faint); font-size: 10px; font-variant-numeric: tabular-nums; }
 .model-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 256px; height: 30px; padding: 0 9px 0 10px; overflow: hidden; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--text-2); font-size: 11.5px; font-weight: 520; transition: border-color var(--fast), background-color var(--fast); }
 .model-chip:hover { border-color: var(--line-2); background: color-mix(in srgb, var(--text) 4%, transparent); }

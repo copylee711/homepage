@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 
 export type Tone = 'info' | 'success' | 'warning' | 'error';
-export type SettingsTab = 'general' | 'capabilities' | 'memory' | 'background' | 'search' | 'providers' | 'grants' | 'packages' | 'toolchains' | 'archived' | 'shortcuts';
+export type SettingsTab = 'general' | 'capabilities' | 'memory' | 'background' | 'search' | 'providers' | 'grants' | 'packages' | 'toolchains' | 'archived' | 'shortcuts' | 'usage';
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'max';
 export interface Toast { id: number; message: string; tone: Tone; action?: { label: string; run: () => void } | null; }
 
@@ -165,7 +165,7 @@ export const useUi = defineStore('ui', {
     openDialog(name: string) {
       const tabMap: Record<string, SettingsTab> = {
         provider: 'providers', providers: 'providers', grants: 'grants',
-        packages: 'packages', toolchains: 'toolchains', archived: 'archived', shortcuts: 'shortcuts',
+        packages: 'packages', toolchains: 'toolchains', archived: 'archived', shortcuts: 'shortcuts', usage: 'usage',
       };
       if (tabMap[name]) { this.openSettings(tabMap[name]); return; }
       this.dialog = name;

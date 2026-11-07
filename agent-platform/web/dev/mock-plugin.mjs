@@ -74,7 +74,10 @@ const sessions = {
 
 // Stateful virtual workspace with project folders
 const dirs = new Set(['', 'default', 'default/src', 'default/.git', 'iris-rebuild', 'iris-rebuild/src']);
+const chatSettings = { autoArchiveDays: 0 };
 const fileText = {
+  'default/data.csv': 'city,population,"area (km²)"\n北京,21893095,16410\n上海,24870895,6340\n"Guangzhou, GD",18676605,7434\n',
+  'default/page.html': '<!doctype html><html><body style="font-family:sans-serif;padding:24px"><h1>HTML 预览</h1><p id="t">script pending</p><script>document.getElementById("t").textContent="script ran in sandbox"</script></body></html>',
   'default/.env.example': 'APP_ENV=development\n',
   'default/.git/HEAD': 'ref: refs/heads/main\n',
   'default/demo.py': 'import math\n\ndef area(r):\n    return math.pi * r ** 2\n\nprint(area(2))\n',
@@ -282,8 +285,8 @@ export function devMock() {
           return send({ ok: true, thread: c.id, projectId: c.projectId });
         }
         if (path === '/api/chats/permission') {
-          const c = chats.find(x => x.id === body.thread);
-          if (!c) return send({ error: '对话不存在' }, 404);
+          let c = chats.find(x => x.id === body.thread);
+          if (!c) { c = { id: body.thread, title: '新任务', updated: Date.now(), projectId: 'default' }; chats.unshift(c); }
           c.permission = body.permission || { scope: 'project_only', extraProjects: {} };
           return send({ ok: true, thread: c.id, permission: c.permission });
         }
@@ -361,6 +364,15 @@ export function devMock() {
           }
           return send({ output, exitCode, cwd });
         }
+        if (path === '/api/chats/settings') return send(chatSettings);
+        if (path === '/api/chats/settings/save') { chatSettings.autoArchiveDays = Number(body.autoArchiveDays) || 0; return send(chatSettings); }
+        if (path === '/api/usage') {
+          const days = Number(q.get('days')) || 30, byDay = [];
+          for (let i = days - 1; i >= 0; i--) { const n = (i * 7919) % 13; byDay.push({ day: new Date(Date.now() - i * 864e5).toISOString().slice(0, 10), input: n * 42000, output: n * 3100, cacheRead: n * 9000, cacheWrite: 0, cost: n * 0.021, calls: n * 3 }); }
+          const sum = k => byDay.reduce((a, d) => a + d[k], 0);
+          const total = { input: sum('input'), output: sum('output'), cacheRead: sum('cacheRead'), cacheWrite: 0, cost: sum('cost'), calls: sum('calls') };
+          return send({ days, total, byDay, byModel: [{ key: 'opencode-go/deepseek-v4.1-flash', ...total }], byChat: chats.slice(0, 3).map((c, i) => ({ key: c.id, title: c.title, input: 120000 / (i + 1), output: 9000 / (i + 1), cacheRead: 0, cacheWrite: 0, cost: 0.4 / (i + 1), calls: 12 - i })) });
+        }
         if (path === '/api/chats') return send({ chats });
         if (path === '/api/session') return send(sessions[q.get('chat')] || { busy: false, messages: [] });
         if (path === '/api/prompt') {
@@ -417,7 +429,7 @@ export function devMock() {
             '.webp': 'image/webp', '.gif': 'image/gif', '.svg': 'image/svg+xml',
             '.pdf': 'application/pdf', '.txt': 'text/plain; charset=utf-8',
             '.md': 'text/markdown; charset=utf-8', '.py': 'text/plain; charset=utf-8',
-            '.js': 'text/javascript; charset=utf-8',
+            '.js': 'text/javascript; charset=utf-8', '.html': 'text/html; charset=utf-8',
           };
           const mime = mimeMap[ext] || 'application/octet-stream';
           const isImg = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(p);

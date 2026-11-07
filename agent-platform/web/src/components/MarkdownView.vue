@@ -18,8 +18,10 @@ function render() {
   const el = host.value;
   if (!el) return;
   const options={sources:props.sources,project:useSession().currentProjectId,citations:props.citations};
-  if (props.streaming) { writer ||= streamingMarkdown(el,document,options); writer(props.source || '', true,options); }
-  else { writer = undefined; el.replaceChildren(renderMarkdown(props.source || '', document, options)); }
+  // Goal-mode control markers are for the harness, not the reader.
+  const source = (props.source || '').replace(/\s*\[(GOAL_DONE|NEED_USER)\]\s*$/g, '');
+  if (props.streaming) { writer ||= streamingMarkdown(el,document,options); writer(source, true,options); }
+  else { writer = undefined; el.replaceChildren(renderMarkdown(source, document, options)); }
 }
 
 // Delegate copy-code buttons and workspace file links produced by the renderer.

@@ -71,6 +71,10 @@ export function handleEvent(event, live) {
     vm.status = '正在整理结果…'; return;
   }
   if (event.type === 'gateway_error') throw new Error(event.error || '任务中断，请重试');
+  if (event.type === 'auto_retry_start') { vm.status = `模型调用失败，${Math.round((event.delayMs || 0) / 1000)} 秒后自动重试（${event.attempt}/${event.maxAttempts}）…`; vm.spinner = true; return; }
+  if (event.type === 'auto_retry_end') { vm.status = event.success ? '重试成功，继续执行…' : '多次重试仍失败：' + (event.finalError || '模型服务不可用'); return; }
+  if (event.type === 'goal_progress') { vm.goal = { continues: event.continues, max: event.max }; vm.status = `长目标自动续跑 ${event.continues}/${event.max}…`; vm.spinner = true; return; }
+  if (event.type === 'compaction_start') { vm.status = '上下文接近上限，正在自动压缩…'; vm.spinner = true; return; }
   if (event.type === 'agent_settled') { if (event.aborted) vm.stopped = true; vm.status = ''; vm.spinner = false; }
 }
 

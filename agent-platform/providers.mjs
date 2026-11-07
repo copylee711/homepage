@@ -58,6 +58,7 @@ export async function publicProviders() {
       ...value,
       models: Array.isArray(value.models) && value.models.length ? value.models : (value.model ? [value.model] : []),
       hasKey: !!providerKey({ ...value, apiKey }),
+      limits: Object.fromEntries((Array.isArray(value.models) && value.models.length ? value.models : [value.model]).filter(Boolean).map(id => [id, modelLimits(value, id)])),
     })),
   };
 }
@@ -99,8 +100,43 @@ export async function normalizeProvider(input) {
     reasoning: input.reasoning === true,
     apiKey,
   };
+  value.modelSettings = normalizeModelSettings(input.modelSettings, candidateModels);
   if (!providerKey(value)) fail(422, '请先填写 API 密钥');
   return value;
+}
+
+// Known output/context limits by model family; anything else keeps Pi's
+// conservative defaults until the user sets the limit in provider settings.
+const familyLimits = [
+  [/claude-(opus|sonnet|fable)/i, { contextWindow: 200000, maxTokens: 64000 }],
+  [/claude-haiku/i, { contextWindow: 200000, maxTokens: 32000 }],
+  [/gpt-5|gpt-6|o3|o4/i, { contextWindow: 400000, maxTokens: 128000 }],
+  [/gemini-(2\.5|3)/i, { contextWindow: 1000000, maxTokens: 65536 }],
+  [/deepseek/i, { contextWindow: 128000, maxTokens: 32768 }],
+];
+export function modelLimits(provider, id) {
+  const base = { contextWindow: 128000, maxTokens: 16384 };
+  for (const [pattern, limits] of familyLimits) if (pattern.test(id)) { Object.assign(base, limits); break; }
+  const own = provider.modelSettings?.[id] || {};
+  return { ...base, ...Object.fromEntries(Object.entries(own).filter(([, v]) => v != null)) };
+}
+const settingRanges = { contextWindow: [4096, 4000000], maxTokens: [256, 1000000], input: [0, 1000], output: [0, 1000], cacheRead: [0, 1000], cacheWrite: [0, 1000] };
+function normalizeModelSettings(raw, models) {
+  const result = {};
+  if (!raw || typeof raw !== 'object') return result;
+  for (const id of models) {
+    const item = raw[id];
+    if (!item || typeof item !== 'object') continue;
+    const clean = {};
+    for (const [key, [min, max]] of Object.entries(settingRanges)) {
+      if (item[key] === '' || item[key] == null) continue;
+      const value = Number(item[key]);
+      if (!Number.isFinite(value) || value < min || value > max) fail(422, `${id} 的 ${key} 超出允许范围（${min}–${max}）`);
+      clean[key] = key === 'contextWindow' || key === 'maxTokens' ? Math.round(value) : value;
+    }
+    if (Object.keys(clean).length) result[id] = clean;
+  }
+  return result;
 }
 
 export async function normalizeProbeInput(input) {
@@ -176,13 +212,30 @@ async function syncModelsJson(config) {
     return [item.id, {
       baseUrl: item.baseUrl, api: item.api, apiKey: item.apiKey || '$OPENCODE_API_KEY', authHeader: item.api.startsWith('openai-'),
       headers: { 'User-Agent': 'copylee-pi-agent/0.1.0' },
-      models: ordered.map(id => ({ id, reasoning: item.reasoning === true, input: ['text', 'image'], contextWindow: 128000, maxTokens: 16384 })),
+      models: ordered.map(id => {
+        const { contextWindow, maxTokens, ...price } = modelLimits(item, id);
+        const cost = ['input', 'output'].every(key => price[key] != null)
+          ? { input: price.input, output: price.output, cacheRead: price.cacheRead ?? 0, cacheWrite: price.cacheWrite ?? 0 } : undefined;
+        return { id, reasoning: item.reasoning === true, input: ['text', 'image'], contextWindow, maxTokens, ...(cost ? { cost } : {}) };
+      }),
     }];
   }));
   await mkdir(root + '/agent', { recursive: true, mode: 0o700 });
+  await syncAgentSettings();
   await writeFile(root + '/agent/models.json.pending', JSON.stringify({ providers }), { mode: 0o600 });
   await rename(root + '/agent/models.json.pending', root + '/agent/models.json');
 }
+// Pi's agent-level retry covers overload, rate limits, 5xx and dropped streams.
+export async function syncAgentSettings() {
+  const path = root + '/agent/settings.json';
+  let settings = {};
+  try { settings = JSON.parse(await readFile(path, 'utf8')); } catch {}
+  settings.retry = { enabled: true, maxRetries: 5, baseDelayMs: 2000, maxAgentDelayMs: 60000 };
+  await mkdir(root + '/agent', { recursive: true, mode: 0o700 });
+  await writeFile(path + '.pending', JSON.stringify(settings, null, 2), { mode: 0o600 });
+  await rename(path + '.pending', path);
+}
+export async function syncProviderFiles() { await syncModelsJson(await loadProviders()); }
 export function proxyEnvironment(useProxy, source = process.env) {
   const env = { ...source };
   for (const name of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'NODE_USE_ENV_PROXY']) delete env[name];

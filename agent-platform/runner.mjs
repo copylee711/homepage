@@ -3,17 +3,18 @@ import { WebSession } from './web-session.mjs';
 import { FeatureStore, publicFeatures, mcpToolName } from './features.mjs';
 import { McpConnections } from './mcp.mjs';
 import { MemoryStore, memoryContext } from './memory.mjs';
-import { requiresApproval } from './execution-policy.mjs';
+import { requiresApproval, EXECUTION_MODES } from './execution-policy.mjs';
 import { streamEvent } from './stream-wire.mjs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
 import { body, equal, fail, json, modelLabel, required } from './shared.mjs';
-import { publicProviders, saveProvider, deleteProvider, activeProvider, activateProvider, testProvider, discoverProviderModels, proxyEnvironment, loadProviders } from './providers.mjs';
+import { publicProviders, saveProvider, deleteProvider, activeProvider, activateProvider, testProvider, discoverProviderModels, proxyEnvironment, loadProviders, syncProviderFiles } from './providers.mjs';
 import { sandbox, sandboxTool } from './sandbox-client.mjs';
 import { sessionCapacity } from './session-limits.mjs';
 import { prepareSessionCwd } from './session-cwd.mjs';
+import { usageSummary } from './usage.mjs';
 import { ChatStore, normalizeProjectId, sanitizePermission } from './conversations.mjs';
 import { SearchSettings, publicSearch } from './search.mjs';
 import { ToolApprovals, UserQuestions } from './tool-approvals.mjs';
@@ -32,6 +33,8 @@ const chats = new ChatStore({ sessionsRoot: '/data/sessions', metaRoot: '/data/c
 const snapshots = new SessionSnapshots(chats, projectSession);
 // Pay the SDK import cost at service startup, before readiness, never on a click.
 await projectSession('');
+// Regenerate models.json/settings.json so limits and retry policy follow the deployed code.
+await syncProviderFiles().catch(() => {});
 let configuring = false;
 const model = process.env.PI_MODEL || 'opencode-go/deepseek-v4.1-flash';
 function sameScope(a, b) { return (a?.scope || 'project_only') === (b?.scope || 'project_only') && JSON.stringify(Object.entries(a?.extraProjects || {}).sort()) === JSON.stringify(Object.entries(b?.extraProjects || {}).sort()); }
@@ -60,7 +63,7 @@ class Pi {
     const projectId = chatItem.projectId || 'default';
     this.projectId = projectId;
     const permission = chatItem.permission || { scope: 'project_only', extraProjects: {} };
-    this.execution = ['auto', 'edit'].includes(permission.execution) ? permission.execution : 'ask';
+    this.execution = EXECUTION_MODES.includes(permission.execution) ? permission.execution : 'ask';
     this.secrets = await secretValues();
     this.lease = (await sandbox('/lease', this.user, undefined, { project: projectId, ...permission })).token;
     await sandboxTool(this.lease, { op: 'mkdir', path: `/workspace/${projectId}` });
@@ -132,7 +135,7 @@ class Pi {
       });
     });
   }
-  async prompt(res, message, thinking, images, permission) {
+  async prompt(res, message, thinking, images, permission, goal) {
     if (this.maintenance) fail(409, '正在压缩此对话');
     if (deleting.has(this.key)) fail(409, '正在删除此对话');
     invalidateWorkspace(this.user);
@@ -142,14 +145,16 @@ class Pi {
     if (deleting.has(this.key)) fail(409, '正在删除此对话');
     // Recheck after the asynchronous capacity read before claiming this user's task.
     if ([...sessions.values()].some(entry => entry.pi.user === this.user && entry.pi.busy)) fail(409, '每个用户同时只能运行一个任务');
-    if (permission?.execution && ['auto', 'edit', 'ask'].includes(permission.execution)) {
+    if (permission?.execution && EXECUTION_MODES.includes(permission.execution)) {
       this.execution = permission.execution;
     }
     this.busy = true; this.webSession=new WebSession(); this.output = res;
+    // Goal mode keeps continuing across settle points, so it gets a longer budget.
+    this.goal = goal ? { continues: 0, max: 20 } : null;
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
     const abort = () => { if (this.busy && this.output === res) void cancel(this.user).catch(() => this.proc?.kill()); };
     res.once('close', abort);
-    this.deadline = setTimeout(abort, 30 * 60000);
+    this.deadline = setTimeout(abort, (goal ? 90 : 30) * 60000);
     let checking = false;
     this.storageCheck = setInterval(async () => {
       if (checking) return; checking = true;
@@ -276,7 +281,13 @@ export const server = createServer(async (req, res) => {
       if (req.url === '/runtime/context') {const item=(await chats.loadMeta(pi.user)).chats[pi.thread];return json(res,200,{context:memoryContext(await memories.read(pi.user,pi.projectId))+(item?.titleSource==='pending'?'\nThis is a new conversation: call set_chat_title early with a concise summary of the actual task, rather than copying user text.':'')});}
       if (req.url === '/runtime/memory/read') return json(res, 200, await memories.read(pi.user, pi.projectId));
       if (req.url === '/runtime/memory/update') return json(res, 200, await memories.update(pi.user, pi.projectId, await body(req)));
-      if (req.url === '/runtime/policy') return json(res, 200, { execution: pi.execution });
+      if (req.url === '/runtime/policy') return json(res, 200, { execution: pi.execution, goal: !!pi.goal });
+      if (req.url === '/runtime/goal/continue') {
+        if (!pi.goal || pi.goal.continues >= pi.goal.max) return json(res, 200, { continue: false });
+        pi.goal.continues++;
+        pi.output?.write(JSON.stringify({ type: 'goal_progress', continues: pi.goal.continues, max: pi.goal.max }) + '\n');
+        return json(res, 200, { continue: true, continues: pi.goal.continues, max: pi.goal.max });
+      }
       if(req.url==='/runtime/chat/title'){
         const input=await body(req);const result=await chats.autoTitle(pi.user,pi.thread,input.title);
         if(!result.skipped&&pi.output)pi.output.write(JSON.stringify({type:'chat_title',thread:pi.thread,title:result.title})+'\n');
@@ -301,6 +312,11 @@ export const server = createServer(async (req, res) => {
       const lease=(await sandbox('/lease',input.user)).token;
       try { return json(res,200,await sandboxTool(lease,{op:'image-fetch',url:input.url},20000)); }
       catch { return json(res,200,await sandboxTool(lease,{op:'image-fetch',url:input.url,useProxy:false},20000)); }
+    }
+    if (req.url === '/usage') {
+      const meta = await chats.loadMeta(input.user);
+      const titles = Object.fromEntries(Object.entries(meta.chats || {}).map(([id, c]) => [id, c.title]));
+      return json(res, 200, await usageSummary(input.user, titles, Math.min(365, Math.max(1, Number(input.days) || 30))));
     }
     if (req.url === '/features') return json(res, 200, publicFeatures(await features.get(input.user)));
     if (req.url === '/features/save') {
@@ -531,7 +547,13 @@ export const server = createServer(async (req, res) => {
       }
       return json(res, 200, { output, exitCode: result.exitCode ?? 0, cwd: nextCwd });
     }
-    if (req.url === '/chats') return json(res, 200, { chats: await chats.list(input.user) });
+    if (req.url === '/chats') {
+      const busy = new Set([...sessions.values()].filter(e => e.pi.user === input.user && (e.pi.busy || e.initializing)).map(e => e.pi.thread));
+      await chats.autoArchive(input.user, busy).catch(() => {});
+      return json(res, 200, { chats: await chats.list(input.user) });
+    }
+    if (req.url === '/chats/settings') return json(res, 200, (await chats.loadMeta(input.user)).settings);
+    if (req.url === '/chats/settings/save') return json(res, 200, await chats.setChatSettings(input.user, input));
     if (req.url === '/chats/rename') return json(res, 200, await chats.rename(input.user, input.thread, input.title));
     if (req.url === '/chats/pin') return json(res, 200, await chats.setPinned(input.user, input.thread, input.pinned));
     if (req.url === '/chats/archive') return json(res, 200, await chats.setArchived(input.user, input.thread, input.archived));
@@ -575,7 +597,7 @@ export const server = createServer(async (req, res) => {
       const prompt=promptInput(input);
       await chats.initialize(input.user, input.thread, input.projectId, input.permission);
       const pi = await instance(input.user, input.thread);
-      return await pi.prompt(res, prompt.message, input.thinking, prompt.images, input.permission);
+      return await pi.prompt(res, prompt.message, input.thinking, prompt.images, input.permission, input.goal === true);
     }
     fail(404, '接口不存在');
   } catch (error) {

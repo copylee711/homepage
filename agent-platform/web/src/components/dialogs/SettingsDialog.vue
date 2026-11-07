@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import CapabilitiesPanel from '../settings/CapabilitiesPanel.vue';
 import MemoryPanel from '../settings/MemoryPanel.vue';
 import SearchPanel from '../settings/SearchPanel.vue';
@@ -9,9 +9,10 @@ import ProvidersPanel from '../settings/ProvidersPanel.vue';
 import GrantsPanel from '../settings/GrantsPanel.vue';
 import PackagesPanel from '../settings/PackagesPanel.vue';
 import ToolchainsPanel from '../settings/ToolchainsPanel.vue';
+import UsagePanel from '../settings/UsagePanel.vue';
 import { useUi, type SettingsTab, type ThinkingLevel } from '../../stores/ui';
 import { useSession } from '../../stores/session';
-import { post } from '../../services/api';
+import { get, post } from '../../services/api';
 import { formatShort } from '../../services/format';
 
 const ui = useUi();
@@ -31,6 +32,7 @@ const navItems = computed(() => {
     { id: 'grants', icon: 'users', label: '执行授权与配额', show: session.isAdmin },
     { id: 'packages', icon: 'package', label: '技能资源市场', show: session.isAdmin },
     { id: 'toolchains', icon: 'terminal', label: '工具链', show: session.canExecute },
+    { id: 'usage', icon: 'activity', label: '用量与费用', show: session.canExecute },
     { id: 'archived', icon: 'archive', label: '已归档对话', show: true },
     { id: 'shortcuts', icon: 'keyboard', label: '快捷键', show: true },
   ];
@@ -38,6 +40,22 @@ const navItems = computed(() => {
 });
 
 async function changeTab(tab: SettingsTab) { if (ui.dialogGuard && !await ui.dialogGuard()) return; ui.settingsTab = tab; }
+
+const archiveChoices = [{ value: 0, label: '关闭' }, { value: 7, label: '7 天' }, { value: 14, label: '14 天' }, { value: 30, label: '30 天' }, { value: 90, label: '90 天' }];
+const autoArchiveDays = ref<number | null>(null);
+onMounted(async () => {
+  if (!session.canExecute) return;
+  try { autoArchiveDays.value = (await get('/api/chats/settings')).autoArchiveDays || 0; } catch {}
+});
+async function setAutoArchive(days: number) {
+  const previous = autoArchiveDays.value;
+  autoArchiveDays.value = days;
+  try {
+    await post('/api/chats/settings/save', { autoArchiveDays: days });
+    await session.loadChats();
+    ui.toast(days ? `闲置超过 ${days} 天的会话将自动归档` : '已关闭自动归档', { tone: 'success' });
+  } catch (e: any) { autoArchiveDays.value = previous; ui.toast(e.message, { tone: 'error' }); }
+}
 
 const archived = computed(() => session.chats.filter(c => c.archived === true));
 const thinkingOptions: { value: ThinkingLevel; label: string }[] = [
@@ -174,6 +192,15 @@ async function remove(c: any) {
               <button type="button" :class="{ 'is-on': ui.workspaceDual }" @click="ui.setWorkspaceDual(true)">双右栏</button>
             </div>
           </div>
+          <div v-if="session.canExecute" class="setting-row">
+            <div class="setting-info">
+              <strong>自动归档闲置会话</strong>
+              <span>超过所选天数没有新消息的会话自动归档（置顶会话除外），可在“已归档对话”中恢复</span>
+            </div>
+            <div class="seg">
+              <button v-for="d in archiveChoices" :key="d.value" type="button" :class="{ 'is-on': autoArchiveDays === d.value }" @click="setAutoArchive(d.value)">{{ d.label }}</button>
+            </div>
+          </div>
         </div>
 
         <CapabilitiesPanel v-else-if="ui.settingsTab === 'capabilities' && session.canExecute" />
@@ -183,6 +210,7 @@ async function remove(c: any) {
         <GrantsPanel v-else-if="ui.settingsTab === 'grants' && session.isAdmin" />
         <PackagesPanel v-else-if="ui.settingsTab === 'packages' && session.isAdmin" />
         <ToolchainsPanel v-else-if="ui.settingsTab === 'toolchains' && session.canExecute" />
+        <UsagePanel v-else-if="ui.settingsTab === 'usage' && session.canExecute" />
 
         <div v-else-if="ui.settingsTab === 'archived'" class="settings-pad">
           <p v-if="!archived.length" class="list-empty-plain">没有已归档的对话。可在侧边栏对话菜单中归档。</p>

@@ -194,11 +194,40 @@ function extLang(name: string) {
 function isMarkdownFile(name: string) {
   return /\.(md|markdown|mdx)$/i.test(name || '');
 }
-
-const showRenderedMd = computed(() => {
+// Text formats with a rendered view; the same toggle switches back to source.
+function renderableKind(name: string): 'md' | 'html' | 'csv' | null {
+  if (isMarkdownFile(name)) return 'md';
+  if (/\.html?$/i.test(name || '')) return 'html';
+  if (/\.(csv|tsv)$/i.test(name || '')) return 'csv';
+  return null;
+}
+const renderedKind = computed(() => {
   const tab = activeFileTab.value;
-  if (!tab || tab.editing || tab.binary || tab.isImage || tab.loading) return false;
-  return isMarkdownFile(tab.name) && !mdSourceMode.value[tab.path];
+  if (!tab || tab.editing || tab.binary || tab.isImage || tab.loading) return null;
+  return mdSourceMode.value[tab.path] ? null : renderableKind(tab.name);
+});
+const showRenderedMd = computed(() => renderedKind.value === 'md');
+const htmlPreviewUrl = computed(() => {
+  const tab = activeFileTab.value;
+  return tab ? `/api/files/download?path=${encodeURIComponent(tab.path)}&inline=1&v=${tab.revision || Date.now()}` : '';
+});
+// Minimal RFC 4180 parsing, capped for responsiveness.
+const csvRows = computed(() => {
+  const tab = activeFileTab.value;
+  if (renderedKind.value !== 'csv' || !tab) return [] as string[][];
+  const sep = /\.tsv$/i.test(tab.name) ? '\t' : ',';
+  const rows: string[][] = []; let row: string[] = [], cell = '', quoted = false;
+  const text = tab.text || '';
+  for (let i = 0; i < text.length && rows.length < 1000; i++) {
+    const ch = text[i];
+    if (quoted) { if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (ch === '"') quoted = false; else cell += ch; continue; }
+    if (ch === '"') quoted = true;
+    else if (ch === sep) { row.push(cell); cell = ''; }
+    else if (ch === '\n') { row.push(cell.replace(/\r$/, '')); rows.push(row); row = []; cell = ''; }
+    else cell += ch;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows;
 });
 
 function toggleMdMode(path: string) {
@@ -208,12 +237,12 @@ function toggleMdMode(path: string) {
 function renderHighlight() {
   const el = codeRef.value;
   const tab = activeFileTab.value;
-  if (!el || !tab || tab.editing || tab.binary || tab.isImage || tab.loading || showRenderedMd.value) return;
+  if (!el || !tab || tab.editing || tab.binary || tab.isImage || tab.loading || renderedKind.value) return;
   highlightInto(el, tab.text || '', extLang(tab.name));
 }
 
 watch(
-  () => [activeFileTab.value?.path, activeFileTab.value?.text, activeFileTab.value?.editing, activeFileTab.value?.loading, isDual.value, showRenderedMd.value],
+  () => [activeFileTab.value?.path, activeFileTab.value?.text, activeFileTab.value?.editing, activeFileTab.value?.loading, isDual.value, renderedKind.value],
   () => { void nextTick(renderHighlight); },
   { immediate: true, flush: 'post' }
 );
@@ -946,13 +975,13 @@ onMounted(() => {
                 </template>
                 <template v-else>
                   <button
-                    v-if="isMarkdownFile(activeFileTab.name)"
+                    v-if="renderableKind(activeFileTab.name)"
                     type="button"
                     class="viewer-pill"
-                    :title="showRenderedMd ? '查看 Markdown 源码' : '查看渲染预览'"
+                    :title="renderedKind ? '查看源码' : '查看渲染预览'"
                     @click="toggleMdMode(activeFileTab.path)"
                   >
-                    <span>{{ showRenderedMd ? '源码' : '预览' }}</span>
+                    <span>{{ renderedKind ? '源码' : '预览' }}</span>
                   </button>
                   <button type="button" class="viewer-pill" @click="activeFileTab.editing = true">
                     <Icon name="edit" :size="12" /><span>编辑</span>
@@ -1000,6 +1029,17 @@ onMounted(() => {
           <div v-else-if="showRenderedMd" class="preview-markdown">
             <MarkdownView :source="activeFileTab.text" :sources="true" />
           </div>
+          <iframe v-else-if="renderedKind === 'html'" class="preview-frame" :src="htmlPreviewUrl" sandbox="allow-scripts" :title="activeFileTab.name + ' 预览'"></iframe>
+          <div v-else-if="renderedKind === 'csv'" class="preview-csv">
+            <table>
+              <thead v-if="csvRows.length"><tr><th v-for="(h, i) in csvRows[0]" :key="i">{{ h }}</th></tr></thead>
+              <tbody><tr v-for="(r, ri) in csvRows.slice(1)" :key="ri"><td v-for="(c, ci) in r" :key="ci">{{ c }}</td></tr></tbody>
+            </table>
+            <p v-if="csvRows.length >= 1000" class="preview-note">仅显示前 1000 行。</p>
+          </div>
+          <iframe v-else-if="activeFileTab.embed === 'pdf'" class="preview-frame" :src="activeFileTab.embedUrl" :title="activeFileTab.name"></iframe>
+          <div v-else-if="activeFileTab.embed === 'video'" class="preview-media"><video :src="activeFileTab.embedUrl" controls preload="metadata"></video></div>
+          <div v-else-if="activeFileTab.embed === 'audio'" class="preview-media is-audio"><Icon name="file" :size="28" /><audio :src="activeFileTab.embedUrl" controls preload="metadata"></audio></div>
           <pre v-else-if="!activeFileTab.binary" class="preview-body"><code ref="codeRef"></code></pre>
         </template>
 

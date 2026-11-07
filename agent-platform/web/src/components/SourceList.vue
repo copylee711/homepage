@@ -67,8 +67,6 @@ defineProps<{ sources: any[] }>();
   padding: 4px 2px 10px;
   margin: 8px 0 0;
   overflow-x: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
   animation: sources-in 180ms var(--ease) both;

@@ -91,9 +91,11 @@ function toggle() {
 .thinking.is-preview .thinking-body {
   max-height: 5.5em;
   overflow-y: auto;
+  scrollbar-width: none;
   -webkit-mask-image: linear-gradient(to bottom, transparent, #000 20%);
   mask-image: linear-gradient(to bottom, transparent, #000 20%);
 }
+.thinking.is-preview .thinking-body::-webkit-scrollbar { display: none; }
 /* Full expansion after re-opening */
 .thinking.is-expanded .thinking-body {
   max-height: none;

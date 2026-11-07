@@ -4,6 +4,7 @@ import Icon from './Icon.vue';
 import { formatDuration } from '../services/format';
 import { useWorkspace } from '../stores/workspace';
 import { useSession } from '../stores/session';
+import { useUi } from '../stores/ui';
 
 const props = defineProps<{ block?: any; tools?: any[] }>();
 
@@ -71,6 +72,10 @@ const VERBS: Record<string, string> = {
   shell: '运行',
   ls: '浏览',
   list_dir: '浏览',
+  list_directory: '浏览',
+  search_files: '搜索文件',
+  update_plan: '更新计划',
+  set_chat_title: '命名会话',
   glob: '查找',
   find: '查找',
   grep: '搜索',
@@ -120,71 +125,62 @@ function summarize(b: any): string {
   return actionParts(b).full;
 }
 
-// Synthesize Claude-style summary:
-// "Finished a background task, read 10 files...   and 9 more actions (2 failed)  +68 -33 · View changes >"
+// Summarize a group by what it actually did, e.g. "搜索了“Claude Opus 5.5”，访问了 anthropic.com".
+// Every tool belongs to a category; each category yields one phrase, specific
+// when it ran once and counted when it ran several times.
+type Category = { key: string; count: number; first: string; many: (n: number) => string };
+function hostOf(url: string) { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; } }
+function short(text: string, n = 28) { const t = String(text || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
+function categorize(b: any): { key: string; one: string; many: (n: number) => string } {
+  const key = String(b?.name || '').toLowerCase();
+  const a = parseArgs(b?.args);
+  const p = actionParts(b);
+  if (key === 'read') return { key: 'read', one: p.target ? `读取了 ${p.target}` : '读取了文件', many: n => `读取了 ${n} 个文件` };
+  if (['write', 'edit', 'multi_edit'].includes(key)) return { key: 'edit', one: p.target ? `编辑了 ${p.target}` : '编辑了文件', many: n => `编辑了 ${n} 个文件` };
+  if (key === 'bash' || key === 'shell') return { key: 'bash', one: p.full, many: n => `运行了 ${n} 条命令` };
+  if (['grep', 'search', 'find', 'glob', 'search_files'].includes(key)) return { key: 'code', one: a.query ? `搜索了代码“${short(a.query, 20)}”` : '搜索了项目文件', many: n => `搜索了 ${n} 次代码` };
+  if (['ls', 'list_dir', 'list_directory'].includes(key)) return { key: 'ls', one: p.target ? `浏览了 ${p.target}` : '浏览了目录', many: n => `浏览了 ${n} 个目录` };
+  if (key === 'web_search') return { key: 'web', one: a.query ? `搜索了“${short(a.query)}”` : '搜索了网页', many: n => `搜索了 ${n} 次网页` };
+  if (key === 'web_fetch' || key === 'fetch') return { key: 'fetch', one: a.url ? `访问了 ${hostOf(a.url)}` : '访问了网页', many: n => `访问了 ${n} 个网页` };
+  if (key === 'image_search') return { key: 'image', one: a.query ? `搜索了图片“${short(a.query, 20)}”` : '搜索了图片', many: n => `搜索了 ${n} 次图片` };
+  if (key === 'memory_read') return { key: 'mem-r', one: '读取了记忆', many: () => '读取了记忆' };
+  if (key === 'memory_update') return { key: 'mem-w', one: '保存了记忆', many: n => `保存了 ${n} 条记忆` };
+  if (key === 'update_plan') return { key: 'plan', one: '更新了计划', many: () => '更新了计划' };
+  if (key === 'set_chat_title') return { key: 'title', one: '命名了会话', many: () => '命名了会话' };
+  if (key === 'ask_user') return { key: 'ask', one: '询问了你', many: n => `询问了你 ${n} 次` };
+  if (key.startsWith('background_')) return { key: 'bg', one: VERBS[key] || '管理后台任务', many: () => '管理了后台任务' };
+  return { key: 'tool:' + key, one: `调用了 ${b?.name || '工具'}`, many: n => `调用了 ${n} 次 ${b?.name || '工具'}` };
+}
 const claudeSummary = computed(() => {
   const tools = list.value;
   const total = tools.length;
   if (!total) return { headText: '', moreText: '', failedText: '', diffAdd: 0, diffDel: 0 };
 
-  let reads = 0;
-  let edits = 0;
-  let runs = 0;
-  let searches = 0;
   let diffAdd = 0;
   let diffDel = 0;
-  const specificActions: string[] = [];
-
+  const cats: Category[] = [];
   for (const b of tools) {
-    const key = String(b?.name || '').toLowerCase();
-    const p = actionParts(b);
-
-    if (key === 'read') {
-      reads++;
-      if (reads === 1 && p.target) specificActions.push(`读取了 ${p.target}`);
-    } else if (key === 'write' || key === 'edit' || key === 'multi_edit') {
-      edits++;
-      if (edits === 1 && p.target) specificActions.push(`编辑了 ${p.target}`);
-    } else if (key === 'bash' || key === 'shell') {
-      runs++;
-      if (runs === 1) specificActions.push(p.full);
-    } else if (key === 'grep' || key === 'search' || key === 'find' || key === 'glob') {
-      searches++;
-      if (searches === 1) specificActions.push('搜索了代码');
-    }
-
+    const c = categorize(b);
+    const found = cats.find(x => x.key === c.key);
+    if (found) found.count++; else cats.push({ key: c.key, count: 1, first: c.one, many: c.many });
     // Only explicit structured edit statistics count. URLs, dates and output
     // numbers must never be interpreted as changed lines.
-    if (['write', 'edit', 'multi_edit'].includes(key)) {
+    if (c.key === 'edit') {
       const stats = b?.details?.diffStats;
       if (Number.isSafeInteger(stats?.added) && stats.added >= 0) diffAdd += stats.added;
       if (Number.isSafeInteger(stats?.removed) && stats.removed >= 0) diffDel += stats.removed;
     }
   }
-
-  const headParts: string[] = [];
-  if (runningCount.value > 0) {
-    headParts.push(`正在执行 (${total - runningCount.value}/${total})`);
-  } else {
-    if (reads > 1) headParts.push(`读取了 ${reads} 个文件`);
-    else if (reads === 1) headParts.push(specificActions.find(s => s.startsWith('读取')) || '读取了 1 个文件');
-
-    if (edits > 1) headParts.push(`编辑了 ${edits} 个文件`);
-    else if (edits === 1) headParts.push(specificActions.find(s => s.startsWith('编辑')) || '编辑了 1 个文件');
-
-    if (runs > 1) headParts.push(`运行了 ${runs} 条命令`);
-    else if (runs === 1) headParts.push(specificActions.find(s => s.startsWith('运行')) || '运行了终端命令');
-
-    if (searches > 0 && headParts.length < 2) headParts.push('搜索了文件与代码');
-
-    if (!headParts.length) {
-      headParts.push(specificActions[0] || `执行了 ${total} 项操作`);
-    }
-  }
-
-  const displayedCount = (reads > 1 ? reads : (reads === 1 ? 1 : 0)) + (edits > 1 ? edits : (edits === 1 ? 1 : 0));
-  const remaining = Math.max(0, total - Math.max(1, displayedCount));
-  const headText = headParts.slice(0, 2).join('，') + (remaining > 0 ? '…' : '');
+  // Bookkeeping (plan, title) only fills the line when nothing substantive ran.
+  const minor = new Set(['plan', 'title']);
+  const ordered = [...cats.filter(c => !minor.has(c.key)), ...cats.filter(c => minor.has(c.key))];
+  const shown = ordered.slice(0, 2);
+  const covered = shown.reduce((n, c) => n + c.count, 0);
+  const remaining = total - covered;
+  const phrase = (c: Category) => c.count > 1 ? c.many(c.count) : c.first;
+  const headText = runningCount.value > 0
+    ? `正在执行 (${total - runningCount.value}/${total}) · ${phrase(shown[shown.length - 1] || ordered[0])}`
+    : shown.map(phrase).join('，');
   const moreText = remaining > 0 ? `还有 ${remaining} 项操作` : '';
   const failedText = failedCount.value > 0 ? `(${failedCount.value} 项失败)` : '';
 
@@ -216,6 +212,21 @@ function openArgFile(v: string) {
   const proj = useSession().currentProjectId;
   void useWorkspace().locateAndOpenFile(v, proj);
 }
+
+// Images the agent looked at show as small thumbnails on the summary line.
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+function workspaceImagePath(b: any): string {
+  if (String(b?.name || '').toLowerCase() !== 'read' || b?.state === 'error') return '';
+  const raw = String(parseArgs(b?.args).path || parseArgs(b?.args).file_path || '').trim();
+  if (!IMAGE_EXT.test(raw)) return '';
+  if (raw.startsWith('/workspace/')) return raw.slice('/workspace/'.length);
+  return `${useSession().currentProjectId}/${raw.replace(/^\.?\//, '')}`;
+}
+const thumbs = computed(() => list.value.map(workspaceImagePath).filter(Boolean)
+  .filter((p, i, all) => all.indexOf(p) === i).slice(0, 6)
+  .map(path => ({ path, name: path.split('/').pop() || path, url: '/api/files/download?path=' + encodeURIComponent(path) + '&inline=1' })));
+const brokenThumbs = ref<Record<string, boolean>>({});
+function openThumb(t: { url: string; name: string }) { useUi().openLightbox({ url: t.url, name: t.name }); }
 </script>
 
 <template>
@@ -238,6 +249,11 @@ function openArgFile(v: string) {
       <span v-if="list[0].durationMs" class="tc-dur">{{ formatDuration(list[0].durationMs) }}</span>
       <span class="tc-chevron"><Icon name="chevron-right" :size="12" /></span>
     </button>
+    <div v-if="thumbs.length" class="tc-thumbs">
+      <button v-for="t in thumbs" v-show="!brokenThumbs[t.path]" :key="t.path" type="button" class="tc-thumb" :title="t.name" @click="openThumb(t)">
+        <img :src="t.url" :alt="t.name" loading="lazy" @error="brokenThumbs[t.path] = true">
+      </button>
+    </div>
     <div v-if="isRowOpen(list[0], 0)" class="tc-detail">
       <dl v-if="argRows(list[0]).length" class="tc-args">
         <template v-for="(r, ri) in argRows(list[0])" :key="ri">
@@ -279,6 +295,11 @@ function openArgFile(v: string) {
         </span>
       </div>
     </button>
+    <div v-if="thumbs.length" class="tc-thumbs">
+      <button v-for="t in thumbs" v-show="!brokenThumbs[t.path]" :key="t.path" type="button" class="tc-thumb" :title="t.name" @click="openThumb(t)">
+        <img :src="t.url" :alt="t.name" loading="lazy" @error="brokenThumbs[t.path] = true">
+      </button>
+    </div>
 
     <div
       v-show="mode !== 'collapsed'"
@@ -329,6 +350,10 @@ function openArgFile(v: string) {
 </template>
 
 <style>
+.tc-thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 6px 2px; }
+.tc-thumb { width: 64px; height: 48px; padding: 0; overflow: hidden; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface-2); cursor: zoom-in; transition: border-color var(--fast), transform var(--fast); }
+.tc-thumb:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+.tc-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
 /* Single-line Claude-style tool row (borderless, quiet, inline) */
 .tc-single {
   margin: 4px 0 6px;
@@ -543,7 +568,9 @@ function openArgFile(v: string) {
   max-height: 156px;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-width: none;
 }
+.tg[data-mode='preview'] .tg-list::-webkit-scrollbar { display: none; }
 .tg[data-mode='expanded'] .tg-list {
   max-height: none;
   overflow: visible;

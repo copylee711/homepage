@@ -3,6 +3,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue';
 import Icon from '../Icon.vue';
 import { get, post } from '../../services/api';
 import { useUi } from '../../stores/ui';
+import { useWorkspace } from '../../stores/workspace';
 
 const ui = useUi();
 const status = ref('正在读取工具链状态…');
@@ -11,15 +12,21 @@ const installed = ref<Map<string, string>>(new Map());
 const versions = ref<Record<string, string>>({});
 const running = ref(false);
 const pending = ref(false);
-const output = ref('');
+const job = ref<any>(null);
 let timer: ReturnType<typeof setTimeout> | null = null;
+
+// Logs persist in the workspace; open them in the file viewer instead of pinning output here.
+function openLog(path: string) {
+  ui.closeDialog();
+  void useWorkspace().locateAndOpenFile(path.replace(/^\/workspace\//, ''), '');
+}
 
 async function load() {
   if (timer) { clearTimeout(timer); timer = null; }
   try {
     const data = await get('/api/toolchains');
     running.value = data.job?.state === 'running';
-    output.value = data.job?.output || '';
+    job.value = data.job || null;
     if (Array.isArray(data.catalog) && data.catalog.length) {
       catalog.value = data.catalog;
       const map = new Map<string, string>((data.installed || []).map((i: any) => [i.id, i.version]));
@@ -85,7 +92,18 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer); });
       </button>
     </div>
 
-    <pre v-if="output" class="tc-output">{{ output }}</pre>
+    <div v-if="running" class="tc-result is-running" role="status">
+      <span class="spinner"></span>
+      <span>正在{{ job?.action === 'remove' ? '移除' : '安装' }} {{ job?.id }} {{ job?.version }}…</span>
+    </div>
+    <div v-else-if="job" class="tc-result" :class="'is-' + job.state" role="status">
+      <Icon :name="job.state === 'done' ? 'check' : 'alert-circle'" :size="14" />
+      <span class="tc-result-text">
+        {{ job.action === 'remove' ? '移除' : '安装' }} {{ job.id }} {{ job.version }} · {{ job.state === 'done' ? '成功' : job.state === 'cancelled' ? '已停止' : '失败' }}
+        <small v-if="job.summary">{{ job.summary }}</small>
+      </span>
+      <button v-if="job.logPath" type="button" class="link-btn" @click="openLog(job.logPath)">查看日志</button>
+    </div>
 
     <div class="pkg-list">
       <p v-if="!catalog.length && !running" class="list-empty-plain">暂无可配置工具链条目。</p>
@@ -128,5 +146,9 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer); });
 .tc-actions { display: flex; align-items: center; gap: 6px; flex: none; flex-wrap: wrap; }
 .tc-ver-input { width: 92px; height: 32px; padding: 0 9px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface-2); color: var(--text); font-family: var(--font-mono); font-size: 12px; outline: 0; }
 .tc-ver-input:focus { border-color: var(--line-focus); background: var(--surface); }
-.tc-output { margin: 0; max-height: 150px; overflow: auto; padding: 11px 13px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--code-bg); color: var(--text-2); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; }
+.tc-result { display: flex; align-items: center; gap: 9px; margin-bottom: 4px; padding: 9px 12px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); color: var(--text-2); font-size: 12.5px; }
+.tc-result.is-done > svg { color: var(--ok); }
+.tc-result.is-failed > svg { color: var(--danger); }
+.tc-result-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tc-result-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
 </style>

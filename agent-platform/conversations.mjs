@@ -38,7 +38,7 @@ export function sanitizePermission(value, currentProject = 'default') {
       }
     }
   }
-  return { scope, extraProjects, execution: ['auto', 'edit'].includes(value.execution) ? value.execution : 'ask' };
+  return { scope, extraProjects, execution: ['auto', 'edit', 'plan'].includes(value.execution) ? value.execution : 'ask' };
 }
 export function normalizeTitle(value) {
   if (typeof value !== 'string') fail(422, '请填写对话标题');
@@ -135,6 +135,7 @@ export class ChatStore {
           version: 2,
           projects: { default: { id: 'default', name: '默认项目', createdAt: 0 } },
           chats: {},
+          settings: { autoArchiveDays: 0 },
         };
       }
       if (error instanceof SyntaxError) fail(503, '对话元数据异常，请联系管理员检查');
@@ -171,14 +172,44 @@ export class ChatStore {
       entry.permission = sanitizePermission(item.permission, pId);
       if (Object.keys(entry).length) chats[id] = entry;
     }
-    return { version: 2, projects, chats };
+    const days = Number(value?.settings?.autoArchiveDays);
+    const settings = { autoArchiveDays: Number.isInteger(days) && days > 0 && days <= 365 ? days : 0 };
+    return { version: 2, projects, chats, settings };
   }
   async saveMeta(user, meta) {
     await mkdir(this.metaRoot, { recursive: true, mode: 0o700 });
     const target = this.metaFile(user), temporary = target + '.tmp-' + process.pid + '-' + Date.now();
-    await writeFile(temporary, JSON.stringify({ version: 2, projects: meta.projects, chats: meta.chats }), { mode: 0o600 });
+    await writeFile(temporary, JSON.stringify({ version: 2, projects: meta.projects, chats: meta.chats, settings: meta.settings }), { mode: 0o600 });
     try { await rename(temporary, target); }
     catch (error) { await unlink(temporary).catch(() => {}); throw error; }
+  }
+  async setChatSettings(user, input) {
+    const days = Number(input?.autoArchiveDays);
+    if (!Number.isInteger(days) || days < 0 || days > 365) fail(422, '自动归档天数需为 0–365 的整数（0 表示关闭）');
+    return this.serialize(user, async () => {
+      const meta = await this.loadMeta(user);
+      meta.settings = { ...meta.settings, autoArchiveDays: days };
+      await this.saveMeta(user, meta);
+      return meta.settings;
+    });
+  }
+  // Archive unpinned conversations idle longer than the user's chosen window.
+  autoArchive(user, busy = new Set()) {
+    return this.serialize(user, async () => {
+      const meta = await this.loadMeta(user);
+      const days = meta.settings?.autoArchiveDays || 0;
+      if (!days) return 0;
+      const cutoff = Date.now() - days * 864e5;
+      let changed = 0;
+      for (const [id, item] of Object.entries(meta.chats)) {
+        if (item.archived || item.pinned || busy.has(id)) continue;
+        let updated;
+        try { updated = (await lstat(this.file(user, id))).mtimeMs; } catch { updated = item.updatedAt || item.createdAt || Date.now(); }
+        if (updated < cutoff) { item.archived = true; changed++; }
+      }
+      if (changed) await this.saveMeta(user, meta);
+      return changed;
+    });
   }
   async listProjects(user) {
     const meta = await this.loadMeta(user);

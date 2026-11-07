@@ -10,13 +10,14 @@ export type PermissionScope = 'project_only' | 'scoped' | 'full';
 export interface ChatPermission {
   scope: PermissionScope;
   extraProjects?: Record<string, 'read' | 'write'>;
-  execution?: 'ask' | 'edit' | 'auto';
+  execution?: 'ask' | 'edit' | 'auto' | 'plan';
 }
 
 // The execution mode is a habit, not a per-chat setting: remember the last
-// choice so a brand-new task starts in the mode the user last picked.
+// choice so a brand-new task starts in the mode the user last picked. Plan mode
+// is a per-task phase, so it is never remembered as the habit.
 const EXECUTION_KEY = 'iris-execution';
-function readExecutionPref(): ChatPermission['execution'] {
+export function readExecutionPref(): ChatPermission['execution'] {
   try {
     const value = localStorage.getItem(EXECUTION_KEY);
     if (value === 'ask' || value === 'edit' || value === 'auto') return value;
@@ -24,7 +25,7 @@ function readExecutionPref(): ChatPermission['execution'] {
   return undefined;
 }
 function writeExecutionPref(execution?: ChatPermission['execution']) {
-  if (!execution) return;
+  if (!execution || execution === 'plan') return;
   try { localStorage.setItem(EXECUTION_KEY, execution); } catch {}
 }
 
@@ -350,7 +351,7 @@ export const useSession = defineStore('session', {
         this.chatError = error.message || '无法读取对话。';
       } finally { this.loadingChat = false; }
     },
-    async send(text: string, opts: { retry?: boolean; continuation?: boolean } = {}) {
+    async send(text: string, opts: { retry?: boolean; continuation?: boolean; goal?: boolean } = {}) {
       const rawText = String(text || '').trim();
       const attachedRefs = [...this.workspaceRefs];
       const attachedQuotes = [...this.textQuotes];
@@ -427,7 +428,7 @@ export const useSession = defineStore('session', {
       try {
         const result = await streamPrompt({
           thread, message, images: images.length ? images : undefined, thinking: useUi().thinkingLevel, projectId: this.currentProjectId,
-          permission: this.currentChatPermission, signal: controller.signal,
+          permission: this.currentChatPermission, goal: opts.goal, signal: controller.signal,
           onEvent: (event) => { received = true;if(event.type==='chat_title'&&event.thread===thread){const chat=this.chats.find(c=>c.id===thread);if(chat)chat.title=event.title;}handleEvent(event, live); },
         });
         if (!result.settled && !this.stopping) throw new ApiError('连接在任务完成前关闭，请刷新对话查看实际结果。', 0);

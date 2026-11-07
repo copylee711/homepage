@@ -112,16 +112,25 @@ function attachment(name) {
   const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
 }
+// Extra types only for inline workspace previews (never for the app shell).
+const previewMime = { ...mimeByExt, '.pdf': 'application/pdf', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.flac': 'audio/flac', '.htm': 'text/html', '.txt': 'text/plain' };
 function sendFile(res, file, inline = false) {
   const buffer = Buffer.from(file.data || '', 'base64');
   const ext = (file.name || '').slice((file.name || '').lastIndexOf('.')).toLowerCase();
-  const type = mimeByExt[ext] || 'application/octet-stream';
-  const headers = { 'Content-Type': type, 'Content-Length': buffer.length };
+  const type = (inline ? previewMime[ext] : mimeByExt[ext]) || 'application/octet-stream';
+  const headers = { 'Content-Type': type + (/^text\//.test(type) ? '; charset=utf-8' : ''), 'Content-Length': buffer.length };
   if (!inline) {
     headers['Content-Disposition'] = attachment(downloadName(file.name));
   } else {
     headers['Content-Disposition'] = 'inline';
     headers['Cache-Control'] = 'private, max-age=300';
+    headers['X-Frame-Options'] = 'SAMEORIGIN';
+    // Workspace content is untrusted: scriptable documents run in an opaque
+    // sandbox origin, and only this app may frame a preview. PDF viewers refuse
+    // sandboxed frames, so PDFs get framing control without the sandbox.
+    headers['Content-Security-Policy'] = type === 'application/pdf' ? "frame-ancestors 'self'; object-src 'none'"
+      : "sandbox allow-scripts; default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; img-src * data: blob:; connect-src 'none'; frame-ancestors 'self'";
   }
   res.writeHead(200, headers);
   res.end(buffer);
@@ -289,6 +298,8 @@ export const server = createServer(async (req, res) => {
         const response = await runner('/search/settings', auth.user.id, {}); return json(res, 200, await response.json());
       }
       if (url.pathname === '/api/features' && req.method === 'GET') { const response = await runner('/features', auth.user.id, {}); return json(res, 200, await response.json()); }
+      if (url.pathname === '/api/chats/settings' && req.method === 'GET') { const response = await runner('/chats/settings', auth.user.id, {}); return json(res, 200, await response.json()); }
+      if (url.pathname === '/api/usage' && req.method === 'GET') { const response = await runner('/usage', auth.user.id, { days: Number(url.searchParams.get('days')) || 30 }); return json(res, 200, await response.json()); }
       if (url.pathname === '/api/context/stats' && req.method === 'GET') { const response = await runner('/context/stats', auth.user.id, { thread:url.searchParams.get('chat') }); return json(res, 200, await response.json()); }
       if (url.pathname === '/api/memory' && req.method === 'GET') {
         const response = await runner('/memory', auth.user.id, { project: url.searchParams.get('project') || 'default' }); return json(res, 200, await response.json());
@@ -386,7 +397,7 @@ export const server = createServer(async (req, res) => {
         return json(res, 200, await response.json());
       }
 
-      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/chats/fork', '/api/chats/truncate', '/api/chats/project', '/api/chats/permission', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/terminal/exec', '/api/git/status', '/api/git/checkout'].includes(url.pathname)) {
+      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/chats/fork', '/api/chats/truncate', '/api/chats/project', '/api/chats/permission', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/terminal/exec', '/api/git/status', '/api/git/checkout', '/api/chats/settings/save'].includes(url.pathname)) {
         const response = await runner(url.pathname.replace('/api', ''), auth.user.id, input);
         return json(res, 200, await response.json());
       }
@@ -417,7 +428,7 @@ export const server = createServer(async (req, res) => {
           finally { checking = false; }
         }, 10000);
         try {
-          const response = await runner('/prompt', auth.user.id, { message: input.message, images, thread: input.thread, thinking, projectId: input.projectId, permission: input.permission }, abort.signal);
+          const response = await runner('/prompt', auth.user.id, { message: input.message, images, thread: input.thread, thinking, projectId: input.projectId, permission: input.permission, goal: input.goal === true }, abort.signal);
           res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Accel-Buffering': 'no' });
           await pipeline(Readable.fromWeb(response.body), res);
         } finally { clearInterval(timer); await runner('/cancel', auth.user.id, {}).catch(() => {}); }

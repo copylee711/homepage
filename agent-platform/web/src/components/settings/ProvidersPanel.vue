@@ -41,7 +41,21 @@ const form = ref({
   proxy: false,
   reasoning: true,
   apiKey: '',
+  modelSettings: {} as Record<string, Record<string, number | ''>>,
 });
+const limitsOpen = ref(false);
+const limitFields = [
+  { key: 'contextWindow', label: '上下文窗口', unit: 'tokens' },
+  { key: 'maxTokens', label: '最大输出', unit: 'tokens' },
+  { key: 'input', label: '输入价', unit: '$/M' },
+  { key: 'output', label: '输出价', unit: '$/M' },
+];
+function limitPlaceholder(id: string, key: string) {
+  const saved = savedProviders.value.find((p: any) => p.id === form.value.id);
+  const value = saved?.limits?.[id]?.[key];
+  return value != null ? String(value) : key === 'maxTokens' ? '16384' : key === 'contextWindow' ? '128000' : '未计费';
+}
+function limitRow(id: string) { return (form.value.modelSettings[id] ||= {}); }
 
 const savedProviders = computed(() => configs.value?.providers || []);
 const presets = computed(() =>
@@ -71,6 +85,7 @@ function fill(v: any, custom = false) {
     proxy: v.proxy === true,
     reasoning: v.reasoning === true,
     apiKey: '',
+    modelSettings: JSON.parse(JSON.stringify(v.modelSettings || {})),
   };
   customModelInput.value = '';
   probedModels.value = [];
@@ -201,6 +216,7 @@ function buildPayload() {
     proxy: form.value.proxy,
     reasoning: form.value.reasoning,
     apiKey: form.value.apiKey,
+    modelSettings: Object.fromEntries(models.map(id => [id, Object.fromEntries(Object.entries(form.value.modelSettings[id] || {}).filter(([, v]) => v !== '' && v != null))]).filter(([, v]) => Object.keys(v as object).length)),
   };
 }
 
@@ -424,6 +440,24 @@ onMounted(async () => {
         </div>
         <p v-else class="hint">尚未添加模型。可手动输入自定义模型 ID，或点击右上角“自动探测可用模型”勾选。</p>
 
+        <div v-if="form.models.length" class="limits-box">
+          <button type="button" class="link-btn limits-toggle" :aria-expanded="limitsOpen" @click="limitsOpen = !limitsOpen">
+            <Icon name="chevron-right" :size="12" :class="{ 'is-open': limitsOpen }" />
+            <span>模型参数：上下文、输出上限与价格</span>
+          </button>
+          <div v-if="limitsOpen" class="limits-table" role="table">
+            <div class="limits-row is-head" role="row">
+              <span role="columnheader">模型</span>
+              <span v-for="f in limitFields" :key="f.key" role="columnheader">{{ f.label }}<small>{{ f.unit }}</small></span>
+            </div>
+            <div v-for="m in form.models" :key="m" class="limits-row" role="row">
+              <span class="limits-id" :title="m">{{ m }}</span>
+              <input v-for="f in limitFields" :key="f.key" v-model.number="limitRow(m)[f.key]" type="number" min="0" :step="f.unit === '$/M' ? '0.01' : '1024'" :placeholder="limitPlaceholder(m, f.key)" :aria-label="m + ' ' + f.label">
+            </div>
+            <p class="hint">留空使用推荐值（按模型系列推断）。输出上限超过供应商允许值会导致请求失败；填写价格后用量面板会显示费用。模型调用遇到限流、过载或 5xx 会自动重试 5 次。</p>
+          </div>
+        </div>
+
         <!-- Probed endpoint models checklist -->
         <div v-if="probeOpen && probedModels.length" class="probe-drawer">
           <div class="probe-toolbar">
@@ -511,6 +545,15 @@ onMounted(async () => {
 .model-tag-del { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 26px; color: var(--muted); border-left: 1px solid var(--line); }
 .model-tag-del:hover { background: var(--danger-soft); color: var(--danger); }
 
+.limits-box { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.limits-toggle { align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; }
+.limits-toggle .is-open { transform: rotate(90deg); }
+.limits-table { display: flex; flex-direction: column; gap: 4px; overflow-x: auto; }
+.limits-row { display: grid; grid-template-columns: minmax(120px, 1.4fr) repeat(4, minmax(88px, 1fr)); gap: 6px; align-items: center; min-width: 520px; }
+.limits-row.is-head span { color: var(--muted); font-size: 11px; font-weight: 600; }
+.limits-row.is-head small { margin-left: 4px; color: var(--faint); font-weight: 500; }
+.limits-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; color: var(--text); }
+.limits-row input { min-width: 0; min-height: 30px; padding: 4px 8px; font-family: var(--font-mono); font-size: 12px; background: var(--surface); }
 .probe-drawer { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .probe-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .probe-search { flex: 1; min-width: 160px; display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: var(--muted); }
