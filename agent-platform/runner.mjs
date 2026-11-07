@@ -1,5 +1,6 @@
 import { promptInput } from './prompt-input.mjs';
 import { WebSession } from './web-session.mjs';
+import { TurnWatchdog } from './turn-watchdog.mjs';
 import { FeatureStore, publicFeatures, mcpToolName } from './features.mjs';
 import { McpConnections } from './mcp.mjs';
 import { MemoryStore, memoryContext } from './memory.mjs';
@@ -7,15 +8,17 @@ import { requiresApproval, EXECUTION_MODES } from './execution-policy.mjs';
 import { streamEvent } from './stream-wire.mjs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { body, equal, fail, json, modelLabel, required } from './shared.mjs';
-import { publicProviders, saveProvider, deleteProvider, activeProvider, activateProvider, testProvider, discoverProviderModels, proxyEnvironment, loadProviders, syncProviderFiles } from './providers.mjs';
+import { TurnFanout } from './turn-stream.mjs';
+import { publicProviders, saveProvider, deleteProvider, activeProvider, activateProvider, testProvider, discoverProviderModels, proxyEnvironment, loadProviders, refreshModelsJson, syncProviderFiles } from './providers.mjs';
 import { sandbox, sandboxTool } from './sandbox-client.mjs';
 import { sessionCapacity } from './session-limits.mjs';
 import { prepareSessionCwd } from './session-cwd.mjs';
 import { usageSummary } from './usage.mjs';
-import { ChatStore, normalizeProjectId, sanitizePermission } from './conversations.mjs';
+import { ChatStore, normalizeProjectId, paginateChats, sanitizePermission } from './conversations.mjs';
 import { SearchSettings, publicSearch } from './search.mjs';
 import { ToolApprovals, UserQuestions } from './tool-approvals.mjs';
 import { SessionSnapshots, projectSession } from './session-snapshot.mjs';
@@ -42,11 +45,46 @@ async function secretValues() {
   return [(process.env.OPENCODE_API_KEY || ''), ...(await loadProviders()).providers.map(item => item.apiKey || '')]
     .filter(key => key.length >= 8);
 }
+const hasResults = value => Boolean(value?.results?.length || value?.images?.length);
+async function searchWeb(lease, config, input) {
+  const image = input.category === 'image';
+  const count = input.count ?? config.count;
+  const request = { op: 'web-search', ...config, query: input.query, count };
+  // A source that answers with zero matches returns {status:'empty'} instead of throwing,
+  // so WebSession can tell "nothing found" apart from a broken source.
+  let result, error;
+  try {
+    result = await sandboxTool(lease, { ...request, category: image ? 'image' : 'web', engine: image ? config.imageEngine : config.engine }, 45000);
+  } catch (caught) { error = caught; }
+  if (hasResults(result)) return result;
+  const giveUp = () => { if (error) throw error; return result; };
+  if (!image || !config.sources.some(source => source.enabled && source.category === 'image')) return giveUp();
+  // Open-license image indexes are sparse for niche queries. Inspect a few
+  // already-ranked source pages through the same public-only broker.
+  let web;
+  try { web = await sandboxTool(lease, { ...request, category: 'web', engine: config.engine, count: 3 }, 20000); }
+  catch { return giveUp(); }
+  const pages = await Promise.allSettled((web.results || []).slice(0, 3).map(item =>
+    sandboxTool(lease, { op: 'web-fetch', url: item.url }, 20000)));
+  const images = new Map();
+  for (const page of pages) {
+    if (page.status !== 'fulfilled') continue;
+    for (const item of page.value.images || []) {
+      if (!item.alt?.trim() || images.has(item.url)) continue;
+      images.set(item.url, { ...item, title: item.alt, provider: 'source-page' });
+    }
+  }
+  if (!images.size) return giveUp();
+  const candidates = [...images.values()].slice(0, count);
+  return { engine: 'source-page', images: candidates, results: candidates,
+    notice: '这些是网页中的候选图。核对图片与主题的相关性，附原网页链接。授权情况未知。' };
+}
 class Pi {
   constructor(user, thread) {
     this.runtimeToken = randomUUID(); this.user = user; this.thread = thread; this.key = user + ':' + thread; this.pending = new Map(); this.busy = false; this.buffer = '';
     const reply = event => { if (this.proc?.stdin.writable) this.proc.stdin.write(JSON.stringify(event) + '\n'); };
-    const emit = event => { if (this.output && !this.output.destroyed) this.output.write(this.mask(JSON.stringify(streamEvent(event))) + '\n'); };
+    const emit = event => { this.publish(streamEvent(event)); };
+    this.disk = Promise.resolve();
     this.questions = new UserQuestions(reply, emit);
     this.mcp = new McpConnections(value => sandboxTool(this.lease, value, 45000));
     this.approvals = new ToolApprovals(reply, emit);
@@ -65,7 +103,7 @@ class Pi {
     const permission = chatItem.permission || { scope: 'project_only', extraProjects: {} };
     this.execution = EXECUTION_MODES.includes(permission.execution) ? permission.execution : 'ask';
     this.secrets = await secretValues();
-    this.lease = (await sandbox('/lease', this.user, undefined, { project: projectId, ...permission })).token;
+    this.lease = (await sandbox('/lease', this.user, undefined, { project: projectId, ...permission }, { thread: this.thread })).token;
     await sandboxTool(this.lease, { op: 'mkdir', path: `/workspace/${projectId}` });
     const env = proxyEnvironment(config.proxy); delete env.RUNNER_SECRET; delete env.SANDBOX_SECRET;
     env.SANDBOX_URL = process.env.SANDBOX_URL || 'http://192.168.84.1:18082';
@@ -91,18 +129,18 @@ class Pi {
         const line = this.buffer.slice(0, index); this.buffer = this.buffer.slice(index + 1);
         let event;
         try { event = JSON.parse(line); } catch { continue; }
+        this.watchdog?.activity(event);
         if (this.busy) { this.approvals.capture(event); this.questions.capture(event); setImmediate(() => this.approvals.allowPending(tool => !requiresApproval(this.execution, tool))); }
         if (event.type === 'response') {
           const wait = this.pending.get(event.id);
           if (wait) { this.pending.delete(event.id); clearTimeout(wait.timer); event.success ? wait.resolve(event.data) : wait.reject(Object.assign(new Error(event.error || 'Pi 请求失败'), { status: 502 })); }
         }
-        if (this.output) {
+        if (this.fanout) {
           // Delta events contain a growing full-message snapshot in the SDK.
           // The browser reducer only needs the delta: avoid quadratic wire traffic.
           const wire = event.type === 'message_update' ? {type:event.type,assistantMessageEvent:{...event.assistantMessageEvent}} : event;
           if(wire.type === 'message_update') { delete wire.assistantMessageEvent.partial; delete wire.assistantMessageEvent.message; }
-          this.output.write(this.mask(JSON.stringify(wire)) + '\n');
-          if (this.output.writableLength > 2 * 1024 * 1024) this.output.destroy();
+          this.publish(wire);
         }
         if (event.type === 'agent_settled') this.finish();
       }
@@ -118,12 +156,32 @@ class Pi {
     this.pending.clear();
   }
   mask(text) { for (const key of this.secrets || []) text = text.split(key).join('[REDACTED]'); return text; }
+  publish(event) {
+    if (!this.fanout || !event) return;
+    const line = this.mask(JSON.stringify(event, (_key, value) =>
+      value?.type === 'image' && typeof value.data === 'string'
+        ? { type: 'text', text: '[图片已交给模型]' } : value)) + '\n';
+    this.fanout.publish(line);
+    this.persist(line);
+  }
+  persist(line) {
+    if (!this.turnFile || this.persisted > 8 * 1024 * 1024) return;
+    this.persisted += line.length;
+    const file = this.turnFile;
+    this.disk = this.disk.then(() => appendFile(file, line)).catch(() => {});
+  }
+  abortTurn() {
+    // Policy stop: silent turn, storage cap, or lost renew. Not a browser disconnect.
+    if (!this.busy || this.stopping) return;
+    this.stopping = true;
+    void cancel(this.user, { stopInstalls: true }).catch(() => { try { this.proc?.kill(); } catch { /* already gone */ } });
+  }
   finish() {
     this.approvals.clear(); this.questions.clear();
     invalidateWorkspace(this.user);
-    clearTimeout(this.deadline); clearInterval(this.storageCheck); this.busy = false;
-    const output = this.output; this.output = undefined;
-    if (output && !output.destroyed) output.end();
+    clearInterval(this.deadline); this.watchdog = null; clearInterval(this.storageCheck); clearInterval(this.renewWatch);
+    this.busy = false;
+    this.fanout?.end();
   }
   command(type, fields = {}, timeout = 120000) {
     const id = randomUUID();
@@ -148,18 +206,38 @@ class Pi {
     if (permission?.execution && EXECUTION_MODES.includes(permission.execution)) {
       this.execution = permission.execution;
     }
-    this.busy = true; this.webSession=new WebSession(); this.output = res;
-    // Goal mode keeps continuing across settle points, so it gets a longer budget.
+    this.busy = true; this.webSession = new WebSession(); this.stopping = false; this.lastRenew = Date.now();
+    // Goal mode keeps continuing across settle points until the goal reports done.
     this.goal = goal ? { continues: 0, max: 20 } : null;
-    res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
-    const abort = () => { if (this.busy && this.output === res) void cancel(this.user).catch(() => this.proc?.kill()); };
-    res.once('close', abort);
-    this.deadline = setTimeout(abort, (goal ? 90 : 30) * 60000);
+    this.fanout = new TurnFanout(); this.persisted = 0; this.disk = Promise.resolve();
+    this.turnFile = await resetTurnLog(this.user, this.thread);
+    // The HTTP response is only a subscriber. Its close must not kill Pi.
+    try {
+      if (!res.destroyed && !res.writableEnded) {
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Accel-Buffering': 'no', 'Cache-Control': 'no-store' });
+        this.fanout.attach(res, 0);
+      }
+    } catch { /* the browser left before the first byte; the turn still runs */ }
+    // No cap on turn or thinking duration; only a silent turn is stopped.
+    this.watchdog = new TurnWatchdog(() => {
+      this.publish({ type: 'gateway_error', error: '模型与工具已长时间没有任何输出，任务已停止。' });
+      this.abortTurn();
+    });
+    this.deadline = setInterval(() => { if (this.busy) this.watchdog.check(); }, 15000);
+    // Gateway heartbeats renew the lease. If that stops, the lease is already
+    // dead and this turn must not keep running on a stale authorization.
+    this.renewWatch = setInterval(() => {
+      if (this.busy && Date.now() - (this.lastRenew || 0) > 30000) this.abortTurn();
+    }, 5000);
     let checking = false;
     this.storageCheck = setInterval(async () => {
       if (checking) return; checking = true;
       try { await sessionCapacity(`/data/sessions/${this.user}`, this.thread); }
-      catch { if (this.output === res) { res.write(JSON.stringify({ type: 'gateway_error', error: '对话存储达到上限，任务已停止。请联系管理员归档。' }) + '\n'); abort(); } }
+      catch (error) {
+        if (!this.busy) return;
+        this.publish({ type: 'gateway_error', error: error.status === 413 ? error.message + '。任务已停止。' : '无法检查对话存储，任务已停止，请重试。' });
+        this.abortTurn();
+      }
       finally { checking = false; }
     }, 10000);
     try {
@@ -170,7 +248,7 @@ class Pi {
       if (Array.isArray(images) && images.length) promptFields.images = images;
       await this.command('prompt', promptFields, 120000);
     }
-    catch (error) { res.write(JSON.stringify({ type: 'gateway_error', error: error.message }) + '\n'); this.finish(); }
+    catch (error) { this.publish({ type: 'gateway_error', error: error.message }); this.finish(); }
   }
 }
 async function instance(user, thread) {
@@ -230,13 +308,31 @@ async function deleteChat(user, thread) {
     return result;
   } finally { deleting.delete(key); }
 }
-async function cancel(user) {
+async function resetTurnLog(user, thread) {
+  const file = `/data/turns/${user}/${thread}.ndjson`;
+  try {
+    await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+    await writeFile(file, '', { mode: 0o600 });
+    return file;
+  } catch { return undefined; }
+}
+async function savedTurn(user, thread) {
+  const file = `/data/turns/${user}/${thread}.ndjson`;
+  try {
+    const info = await stat(file);
+    if (Date.now() - info.mtimeMs > 30 * 60 * 1000) return null;
+    const text = await readFile(file, 'utf8');
+    const lines = text.split('\n').filter(line => line.length > 0);
+    return { lines, cursor: lines.length };
+  } catch { return null; }
+}
+async function cancel(user, extra) {
   cancelToolchain(user);
   // Kill model generation AND every tool descendant, including detached processes.
   for (const [key, entry] of sessions) {
     if (entry.pi.user === user) { sessions.delete(key); entry.pi.proc?.kill(); }
   }
-  await sandbox('/cancel', user);
+  await sandbox('/cancel', user, undefined, undefined, extra);
 }
 function assertUserIdle(user) {
   if (toolchainBusy(user) || [...sessions.values()].some(entry => entry.pi.user === user && (entry.initializing || entry.pi.busy || entry.pi.maintenance))) {
@@ -285,18 +381,20 @@ export const server = createServer(async (req, res) => {
       if (req.url === '/runtime/goal/continue') {
         if (!pi.goal || pi.goal.continues >= pi.goal.max) return json(res, 200, { continue: false });
         pi.goal.continues++;
-        pi.output?.write(JSON.stringify({ type: 'goal_progress', continues: pi.goal.continues, max: pi.goal.max }) + '\n');
+        pi.publish({ type: 'goal_progress', continues: pi.goal.continues, max: pi.goal.max });
         return json(res, 200, { continue: true, continues: pi.goal.continues, max: pi.goal.max });
       }
       if(req.url==='/runtime/chat/title'){
-        const input=await body(req);const result=await chats.autoTitle(pi.user,pi.thread,input.title);
-        if(!result.skipped&&pi.output)pi.output.write(JSON.stringify({type:'chat_title',thread:pi.thread,title:result.title})+'\n');
+        const input = await body(req);
+        const title = typeof input.title === 'string' ? pi.mask(input.title) : input.title;
+        const result = await chats.autoTitle(pi.user, pi.thread, title);
+        if (!result.skipped) pi.publish({ type: 'chat_title', thread: pi.thread, title: result.title });
         return json(res,200,result);
       }
       if (req.url === '/runtime/search') {
         const input = await body(req), config = await searchSettings.get(pi.user);
         if (!config.enabled) fail(403, '联网搜索已在设置中关闭');
-        return json(res, 200, await pi.webSession.run('search',(input.category||'web')+':'+input.query,()=>sandboxTool(pi.lease, { op: 'web-search', ...config, engine:input.category==='image'?config.imageEngine:config.engine, category: input.category === 'image' ? 'image' : 'web', query: input.query, count: input.count ?? config.count }, 45000)));
+        return json(res, 200, await pi.webSession.run(input.category === 'image' ? 'image' : 'search', input.query,() => searchWeb(pi.lease, config, input)));
       }
       if(req.url==='/runtime/fetch'){const input=await body(req);return json(res,200,await pi.webSession.run('fetch',input.url,()=>sandboxTool(pi.lease,{op:'web-fetch',url:input.url},35000)));}
       fail(404, '接口不存在');
@@ -349,9 +447,9 @@ export const server = createServer(async (req, res) => {
       const response = await fetch((process.env.SANDBOX_URL || 'http://192.168.84.1:18082') + '/background/preview', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + required('SANDBOX_SECRET') }, body: JSON.stringify({ token: input.token, path: input.path }), signal: AbortSignal.timeout(15000) });
       const value = await response.json(); if (!response.ok) fail(404, value.error || '预览不可用'); return json(res, 200, value);
     }
-    if (req.url === '/background/list' || req.url === '/background/stop') {
+    if (['/background/list', '/background/stop', '/background/clear-history'].includes(req.url)) {
       const lease = (await sandbox('/lease', input.user)).token;
-      return json(res, 200, await sandboxTool(lease, { op: req.url.endsWith('/list') ? 'background-status' : 'background-stop', id: input.id }));
+      return json(res, 200, await sandboxTool(lease, { op: req.url.endsWith('/list') ? 'background-status' : req.url.slice(1).replace('/', '-'), id: input.id, all: input.all === true }));
     }
     if (req.url === '/memory' || req.url === '/memory/update') {
       const project = input.project || 'default'; await projectDirectory(input.user, project);
@@ -361,7 +459,10 @@ export const server = createServer(async (req, res) => {
     if (req.url === '/renew') {
       await renewToolchain(input.user);
       for (const entry of sessions.values()) {
-        if (entry.pi.user === input.user && entry.pi.busy) await sandbox('/renew', input.user, entry.pi.lease);
+        if (entry.pi.user === input.user && entry.pi.busy) {
+          await sandbox('/renew', input.user, entry.pi.lease);
+          entry.pi.lastRenew = Date.now();
+        }
       }
       return json(res, 200, { ok: true });
     }
@@ -375,7 +476,11 @@ export const server = createServer(async (req, res) => {
       const config = await searchSettings.get(input.user);
       if (!config.enabled) fail(403, '联网搜索已关闭');
       const lease = (await sandbox('/lease', input.user)).token;
-      return json(res, 200, await sandboxTool(lease, { op: 'web-search', ...config, engine:input.category==='image'?config.imageEngine:config.engine, category:input.category === 'image'?'image':'web', query: input.query, ...(input.source?{sources:config.sources.filter(s=>s.id===input.source).map(s=>({...s,enabled:true}))}:{}) }, 45000));
+      const renewal = setInterval(() => sandbox('/renew', input.user, lease).catch(() => {}), 5000);
+      try {
+        if (!input.source) return json(res, 200, await searchWeb(lease, config, input));
+        return json(res, 200, await sandboxTool(lease, { op: 'web-search', ...config, engine:input.category==='image'?config.imageEngine:config.engine, category:input.category === 'image'?'image':'web', query: input.query, ...(input.source?{sources:config.sources.filter(s=>s.id===input.source).map(s=>({...s,enabled:true}))}:{}) }, 45000));
+      } finally { clearInterval(renewal); }
     }
     if (req.url === '/providers') return json(res, 200, await publicProviders());
     if (req.url === '/greeting') {
@@ -550,7 +655,7 @@ export const server = createServer(async (req, res) => {
     if (req.url === '/chats') {
       const busy = new Set([...sessions.values()].filter(e => e.pi.user === input.user && (e.pi.busy || e.initializing)).map(e => e.pi.thread));
       await chats.autoArchive(input.user, busy).catch(() => {});
-      return json(res, 200, { chats: await chats.list(input.user) });
+      return json(res, 200, paginateChats(await chats.list(input.user), { limit: input.limit, cursor: input.cursor }));
     }
     if (req.url === '/chats/settings') return json(res, 200, (await chats.loadMeta(input.user)).settings);
     if (req.url === '/chats/settings/save') return json(res, 200, await chats.setChatSettings(input.user, input));
@@ -592,7 +697,29 @@ export const server = createServer(async (req, res) => {
       for (const key of await secretValues()) text = text.split(key).join('[REDACTED]');
       return json(res, 200, { messages: JSON.parse(text), busy });
     }
-    if (req.url === '/abort') { await cancel(input.user); return json(res, 200, { ok: true }); }
+    if (req.url === '/abort') { await cancel(input.user, { stopInstalls: true }); return json(res, 200, { ok: true }); }
+    if (req.url === '/turns/status') {
+      const pi = sessions.get(input.user + ':' + input.thread)?.pi;
+      if (pi?.fanout) return json(res, 200, { thread: input.thread, busy: pi.busy === true, settled: pi.busy !== true && pi.fanout.cursor > 0, cursor: pi.fanout.cursor });
+      const saved = await savedTurn(input.user, input.thread);
+      if (saved) return json(res, 200, { thread: input.thread, busy: false, settled: saved.cursor > 0, cursor: saved.cursor });
+      return json(res, 200, { thread: input.thread, busy: false, settled: false, cursor: 0 });
+    }
+    if (req.url === '/turns/subscribe') {
+      const cursor = Number.isFinite(Number(input.cursor)) && Number(input.cursor) > 0 ? Math.floor(Number(input.cursor)) : 0;
+      const pi = sessions.get(input.user + ':' + input.thread)?.pi;
+      if (pi?.fanout && (pi.busy || pi.fanout.cursor > 0)) {
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Accel-Buffering': 'no', 'Cache-Control': 'no-store', 'X-Turn-Cursor': String(pi.fanout.cursor) });
+        pi.fanout.attach(res, cursor, { endIfIdle: !pi.busy });
+        return;
+      }
+      const saved = await savedTurn(input.user, input.thread);
+      if (!saved) fail(404, '没有可恢复的任务');
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Accel-Buffering': 'no', 'Cache-Control': 'no-store', 'X-Turn-Cursor': String(saved.cursor) });
+      for (const line of saved.lines.slice(cursor)) res.write(line + '\n');
+      res.end();
+      return;
+    }
     if (req.url === '/prompt') {
       const prompt=promptInput(input);
       await chats.initialize(input.user, input.thread, input.projectId, input.permission);
@@ -605,4 +732,6 @@ export const server = createServer(async (req, res) => {
     json(res, error.status || 503, { error: error.status ? error.message : 'Pi 服务暂时不可用' });
   }
 });
+// Apply current model limits to models.json written by older releases.
+await refreshModelsJson().catch(() => {});
 server.listen(Number(process.env.PORT || 8081), '0.0.0.0');

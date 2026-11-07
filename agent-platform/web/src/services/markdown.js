@@ -3,6 +3,10 @@
 import { splitInlineMath, extractDisplayMath, renderMathInto } from './math.js';
 import { highlightInto } from './highlight.js';
 import { widget } from './widgets.js';
+import { isWsFilePath, safeHref } from './markdown-url.mjs';
+import { createMarkdownImage, imageUrl as markdownImageUrl } from './markdown-image.mjs';
+
+export { isWsFilePath, safeHref };
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*([A-Za-z0-9_+#.-]*)[^`~]*$/;
 const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*)$/;
@@ -11,14 +15,6 @@ const QUOTE = /^ {0,3}>[ \t]?(.*)$/;
 const UL = /^( {0,3})([-+*])[ \t]+(.*)$/;
 const OL = /^( {0,3})(\d{1,9})[.)][ \t]+(.*)$/;
 const SEPARATOR = /^ {0,3}\|?[ \t]*:?-{2,}:?[ \t]*(?:\|[ \t]*:?-{2,}:?[ \t]*)*\|?[ \t]*$/;
-
-export function isWsFilePath(raw) {
-  if (typeof raw !== 'string') return false;
-  const v = raw.trim();
-  if (!v || v.length > 500 || /\s/.test(v)) return false;
-  if (v.startsWith('/workspace/') || v.startsWith('workspace/')) return true;
-  return /^[a-zA-Z0-9_\-一-龥./]+\.(?:docx?|xlsx?|pptx?|pdf|zip|tar|gz|7z|rar|csv|tsv|py|js|mjs|cjs|ts|tsx|jsx|vue|html|css|scss|json|md|txt|png|jpe?g|gif|svg|webp|sh|bash|yml|yaml|sql|go|rs|c|cpp|h|toml|ini|env)$/i.test(v) && !v.includes('://');
-}
 
 export function isDeliverableExt(path) {
   return /\.(docx?|xlsx?|pptx?|pdf|zip|tar|gz|7z|rar)$/i.test(String(path || '').trim());
@@ -77,19 +73,6 @@ export function deliverableCard(doc, filePath, label) {
   return card;
 }
 
-export function safeHref(raw) {
-  if (typeof raw !== 'string') return null;
-  const value = raw.trim();
-  if (!value || value.length > 2048 || /[\u0000-\u001f\u007f]/.test(value)) return null;
-  if (!/^(?:https?:\/\/|mailto:)/i.test(value)) return null;
-  let url;
-  try { url = new URL(value); } catch { return null; }
-  if (!['http:', 'https:', 'mailto:'].includes(url.protocol)) return null;
-  if ((url.protocol === 'http:' || url.protocol === 'https:') && (url.username || url.password)) return null;
-  if (url.protocol === 'mailto:' && /[?&](?:body|cc|bcc)=/i.test(value)) return null;
-  return url.href;
-}
-
 function node(doc, tag, className, text) {
   const element = doc.createElement(tag);
   if (className) element.className = className;
@@ -116,26 +99,19 @@ function link(doc, href, label, className = '') {
 function text(doc, value) { return doc.createTextNode(String(value)); }
 
 let activeProject='default';
-export function imageUrl(raw,project=activeProject) {
-  if (isWsFilePath(raw)) return '/api/image?path='+encodeURIComponent(raw.startsWith('/workspace/')||raw.startsWith('workspace/')?raw.replace(/^\/?workspace\//,''):project+'/'+raw);
-  const safe=safeHref(raw);if(!safe)return null;
-  const u=new URL(safe);if(!['https:','http:'].includes(u.protocol)||u.hostname==='localhost'||u.hostname.endsWith('.local')||u.hostname.endsWith('.internal')||/^[\d.]+$/.test(u.hostname)||u.hostname.includes(':'))return null;
-  return '/api/image?url='+encodeURIComponent(safe);
+export function imageUrl(raw, project = activeProject) {
+  return markdownImageUrl(raw, project);
 }
 function image(doc, raw, label) {
-  const src=imageUrl(raw);if(!src)return node(doc,'span','md-blocked-link',label||'图片地址不可用');
-  const anchor=node(doc,'a','md-image',null);anchor.href=src;anchor.target='_blank';anchor.rel='noopener noreferrer';anchor.dataset.imagePreview=src;anchor.setAttribute('aria-label','放大图片：'+(label||'图片'));
-  const img=node(doc,'img',null,null);img.alt=label||'图片';img.loading='lazy';img.decoding='async';img.referrerPolicy='no-referrer';img.src=src;
-  img.addEventListener('error',()=>{anchor.classList.add('is-failed');anchor.replaceChildren(node(doc,'span',null,'图片加载失败 · '+(label||'点击重试查看')));},{once:true});
-  anchor.append(img);return anchor;
+  return createMarkdownImage(doc, raw, label, activeProject);
 }
 
 let activeFootnotes = null;
 let activeStreaming = false;
 export function renderMarkdown(value, doc = globalThis.document, options = {}) {
   const fragment = doc.createDocumentFragment();
-  const raw = String(value ?? '').replace(/\r\n?/g, '\n');
-  const prevCitations=activeCitations;activeCitations=new Map((options.citations||(options.sources?collectSources(raw):[])).map(s=>[s.url,s]));
+  const { text: raw, sources } = splitSourceBlocks(value);
+  const prevCitations=activeCitations;activeCitations=new Map((options.citations||(options.sources?collectSources(raw, [], sources):[])).map(s=>[s.url,s]));
   const prevFootnotes = activeFootnotes,prevProject=activeProject,prevStreaming=activeStreaming;activeProject=options.project||'default';activeStreaming=options.streaming===true;
   activeFootnotes = extractFootnoteMap(raw);
   const cleaned = activeFootnotes.size ? raw.replace(FOOTNOTE_DEF, '') : raw;
@@ -172,7 +148,31 @@ function extractFootnoteMap(rawText) {
   }
   return map;
 }
-export function collectSources(text, metadata = []) {
+// A dedicated fence contributes to the source panel without emitting body links.
+export function splitSourceBlocks(text) {
+  const sources = [];
+  const body = [];
+  let fence;
+  for (const line of String(text ?? '').replace(/\r\n?/g, '\n').split('\n')) {
+    const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (match && match[1][0] === fence.marker[0] && match[1].length >= fence.marker.length && !match[2].trim()) {
+        if (!fence.sources) body.push(line);
+        fence = undefined;
+      } else if (fence.sources) {
+        const value = line.trim().replace(/^(?:[-*+]|\d+[.)])\s+/, '');
+        const link = linkAt(value, 0, false);
+        if (link && link.end === value.length && sources.length < 30) sources.push({ url: link.href, title: link.label });
+      } else body.push(line);
+    } else if (match) {
+      fence = { marker: match[1], sources: line.match(FENCE)?.[2]?.toLowerCase() === 'iris-sources' };
+      if (!fence.sources) body.push(line);
+    } else body.push(line);
+  }
+  return { text: body.join('\n'), sources };
+}
+
+export function collectSources(text, metadata = [], additional = []) {
   const byUrl=new Map(),used=new Set();let next=1;
   const str=String(text??'').replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[ \t]*$/gm,'').replace(/`[^`\n]*`/g,'');
   const footnotes=extractFootnoteMap(str),meta=new Map(metadata.map(item=>[safeHref(item.url),item]));
@@ -186,11 +186,18 @@ export function collectSources(text, metadata = []) {
     if(found){if(!/^(?:下载|download|打开工作区)/i.test(found.label))add(found.href,found.label.replace(/[\[\]^]/g,''),found.title);i=found.end-1;continue;}
     const match=str.slice(i).match(/^\[\^?(\d{1,3})\]/);if(match&&footnotes.has(match[1])){const item=footnotes.get(match[1]);add(item.url,item.label,item.title);}
   }
+  for (const item of additional) {
+    const url = safeHref(item.url);
+    if (!url || !/^https?:/.test(url) || byUrl.has(url)) continue;
+    const extra = meta.get(url) || {};
+    byUrl.set(url, { ...extra, url, host: hostOf(url), title: item.title || extra.title || hostOf(url), label: '' });
+  }
   return [...byUrl.values()];
 }
 export function citationBadge(doc,source){
   const badge=link(doc,source.url,source.label,'md-citation');badge.setAttribute('aria-label','引用 '+source.label+'：'+(source.title||source.host));badge.title=source.title||source.host;
   if(source.label.length===1)badge.classList.add('is-single');
+  badge.title = source.title || source.host;
   const popup=node(doc,'span','md-citation-preview');popup.append(node(doc,'span','md-citation-host',source.host),node(doc,'strong',null,source.title||source.host));if(source.snippet)popup.append(node(doc,'span','md-citation-snippet',String(source.snippet).slice(0,240)));badge.append(popup);return badge;
 }
 let activeCitations=null;
@@ -234,6 +241,7 @@ function renderBlocks(lines, parent, doc) {
       }
       const closed=index < lines.length;
       if (closed) index += 1;
+      if (language === 'iris-sources') continue;
       if (/^iris-widget(\s|$)/.test(language)) {
         if (!closed) {
           if (activeStreaming) { parent.append(widgetPending(doc)); continue; }
@@ -344,7 +352,7 @@ function alignment(cell) {
 }
 function renderTable(lines, doc) {
   const header = splitRow(lines[0]), separator = splitRow(lines[1]);
-  const wrap = node(doc, 'div', 'md-table-wrap');
+  const wrap = node(doc, 'div', 'md-table-wrap is-nowrap');
   const scroller = node(doc, 'div', 'md-table-scroll');
   const table = doc.createElement('table');
   const thead = doc.createElement('thead'), headRow = doc.createElement('tr');
@@ -369,29 +377,17 @@ function renderTable(lines, doc) {
     tbody.append(row);
   }
   table.append(thead, tbody);
+  const bar = node(doc, 'div', 'md-table-bar');
+  const toggle = node(doc, 'button', 'md-table-wrap-toggle');
+  toggle.type = 'button';
+  toggle.dataset.tableWrap = '';
+  toggle.setAttribute('aria-pressed', 'false');
+  toggle.setAttribute('aria-label', '单元格换行');
+  toggle.title = '切换换行/单行显示';
+  toggle.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M3 12h14a3 3 0 0 1 0 6h-4M16 15l-3 3 3 3"/></svg>';
+  bar.append(toggle);
   scroller.append(table);
-
-  // Subtle wrap toggle icon: only shown when the table actually overflows the viewport.
-  const btn = node(doc, 'button', 'md-table-wrap-btn');
-  btn.type = 'button';
-  btn.dataset.tableWrap = '';
-  btn.title = '切换换行/单行显示';
-  btn.setAttribute('aria-label', '切换表格换行');
-  btn.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M3 12h14a3 3 0 0 1 0 6h-4M16 15l-3 3 3 3"/></svg>';
-
-  const checkOverflow = () => {
-    if (!scroller.isConnected) return;
-    const overflows = scroller.scrollWidth > scroller.clientWidth + 2;
-    btn.style.display = overflows ? 'inline-flex' : 'none';
-  };
-  queueMicrotask(() => {
-    checkOverflow();
-    if (typeof ResizeObserver !== 'undefined' && scroller.isConnected) {
-      new ResizeObserver(checkOverflow).observe(scroller);
-    }
-  });
-
-  wrap.append(btn, scroller);
+  wrap.append(bar, scroller);
   return wrap;
 }
 
@@ -557,7 +553,14 @@ export function renderInline(value, parent, doc = globalThis.document, depth = 0
       if (found) {
         const citeMatch = found.label.trim().match(/^\[?\^?(\d{1,3})\]?$/);
         const source = activeCitations?.get(safeHref(found.href));
-        if (source || (citeMatch && safeHref(found.href))) {
+        if (source?.label || (citeMatch && safeHref(found.href))) {
+          if (!citeMatch && parent.closest('td, th')) {
+            flush();
+            renderInline(found.label, parent, doc, depth + 1);
+            parent.append(citationBadge(doc, source));
+            index = found.end;
+            continue;
+          }
           // Strip redundant surrounding parentheses: e.g. `( [10](...) )` or `（[10](...)）`
           const leftParen = buffer.match(/[（(]\s*$/);
           if (leftParen) {

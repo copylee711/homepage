@@ -87,7 +87,7 @@ test('new file/chat endpoints enforce CSRF and derive tenant identity; local mod
   assert.equal((await fetch(base + '/api/git/status?project=app', { headers })).status, 200);
   assert.equal(lastRunner.path, '/git/status');
   assert.equal(lastRunner.value.project, 'app');
-  for (const path of ['/api/approvals/resolve', '/api/questions/answer', '/api/steer', '/api/search/settings/save', '/api/search/test', '/api/memory/update', '/api/background/stop', '/api/features/save', '/api/features/mcp/test', '/api/context/compact', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/chats/project', '/api/chats/permission', '/api/terminal/exec', '/api/git/checkout', '/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/files/upload', '/api/files/manage', '/api/toolchains/change', '/api/toolchains/cancel']) {
+  for (const path of ['/api/approvals/resolve', '/api/questions/answer', '/api/steer', '/api/search/settings/save', '/api/search/test', '/api/memory/update', '/api/background/stop', '/api/background/clear-history', '/api/features/save', '/api/features/mcp/test', '/api/context/compact', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/chats/project', '/api/chats/permission', '/api/terminal/exec', '/api/git/checkout', '/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/files/upload', '/api/files/manage', '/api/toolchains/change', '/api/toolchains/cancel']) {
     const value = JSON.stringify({ user: 'forged', thread: '11111111-1111-4111-8111-111111111111', title: 'test', content: 'test', path: 'test.txt' });
     assert.equal((await fetch(base + path, { method: 'POST', headers: { cookie }, body: value })).status, 403);
     assert.equal((await fetch(base + path, { method: 'POST', headers, body: value })).status, 200);
@@ -95,7 +95,9 @@ test('new file/chat endpoints enforce CSRF and derive tenant identity; local mod
   }
   // The console is a Vite SPA: unknown non-asset GETs render the app shell (200),
   // a missing hashed asset is 404, and unauthenticated page loads still redirect.
-  assert.equal((await fetch(base + '/', { headers })).status, 200);
+  const shell = await fetch(base + '/', { headers });
+  assert.equal(shell.status, 200);
+  assert.equal(shell.headers.get('content-security-policy'), "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob: https:; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   assert.equal((await fetch(base + '/assets/missing-abcdef.js', { headers })).status, 404);
   assert.equal((await fetch(base + '/', { redirect: 'manual' })).status, 302);
   const promptHigh = await fetch(base + '/api/prompt', { method: 'POST', headers, body: JSON.stringify({ thread: '11111111-1111-4111-8111-111111111111', message: 'hello', thinking: 'high' }) });
@@ -110,6 +112,18 @@ test('new file/chat endpoints enforce CSRF and derive tenant identity; local mod
   assert.equal((await fetch(base + '/api/files', { headers })).status, 403);
   assert.equal((await fetch(base + '/api/chats/export', { headers })).status, 403);
   admin = true;
+});
+test('gateway forwards explicit recursive deletion only', async () => {
+  const cookie = 'copylee_ai=' + 't'.repeat(64);
+  const { csrf } = await (await fetch(base + '/api/me', { headers: { cookie } })).json();
+  for (const recursive of [true, false, 'true', undefined]) {
+    const response = await fetch(base + '/api/files/manage', {
+      method: 'POST', headers: { cookie, Origin: 'http://127.0.0.1', 'X-CSRF-Token': csrf },
+      body: JSON.stringify({ action: 'delete', path: 'example/subfolder', recursive }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(lastRunner.value.recursive, recursive === true);
+  }
 });
 test('preview capabilities are structurally validated and sandbox active content',async()=>{
  assert.equal((await fetch(base+'/preview/not-a-token/')).status,404);
@@ -132,4 +146,13 @@ test('interactive widgets are CSRF-protected, owner-bound and execute only in an
 test('image-only HTTP prompts reach runner unchanged without an invented request',async()=>{
  admin=true;const cookie='copylee_ai='+'t'.repeat(64),me=await(await fetch(base+'/api/me',{headers:{cookie}})).json();
  const r=await fetch(base+'/api/prompt',{method:'POST',headers:{cookie,Origin:'http://127.0.0.1','X-CSRF-Token':me.csrf},body:JSON.stringify({thread:'11111111-1111-4111-8111-111111111111',message:'',images:[{type:'image',data:'AA==',mimeType:'image/png'}]})});assert.equal(r.status,200);await r.text();assert.equal(lastPrompt.message,'');assert.equal(lastPrompt.images.length,1);
+});
+
+test('chat list forwards only the optional paging parameters to the runner', async () => {
+  admin = true;
+  const cookie = 'copylee_ai=' + 't'.repeat(64);
+  assert.equal((await fetch(base + '/api/chats', { headers: { cookie } })).status, 200);
+  assert.equal(lastRunner.path, '/chats'); assert.equal('limit' in lastRunner.value, false); assert.equal('cursor' in lastRunner.value, false);
+  assert.equal((await fetch(base + '/api/chats?limit=20&cursor=40&user=evil', { headers: { cookie } })).status, 200);
+  assert.equal(lastRunner.value.limit, '20'); assert.equal(lastRunner.value.cursor, '40'); assert.notEqual(lastRunner.value.user, 'evil');
 });

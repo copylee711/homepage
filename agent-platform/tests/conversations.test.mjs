@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ChatStore, exportMessages, normalizeTitle, safeFilename, validThread } from '../conversations.mjs';
+import { ChatStore, exportMessages, normalizeTitle, paginateChats, safeFilename, validThread } from '../conversations.mjs';
 import { modelLabel } from '../shared.mjs';
 
 const root = await mkdtemp(join(tmpdir(), 'agent-chats-'));
@@ -166,4 +166,26 @@ test('new task metadata is immediately listed; model titles apply once and never
  await store.autoTitle(a,id,'四阶图的同构分类');assert.equal((await store.list(a)).find(c=>c.id===id).title,'四阶图的同构分类');assert.equal((await store.autoTitle(a,id,'重复命名')).skipped,true);
  await writeFile(store.file(a,id),session('user text'));await store.rename(a,id,'我的标题');await store.autoTitle(a,id,'覆盖企图');assert.equal((await store.loadMeta(a)).chats[id].title,'我的标题');await store.delete(a,id);
  const pending='77777777-7777-4777-8777-777777777777';await store.initialize(a,pending);await store.delete(a,pending);assert.equal((await store.loadMeta(a)).chats[pending],undefined);
+});
+
+test('chat list is never truncated and pages with limit/cursor on request', async () => {
+  const many = await mkdtemp(join(tmpdir(), 'agent-many-chats-'));
+  try {
+    const store = new ChatStore({ sessionsRoot: join(many, 'sessions'), metaRoot: join(many, 'meta') });
+    const user = 'c'.repeat(64), dir = join(many, 'sessions', user);
+    await mkdir(dir, { recursive: true });
+    const ids = Array.from({ length: 130 }, (_, i) => `${String(i).padStart(8, '0')}-0000-4000-8000-000000000000`);
+    for (const id of ids) await writeFile(join(dir, id + '.jsonl'), session('第 ' + id + ' 个对话'));
+    const all = await store.list(user);
+    assert.equal(all.length, 130);
+    assert.deepEqual(paginateChats(all), { chats: all, total: 130, hasMore: false, nextCursor: null });
+    const seen = [];
+    let cursor, page;
+    do { page = paginateChats(all, { limit: '50', cursor }); seen.push(...page.chats.map(c => c.id)); cursor = page.nextCursor; } while (page.hasMore);
+    assert.equal(seen.length, 130); assert.equal(new Set(seen).size, 130);
+    assert.equal(paginateChats(all, { cursor: '120' }).chats.length, 10);
+    assert.equal(paginateChats(all, { limit: 10 }).nextCursor, '10');
+    for (const bad of [{ limit: 0 }, { limit: 501 }, { limit: 'x' }, { cursor: '-1' }, { cursor: '1e3' }])
+      assert.throws(() => paginateChats(all, bad), error => error.status === 422);
+  } finally { await rm(many, { recursive: true, force: true }); }
 });

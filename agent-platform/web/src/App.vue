@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed, ref } from 'vue';
+import { onMounted, computed, ref, watch } from 'vue';
 import Sidebar from './components/Sidebar.vue';
 import TopBar from './components/TopBar.vue';
 import Conversation from './components/Conversation.vue';
@@ -13,9 +13,11 @@ import SettingsDialog from './components/dialogs/SettingsDialog.vue';
 import SubordinateDialog from './components/dialogs/SubordinateDialog.vue';
 import { useSession } from './stores/session';
 import { useUi } from './stores/ui';
+import { useWorkspace } from './stores/workspace';
 
 const session = useSession();
 const ui = useUi();
+const workspace = useWorkspace();
 
 const wide = ref(window.innerWidth > 1180);
 
@@ -24,6 +26,23 @@ const shellStyle = computed(() => ({
   '--workspace-w': ui.workspaceW + 'px',
 }));
 const workspaceVisible = computed(() => session.canExecute && ui.workspaceOpen && wide.value);
+const workspacePanelOpen = computed(() => session.canExecute && (workspaceVisible.value || ui.mobileDrawer === 'workspace'));
+
+watch(workspacePanelOpen, (open, _previous, onCleanup) => {
+  if (!open) return;
+  const controller = new AbortController();
+  function refresh() {
+    if (document.visibilityState === 'visible') void workspace.refreshListing(controller.signal);
+  }
+  const timer = window.setInterval(refresh, 5000);
+  document.addEventListener('visibilitychange', refresh);
+  onCleanup(() => {
+    controller.abort();
+    window.clearInterval(timer);
+    document.removeEventListener('visibilitychange', refresh);
+  });
+  refresh();
+});
 
 function onResize() {
   wide.value = window.innerWidth > 1180;
@@ -106,6 +125,14 @@ onMounted(() => {
   background: var(--bg);
 }
 
+.main-col:not(.is-welcome) .composer-area {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 10;
+  pointer-events: none;
+}
+.main-col:not(.is-welcome) .composer-stack { pointer-events: auto; }
+
 .main-col.is-welcome {
   justify-content: center;
   align-items: center;
@@ -140,8 +167,8 @@ onMounted(() => {
   border-left-color: transparent;
 }
 
-.scrim { position: fixed; inset: 0; z-index: 50; background: rgba(12, 13, 18, 0.48); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
-.mobile-drawer { position: fixed; top: 0; bottom: 0; z-index: 60; box-shadow: 0 18px 56px rgba(0, 0, 0, 0.42), var(--shadow-lg); animation: drawer-in var(--slow) var(--ease); overflow: hidden; }
+.scrim { position: fixed; inset: 0; z-index: 50; background: rgba(12, 13, 18, 0.48); }
+.mobile-drawer { position: fixed; top: 0; bottom: 0; z-index: 60; box-shadow: var(--shadow); animation: drawer-in var(--slow) var(--ease); overflow: hidden; }
 .mobile-drawer.left { left: 0; width: min(86vw, 320px); border-radius: 0 22px 22px 0; border-right: 1px solid var(--line); }
 .mobile-drawer.right { right: 0; width: min(92vw, 404px); border-radius: 22px 0 0 22px; border-left: 1px solid var(--line); }
 .mobile-drawer .sidebar, .mobile-drawer .workspace { border-radius: inherit; width: 100%; }

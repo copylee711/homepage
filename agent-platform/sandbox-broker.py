@@ -89,9 +89,16 @@ def run_tool(user, value, lease):
     if value.get('op') == 'quota-info': return quotas.status(user)
     if value.get('op', '').startswith('background-'):
         with guard:
-            if value['op'] == 'background-start': return backgrounds.start(user, value, leases[lease].get('policy'))
+            if value['op'] == 'background-start': return backgrounds.start(user, value, leases[lease].get('policy'), leases[lease].get('thread'))
             if value['op'] == 'background-status': return backgrounds.logs(user, value['id']) if value.get('id') else backgrounds.list(user)
             if value['op'] == 'background-stop': return backgrounds.stop(user, value.get('id'))
+            if value['op'] == 'background-clear-history':
+                task_id = value.get('id')
+                if isinstance(task_id, str) and task_id and value.get('all') is not True:
+                    return backgrounds.clear_history(user, task_id)
+                if task_id is None and value.get('all') is True:
+                    return backgrounds.clear_history(user)
+                raise ValueError('请选择后台任务或明确清空历史')
             raise ValueError('后台操作无效')
     if value.get("op") in {"web-fetch", "web-search", "mcp-request", "image-fetch"}:
         if not web_slots.acquire(blocking=False):
@@ -105,10 +112,13 @@ def run_tool(user, value, lease):
             web_slots.release()
     if value.get("op") not in {"read", "write", "mkdir", "access", "bash", "list", "search-files", "file-read", "file-write", "file-manage", "toolchain-list", "toolchain-change"}:
         raise ValueError("工具不支持")
-    lock = locks.setdefault(user, threading.Lock())
+    readonly = value.get("op") in {"list", "file-read"}
+    key = user + ":view" if readonly else user
+    name = ("cl-sandbox-view-" if readonly else "cl-sandbox-") + user
+    lock = locks.setdefault(key, threading.Lock())
     browsing = value.get("op") in {"list", "file-read", "file-write", "file-manage", "toolchain-list", "toolchain-change"}
     # Pi may issue parallel tool calls; serialize them within the user's workspace.
-    # File browsing never waits behind a long model tool and never cancels it.
+    # Read-only views use a separate container and never take the command lock.
     if browsing:
         if not lock.acquire(blocking=False):
             raise ValueError("工作区正在执行任务，请稍后刷新")
@@ -125,23 +135,26 @@ def run_tool(user, value, lease):
             quota = quotas.get(user)
             if sum(active_memory.values()) + backgrounds.memory_used() + quota['memory_mib'] > int(os.environ.get('SANDBOX_ACTIVE_MEMORY_MIB', '4096')):
                 raise ValueError("沙箱运行内存预算已满，请等待其他任务结束")
-            active_memory[user] = quota['memory_mib']
+            active_memory[key] = quota['memory_mib']
             value = {**value, '_timeout_limit': quota['timeout']}
+            mount_args = project_policy.mount_arguments(mount, leases[lease].get("policy"))
+            if readonly:
+                mount_args = [arg + ",readonly" if arg.startswith("type=bind,") and ",readonly" not in arg else arg for arg in mount_args]
             created = subprocess.run([
-                "docker", "create", "-i", "--name", "cl-sandbox-" + user,
-                "--label", "copylee.sandbox=1", "--network", NETWORK, "--read-only",
+                "docker", "create", "-i", "--name", name,
+                "--label", "copylee.sandbox=1", "--network", "none" if readonly else NETWORK, "--read-only",
                 "--sysctl", "net.ipv6.conf.all.disable_ipv6=1",
                 "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
                 "--memory", str(quota['memory_mib']) + 'm', "--memory-swap", str(quota['memory_mib']) + 'm', "--cpus", str(quota['cpus']), "--pids-limit", str(quota['pids']),
                 "--ulimit", "nofile=256:256", "--ulimit", f"fsize={quota['disk_mib'] * 1048576}:{quota['disk_mib'] * 1048576}",
                 "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,mode=1777", "--shm-size", "8m",
-                *project_policy.mount_arguments(mount, leases[lease].get("policy")),
+                *mount_args,
                 "--env", "HOME=/tmp", "--env", "PI_CODING_AGENT_DIR=/tmp/pi",
                 "--env", "HTTP_PROXY=http://192.168.85.2:3128", "--env", "HTTPS_PROXY=http://192.168.85.2:3128",
                 "--log-driver", "none", IMAGE], capture_output=True, timeout=15)
             if created.returncode:
                 raise ValueError("沙箱容器创建失败")
-            proc = subprocess.Popen(["docker", "start", "-ai", "cl-sandbox-" + user],
+            proc = subprocess.Popen(["docker", "start", "-ai", name],
                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             output, _ = proc.communicate(json.dumps(value).encode(), timeout=quota['timeout'] + 15)
@@ -156,10 +169,10 @@ def run_tool(user, value, lease):
         except (subprocess.TimeoutExpired, json.JSONDecodeError):
             raise ValueError("沙箱工具已停止或执行超时") from None
         finally:
-            cancel(user)
+            docker("rm", "-f", name)
             proc.wait(timeout=10)
     finally:
-        with guard: active_memory.pop(user, None)
+        with guard: active_memory.pop(key, None)
         slots.release()
         lock.release()
 
@@ -211,23 +224,30 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(200, quotas.save(user, value.get('quota', {})) if self.path.endswith('/set') else quotas.status(user))
                 finally:
                     user_lock.release()
+            if self.path == "/cancel":
+                with guard:
+                    for key, lease in list(leases.items()):
+                        if lease["user"] == user:
+                            del leases[key]
+                    cancel(user)
+                # Outside the broker guard: stop() takes the task lock, and start()
+                # takes that lock before the guard. Install tasks only; previews stay.
+                if value.get("stopInstalls") is True:
+                    backgrounds.stop_installs(user)
+                return self.reply(200, {"ok": True})
             with guard:
                 if self.path == "/lease":
+                    thread = value.get("thread")
                     token = secrets.token_urlsafe(48)
                     leases[token] = {"user": user, "expires": time.monotonic() + 20,
-                                     "policy": project_policy.policy(value.get("policy"))}
+                                     "policy": project_policy.policy(value.get("policy")),
+                                     "thread": thread if isinstance(thread, str) and re.fullmatch(r"[a-f0-9-]{36}", thread) else None}
                     return self.reply(200, {"token": token})
                 if self.path == "/renew":
                     lease = leases.get(value.get("token"))
                     if not lease or lease["user"] != user or lease["expires"] <= time.monotonic():
                         return self.reply(403, {"error": "租约已失效"})
                     lease["expires"] = time.monotonic() + 20
-                    return self.reply(200, {"ok": True})
-                if self.path == "/cancel":
-                    for key, lease in list(leases.items()):
-                        if lease["user"] == user:
-                            del leases[key]
-                    cancel(user)
                     return self.reply(200, {"ok": True})
             return self.reply(404, {"error": "接口不存在"})
         except Conflict as error:

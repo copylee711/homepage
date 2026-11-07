@@ -38,6 +38,47 @@ function validateBaseUrl(rawUrl) {
   return url.href.replace(/\/$/, '');
 }
 
+// Pi gives a custom model 16384 output tokens unless told otherwise, and reasoning
+// shares that allowance with the answer. A long think could use all of it and end with
+// stopReason "length" and no reply. Use the limits from Pi's own catalog for models we
+// know, fall back to the model family, and let the provider or a per-model setting
+// override them (contextWindow / maxTokens).
+export const DEFAULT_MODEL_LIMITS = Object.freeze({ contextWindow: 128000, maxTokens: 16384 });
+const KNOWN_MODEL_LIMITS = [
+  // Pi 1.4.0 catalog: opencode / opencode-go deepseek-v4.x
+  { host: /(^|\.)opencode\.ai$/, model: /^deepseek-v4/, contextWindow: 1000000, maxTokens: 384000 },
+];
+// Family fallback for endpoints Pi's catalog does not list (official DeepSeek,
+// OpenAI-compatible gateways, Claude proxies).
+const FAMILY_LIMITS = [
+  [/claude-(opus|sonnet|fable)/i, { contextWindow: 200000, maxTokens: 64000 }],
+  [/claude-haiku/i, { contextWindow: 200000, maxTokens: 32000 }],
+  [/gpt-5|gpt-6|o3|o4/i, { contextWindow: 400000, maxTokens: 128000 }],
+  [/gemini-(2\.5|3)/i, { contextWindow: 1000000, maxTokens: 65536 }],
+  [/deepseek/i, { contextWindow: 128000, maxTokens: 32768 }],
+];
+export function modelLimits(provider, model) {
+  let host = '';
+  try { host = new URL(provider.baseUrl).hostname; } catch { /* invalid URLs are rejected on save */ }
+  const known = KNOWN_MODEL_LIMITS.find(item => item.host.test(host) && item.model.test(model))
+    || FAMILY_LIMITS.find(([pattern]) => pattern.test(model))?.[1] || DEFAULT_MODEL_LIMITS;
+  let contextWindow = known.contextWindow, maxTokens = known.maxTokens;
+  if (Number.isInteger(provider.contextWindow)) contextWindow = provider.contextWindow;
+  if (Number.isInteger(provider.maxTokens)) maxTokens = provider.maxTokens;
+  const own = Object.fromEntries(Object.entries(provider.modelSettings?.[model] || {}).filter(([, value]) => value != null));
+  if (Number.isInteger(own.contextWindow)) contextWindow = own.contextWindow;
+  if (Number.isInteger(own.maxTokens)) maxTokens = own.maxTokens;
+  const price = {};
+  for (const key of ['input', 'output', 'cacheRead', 'cacheWrite']) if (own[key] != null) price[key] = own[key];
+  return { contextWindow, maxTokens: Math.min(maxTokens, contextWindow), ...price };
+}
+function optionalLimit(value, min, max, message) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < min || number > max) fail(422, message);
+  return number;
+}
+
 export async function loadProviders() {
   try { return JSON.parse(await readFile(file, 'utf8')); }
   catch (error) {
@@ -101,25 +142,14 @@ export async function normalizeProvider(input) {
     apiKey,
   };
   value.modelSettings = normalizeModelSettings(input.modelSettings, candidateModels);
+  const maxTokens = optionalLimit(input.maxTokens, 256, 2000000, '最大输出 token 需为 256–2000000 的整数');
+  const contextWindow = optionalLimit(input.contextWindow, 1024, 10000000, '上下文窗口需为 1024–10000000 的整数');
+  if (maxTokens !== undefined) value.maxTokens = maxTokens;
+  if (contextWindow !== undefined) value.contextWindow = contextWindow;
   if (!providerKey(value)) fail(422, '请先填写 API 密钥');
   return value;
 }
 
-// Known output/context limits by model family; anything else keeps Pi's
-// conservative defaults until the user sets the limit in provider settings.
-const familyLimits = [
-  [/claude-(opus|sonnet|fable)/i, { contextWindow: 200000, maxTokens: 64000 }],
-  [/claude-haiku/i, { contextWindow: 200000, maxTokens: 32000 }],
-  [/gpt-5|gpt-6|o3|o4/i, { contextWindow: 400000, maxTokens: 128000 }],
-  [/gemini-(2\.5|3)/i, { contextWindow: 1000000, maxTokens: 65536 }],
-  [/deepseek/i, { contextWindow: 128000, maxTokens: 32768 }],
-];
-export function modelLimits(provider, id) {
-  const base = { contextWindow: 128000, maxTokens: 16384 };
-  for (const [pattern, limits] of familyLimits) if (pattern.test(id)) { Object.assign(base, limits); break; }
-  const own = provider.modelSettings?.[id] || {};
-  return { ...base, ...Object.fromEntries(Object.entries(own).filter(([, v]) => v != null)) };
-}
 const settingRanges = { contextWindow: [4096, 4000000], maxTokens: [256, 1000000], input: [0, 1000], output: [0, 1000], cacheRead: [0, 1000], cacheWrite: [0, 1000] };
 function normalizeModelSettings(raw, models) {
   const result = {};
@@ -202,6 +232,14 @@ export async function activateProvider({ id, model } = {}) {
   await rename(file + '.pending', file);
   await syncModelsJson(config);
   return { active: config.active, activeModel: config.activeModel };
+}
+
+// Rewrite models.json from the saved providers, e.g. at startup so new limits apply.
+export async function refreshModelsJson() {
+  let config;
+  try { config = JSON.parse(await readFile(file, 'utf8')); }
+  catch (error) { if (error.code === 'ENOENT') return; throw error; } // built-in provider only
+  if (config.providers?.length) await syncModelsJson(config);
 }
 
 async function syncModelsJson(config) {

@@ -64,7 +64,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey, true));
 
       <div class="iris-lightbox-content" @click.self="emit('close')">
         <div class="iris-lightbox-img-wrap" :style="{ transform: `scale(${scale})` }">
-          <img :src="item.url" :alt="item.name || '预览图片'" class="iris-lightbox-img" />
+          <img :src="item.url" :alt="item.name || '预览图片'" class="iris-lightbox-img" referrerpolicy="no-referrer" />
         </div>
       </div>
     </div>
@@ -193,5 +193,8 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey, true));
   max-height: min(82vh, 900px);
   object-fit: contain;
   display: block;
+}
+@media (max-width: 860px) {
+  .iris-lightbox-backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
 </style>

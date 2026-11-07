@@ -143,6 +143,8 @@ def fetch_public(raw, raw_html=False, use_proxy=True, request=None, image=False)
                 import base64
                 data=response.read(5*MAX_BYTES+1)
                 mime='image/png' if data.startswith(b'\x89PNG\r\n\x1a\n') else 'image/jpeg' if data.startswith(b'\xff\xd8\xff') else 'image/gif' if data.startswith((b'GIF87a',b'GIF89a')) else 'image/webp' if data.startswith(b'RIFF') and data[8:12]==b'WEBP' else ''
+                if not mime and len(data) >= 22 and data.startswith(b'\x00\x00\x01\x00') and int.from_bytes(data[4:6], 'little') > 0:
+                    mime = 'image/vnd.microsoft.icon'
                 if not mime and b'<svg' in data[:4096] and len(data)<=5*MAX_BYTES:
                     data=sanitize_svg(data);mime='image/svg+xml'
                 if response.status!=200 or not mime or len(data)>5*MAX_BYTES: raise ValueError('图片加载失败、格式不支持或超过大小限制')

@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { fail } from './shared.mjs';
+import { MAX_SESSION_READ_BYTES } from './session-limits.mjs';
 
 // Process-local, bounded snapshots; never browser storage, never an execution lease.
 export class SessionSnapshots {
@@ -9,7 +10,7 @@ export class SessionSnapshots {
     let info;
     try { info = await this.store.assertOwned(user, thread); }
     catch (error) { if (error.status === 404) return []; throw error; }
-    if (info.size > 4 * 1024 * 1024) fail(413, '此对话超过读取上限');
+    if (info.size > MAX_SESSION_READ_BYTES) fail(413, '此对话超过读取上限');
     const key = user + ':' + thread;
     const version = `${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
     const cached = this.cache.get(key);
@@ -17,7 +18,7 @@ export class SessionSnapshots {
     const text = await readFile(this.store.file(user, thread), 'utf8');
     const messages = await this.project(text);
     this.cache.delete(key);
-    this.cache.set(key, { version, messages });
+    if (info.size <= 4 * 1024 * 1024) this.cache.set(key, { version, messages });
     // At most 16 bounded 4 MiB sessions; a changed file invalidates on next read.
     while (this.cache.size > 16) this.cache.delete(this.cache.keys().next().value);
     return messages;

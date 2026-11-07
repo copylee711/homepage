@@ -89,6 +89,8 @@ export const useWorkspace = defineStore('workspace', {
     terminalLines: [] as TerminalLine[],
     terminalHistory: [] as string[],
     snapshots: new Map<string, any>(),
+    listingRequest: 0,
+    refreshing: false,
   }),
   getters: {
     entries(state): any[] {
@@ -99,26 +101,40 @@ export const useWorkspace = defineStore('workspace', {
     },
   },
   actions: {
-    async load(path = '', fresh = false) {
+    async load(path = '', fresh = false, signal?: AbortSignal) {
       path = normalizeWsPath(path);
-      const cached = !fresh ? this.snapshots.get(path) : undefined;
-      if (cached) this.apply(cached);
-      else this.loading = true;
-      this.error = '';
+      const quiet = !!signal;
+      if (quiet && (signal.aborted || this.loading || this.refreshing)) return;
+      const request = ++this.listingRequest;
+      const previous = this.snapshots.get(path);
+      if (quiet) {
+        this.refreshing = true;
+      } else {
+        const cached = !fresh && previous;
+        if (cached) this.apply(cached);
+        this.loading = !cached;
+        this.error = '';
+      }
       try {
-        const value = await get('/api/files?path=' + encodeURIComponent(path) + (fresh ? '&fresh=1' : ''));
+        const value = await get('/api/files?path=' + encodeURIComponent(path) + (fresh ? '&fresh=1' : ''), signal);
+        if (signal?.aborted || request !== this.listingRequest) return;
         this.snapshots.set(path, value);
         while (this.snapshots.size > 24) {
           const first = this.snapshots.keys().next().value;
           if (first === undefined) break;
           this.snapshots.delete(first);
         }
-        this.apply(value);
+        if (!quiet || JSON.stringify(previous?.entries) !== JSON.stringify(value.entries)) this.apply(value);
+        this.error = '';
       } catch (e: any) {
-        this.error = e.message || '无法读取工作区';
+        if (!quiet && request === this.listingRequest) this.error = e.message || '无法读取工作区';
       } finally {
-        this.loading = false;
+        if (quiet) this.refreshing = false;
+        else if (request === this.listingRequest) this.loading = false;
       }
+    },
+    refreshListing(signal: AbortSignal) {
+      return this.load(this.path, false, signal);
     },
     apply(value: any) {
       this.path = normalizeWsPath(value.path);
@@ -300,7 +316,7 @@ export const useWorkspace = defineStore('workspace', {
       await this.load(this.path, true);
     },
     async deleteEntry(entryPath: string) {
-      await post('/api/files/manage', { action: 'delete', path: entryPath });
+      await post('/api/files/manage', { action: 'delete', path: entryPath, recursive: true });
       void this.closeTab(entryPath, true);
       this.snapshots.clear();
       await this.load(this.path, true);
@@ -310,7 +326,7 @@ export const useWorkspace = defineStore('workspace', {
       const failed: Array<{ path: string; error: string }> = [];
       for (const p of paths) {
         try {
-          await post('/api/files/manage', { action: 'delete', path: p });
+          await post('/api/files/manage', { action: 'delete', path: p, recursive: true });
           void this.closeTab(p, true);
           deleted.push(p);
         } catch (err: any) {

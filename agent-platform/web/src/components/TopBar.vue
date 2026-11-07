@@ -95,6 +95,7 @@ function toggleWorkspace() {
       <p v-if="subtitle">{{ subtitle }}</p>
     </div>
     <div class="topbar-actions">
+      <span id="background-toolbar-slot" style="display: contents"></span>
       <button v-if="session.canExecute" class="icon-button" aria-label="联网搜索" title="联网搜索" @click="ui.openSettings('search')"><Icon name="globe" /></button>
       <button v-if="session.canExecute" class="icon-button" :disabled="!session.currentChat" aria-label="对话操作" title="对话操作" @click="openChatMenu"><Icon name="more-horizontal" /></button>
       <button class="icon-button theme-btn" :aria-label="ui.theme === 'dark' ? '切换到浅色' : '切换到深色'" :title="ui.theme === 'dark' ? '浅色' : '深色'" @click="ui.toggleTheme($event)">
@@ -138,9 +139,11 @@ function toggleWorkspace() {
 .chat-title-btn:hover .chat-title-icon { opacity: 1; color: var(--muted); }
 
 .chat-heading p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; line-height: 1.3; }
-.topbar-actions { display: flex; align-items: center; gap: 3px; flex: none; }
+.topbar-actions { position: relative; display: flex; align-items: center; gap: 3px; flex: none; }
 .theme-btn svg { animation: theme-icon-in 260ms var(--ease); }
 @keyframes theme-icon-in { from { opacity: 0.4; transform: rotate(-45deg) scale(0.82); } to { opacity: 1; transform: none; } }
 .only-mobile { display: none; }
-@media (max-width: 860px) { .only-mobile { display: inline-flex; } }
+@media (max-width: 860px) {
+  .only-mobile { display: inline-flex; }
+}
 </style>

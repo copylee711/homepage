@@ -433,7 +433,7 @@ async function batchDelete() {
   const names = items.slice(0, 4).map(e => e.name).join('、') + (items.length > 4 ? ` 等 ${items.length} 项` : '');
   const ok = await ui.confirm({
     title: `批量删除 ${items.length} 项`,
-    message: `确定删除“${names}”？此操作不可撤销（文件夹须为空）。`,
+    message: `确定删除“${names}”？文件夹及其所有内容都会被删除。此操作不可撤销。`,
     confirmText: '全部删除',
     danger: true,
   });
@@ -525,10 +525,10 @@ function fileContext(ev: MouseEvent, e: any) {
     },
     {
       icon: 'trash',
-      label: e.type === 'dir' ? '删除空文件夹' : '删除文件',
+      label: e.type === 'dir' ? '删除文件夹' : '删除文件',
       danger: true,
       action: async () => {
-        if (!(await ui.confirm({ title: e.type === 'dir' ? '删除文件夹' : '删除文件', message: `确定删除“${e.name}”？此操作不可撤销（文件夹须为空）。`, confirmText: '删除', danger: true }))) return;
+        if (!(await ui.confirm({ title: e.type === 'dir' ? '删除文件夹' : '删除文件', message: `确定删除“${e.name}”？文件夹及其所有内容都会被删除。此操作不可撤销。`, confirmText: '删除', danger: true }))) return;
         try { await ws.deleteEntry(e.path); ui.toast('已删除', { tone: 'success' }); }
         catch (err: any) { ui.toast(err.message, { tone: 'error' }); }
       },

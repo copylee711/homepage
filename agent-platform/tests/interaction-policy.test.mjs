@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 test('only known low-risk tools bypass approval, arbitrary bash never does', () => {
   for (const name of ['read', 'web_fetch', 'web_search', 'ask_user', 'update_plan']) assert.equal(requiresApproval('ask', name), false);
-  for (const name of ['bash', 'write', 'edit', 'unknown']) assert.equal(requiresApproval('ask', name), true);
+  for (const name of ['bash', 'write', 'edit', 'unknown', 'background_start', 'background_wait']) assert.equal(requiresApproval('ask', name), true);
   assert.equal(requiresApproval('auto', 'bash'), false);
 });
 test('switching to auto releases pending approval, preserves independent user questions', () => {

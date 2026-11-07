@@ -4,6 +4,7 @@ import { normalizeSearch, publicSearch } from '../../search.mjs';
 // Vite dev-only middleware that emulates the gateway API so the Iris console can be
 // previewed without the backend. Never included in the production build.
 import { createHash, randomUUID } from 'node:crypto';
+import { deflateSync } from 'node:zlib';
 
 const now = Date.now();
 const sha256 = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
@@ -35,6 +36,8 @@ const gitBranches = {
 };
 
 const chats = [
+  { id: '66666666-6666-4666-8666-666666666666', title: '外部图片直接显示', updated: now - 5e4, pinned: true, archived: false, projectId: 'iris-rebuild', permission: { scope: 'project_only', extraProjects: {} } },
+  { id: '55555555-5555-4555-8555-555555555555', title: '网页与搜索图标', updated: now - 1e5, pinned: true, archived: false, projectId: 'iris-rebuild', permission: { scope: 'project_only', extraProjects: {} } },
   { id: '11111111-1111-4111-8111-111111111111', title: '重构 Iris 控制台界面', updated: now - 6e5, pinned: true, archived: false, projectId: 'iris-rebuild', permission: { scope: 'project_only', extraProjects: {} } },
   { id: '22222222-2222-4222-8222-222222222222', title: '用 Python 生成项目说明', updated: now - 36e5, pinned: false, archived: false, projectId: 'default', permission: { scope: 'project_only', extraProjects: {} } },
   { id: '33333333-3333-4333-8333-333333333333', title: '推导梯度下降收敛性', updated: now - 9e7, pinned: false, archived: false, projectId: 'default', permission: { scope: 'scoped', extraProjects: { 'iris-rebuild': 'read' } } },
@@ -61,7 +64,66 @@ const sampleAssistant = {
     { type: 'text', text: '```python\ndef area(r: float) -> float:\n    import math\n    return math.pi * r ** 2\n\nprint(area(2))\n```\n\n完成，你可以在工作区查看 `demo.py`。' },
   ],
 };
+function webTool(id, name, args, result) {
+  return { type: 'tool', id, name, args: JSON.stringify(args, null, 2), state: 'success', result: JSON.stringify(result), durationMs: 640 };
+}
+const directImage = 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png';
 const sessions = {
+  '66666666-6666-4666-8666-666666666666': {
+    busy: false,
+    messages: [
+      { role: 'user', timestamp: now - 8e4, content: '正文里的外链图片直接显示，不要先下到工作区。' },
+      {
+        role: 'assistant',
+        timestamp: now - 6e4,
+        content: [
+          { type: 'text', text: [
+            'https 图片按源地址加载。',
+            '',
+            '源站可以直接显示：',
+            '',
+            `![GitHub 标志，直接从源站加载](${directImage})`,
+            '',
+            '源站失败时改走同源代理：',
+            '',
+            '![代理回退](https://direct-fail.invalid/iris.png)',
+            '',
+            '源站和代理都失败时显示占位：',
+            '',
+            '![加载失败](https://both-fail.invalid/missing.png)',
+          ].join('\n') },
+        ],
+      },
+    ],
+  },
+  '55555555-5555-4555-8555-555555555555': {
+    busy: false,
+    messages: [
+      { role: 'user', timestamp: now - 2e5, content: '打开 GitHub、Vue 文档，再搜一下 favicon，并看一张没有站点的图片搜索。' },
+      {
+        role: 'assistant',
+        timestamp: now - 1e5,
+        stopReason: 'length',
+        content: [
+          { type: 'text', text: 'GitHub 提供 /favicon.ico。' },
+          webTool('web-gh', 'web_fetch', { url: 'https://github.com/' }, { url: 'https://github.com/', status: 200, text: 'GitHub' }),
+          { type: 'text', text: 'Vue 官网没有 /favicon.ico，改用公共图标。' },
+          webTool('web-vue', 'web_fetch', { url: 'https://vuejs.org/guide/introduction.html' }, { url: 'https://vuejs.org/guide/introduction.html', status: 200, text: 'Vue.js' }),
+          { type: 'text', text: '搜索结果逐条显示站点。' },
+          webTool('web-search', 'web_search', { query: 'favicon vue github' }, { query: 'favicon vue github', engine: 'demo', results: [
+            { title: 'Vue.js', url: 'https://vuejs.org/guide/introduction.html', snippet: '官方文档' },
+            { title: 'GitHub', url: 'https://github.com/', snippet: '代码托管' },
+            { title: 'Favicon', url: 'https://en.wikipedia.org/wiki/Favicon', snippet: '维基百科' },
+            { title: '不存在的站点', url: 'https://this-domain-does-not-exist-9d22.example/', snippet: '应回退地球图标' },
+          ] }),
+          { type: 'text', text: '打不开的地址回到地球图标。' },
+          webTool('web-miss', 'web_fetch', { url: 'https://this-domain-does-not-exist-9d22.example/' }, { url: 'https://this-domain-does-not-exist-9d22.example/', status: 0, text: '无法连接' }),
+          { type: 'text', text: '图片搜索没有具体站点。' },
+          webTool('web-img', 'image_search', { query: 'mountain lake' }, { query: 'mountain lake', engine: 'demo', results: [{ title: 'Lake', url: 'https://images.example/lake.jpg', sourceUrl: 'https://example.com/photo' }] }),
+        ],
+      },
+    ],
+  },
   '11111111-1111-4111-8111-111111111111': {
     busy: false,
     messages: [
@@ -210,10 +272,55 @@ function readBody(req) {
   });
 }
 
+// Mirrors the console CSP in gateway.mjs so dev can load https images directly.
+const DEV_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob: https:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'";
+
+function crc32(buf) {
+  let c = ~0;
+  for (const byte of buf) {
+    c ^= byte;
+    for (let i = 0; i < 8; i++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+  }
+  return ~c >>> 0;
+}
+function pngChunk(type, data) {
+  const body = Buffer.concat([Buffer.from(type), data]);
+  const out = Buffer.alloc(12 + data.length);
+  out.writeUInt32BE(data.length, 0);
+  body.copy(out, 4);
+  out.writeUInt32BE(crc32(body), 8 + data.length);
+  return out;
+}
+function solidPng(width, height, r, g, b) {
+  const row = Buffer.alloc(1 + width * 3);
+  for (let x = 0; x < width; x++) {
+    row[1 + x * 3] = r;
+    row[2 + x * 3] = g;
+    row[3 + x * 3] = b;
+  }
+  const raw = Buffer.alloc(row.length * height);
+  for (let y = 0; y < height; y++) row.copy(raw, y * row.length);
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', deflateSync(raw)),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
 export function devMock() {
   return {
     name: 'iris-dev-mock',
     configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        res.setHeader('Content-Security-Policy', DEV_CSP);
+        next();
+      });
       server.middlewares.use(async (req, res, next) => {
         const url = new URL(req.url, 'http://localhost');
         const path = url.pathname;
@@ -411,6 +518,21 @@ export function devMock() {
           const idx = chats.findIndex(x => x.id === body.thread);
           if (idx >= 0) chats.splice(idx, 1);
           return send({ ok: true });
+        }
+
+        if (path === '/api/image' && req.method === 'GET') {
+          const target = q.get('url') || '';
+          if (target.startsWith('https://direct-fail.invalid/')) {
+            const png = solidPng(320, 180, 38, 130, 90);
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Cache-Control', 'private, max-age=300');
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            return res.end(png);
+          }
+          res.statusCode = 404;
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          return res.end('image proxy miss');
         }
 
         // Workspace

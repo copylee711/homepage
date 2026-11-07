@@ -114,8 +114,7 @@
   gap: 6px;
   border: 1px solid var(--line-2);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
-  backdrop-filter: blur(8px);
+  background: var(--surface);
   box-shadow: var(--shadow);
   font-size: 12px;
 }

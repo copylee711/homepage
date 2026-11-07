@@ -1,9 +1,11 @@
 import { required, fail } from './shared.mjs';
 const url = process.env.SANDBOX_URL || 'http://192.168.84.1:18082';
-export async function sandbox(path, user, token, policy) {
+export async function sandbox(path, user, token, policy, extra) {
+  const payload = { user, token, policy };
+  if (extra && typeof extra === 'object') Object.assign(payload, extra);
   const response = await fetch(url + path, { method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + required('SANDBOX_SECRET') },
-    body: JSON.stringify({ user, token, policy }), signal: AbortSignal.timeout(15000) });
+    body: JSON.stringify(payload), signal: AbortSignal.timeout(15000) });
   if (!response.ok) fail(503, '独立沙箱不可用，执行已关闭');
   return response.json();
 }

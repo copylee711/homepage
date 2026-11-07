@@ -1,11 +1,49 @@
 # Same locked, credential-free toolchain; no Pi process runs in this container.
 FROM copylee-agent-runner:latest
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Same optional apt tweaks as Dockerfile.runner; defaults change nothing. A runner
+# built with them already carries the mirror and IPv4 settings.
+ARG APT_MIRROR=
+ARG APT_FORCE_IPV4=0
+RUN if [ "$APT_FORCE_IPV4" = 1 ]; then echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4; fi \
+    && if [ -n "$APT_MIRROR" ]; then \
+         for f in /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list; do \
+           if [ -f "$f" ]; then sed -i "s|deb.debian.org|$APT_MIRROR|g" "$f"; fi; \
+         done; \
+       fi \
+    && apt-get update && apt-get install -y --no-install-recommends \
     python3-pip python3-venv python3-dev build-essential pkg-config jq zip unzip less file \
+    python3-numpy python3-pandas python3-matplotlib python3-seaborn python3-scipy python3-sympy \
     && rm -rf /var/lib/apt/lists/* \
     && npm cache clean --force
-RUN corepack enable --install-directory /usr/local/bin
+# Debian supplies the document dependencies. The PPTX wheel and its typing dependency are verified.
+ARG PIP_INDEX_URL=https://pypi.org/simple
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-docx python3-openpyxl python3-xlsxwriter python3-pypdf2 python3-reportlab poppler-utils python3-defusedxml \
+    libreoffice-writer libreoffice-calc libreoffice-impress tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/* \
+    && printf '%s\n' 'python-pptx==1.0.2 --hash=sha256:160838e0b8565a8b1f67947675886e9fea18aa5e795db7ae531606d68e785cba' \
+      'pypdf==6.21.4 --hash=sha256:33e4fb41ca352810eb4e9838aa0d82d6888a5f8bf682f43e99cce5faa666255c' \
+      'typing-extensions==4.12.2 --hash=sha256:04e5ca0351e0f3f85c6853954072df659d0d13fac324d0072316b67d7794700d' \
+      | /usr/bin/python3 -m pip install --index-url "$PIP_INDEX_URL" --break-system-packages --no-cache-dir --no-deps --only-binary=:all: --require-hashes -r /dev/stdin
+RUN ln -s /usr/bin/python3 /usr/local/bin/python \
+    && corepack enable --install-directory /usr/local/bin
+# Headless browser for project E2E tests and screenshots, with CJK font fallback.
+RUN apt-get update && apt-get install -y --no-install-recommends chromium fonts-wqy-zenhei \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install --global --ignore-scripts --fetch-retries=1 playwright-core@1.64.1 \
+    && npm cache clean --force
+# Shared fonts and dependencies used by the bundled document skills.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-noto-cjk fonts-noto-color-emoji fonts-liberation2 fonts-crosextra-carlito fonts-crosextra-caladea \
+    fonts-arphic-ukai fonts-arphic-uming fonts-cwtex-fs python3-lxml python3-pil qpdf tesseract-ocr-chi-sim \
+    && rm -rf /var/lib/apt/lists/*
+RUN /usr/bin/python3 -m pip install --index-url "$PIP_INDEX_URL" --break-system-packages --no-cache-dir --only-binary=:all: \
+    'markitdown[pptx]==0.1.9' 'pdfplumber==0.11.9' 'pdf2image==1.17.0' 'pytesseract==0.3.13' \
+    && npm install --global --ignore-scripts --fetch-retries=1 docx@9.5.1 pptxgenjs@4.0.1 \
+    && npm cache clean --force
+COPY agent-platform/office-fonts.conf /etc/fonts/conf.d/61-iris-office.conf
+ENV NODE_PATH=/usr/local/lib/node_modules
 # Optional language images can extend this base with rustc/cargo, golang or a JDK.
 USER 1000:1000
 COPY agent-platform/sandbox-worker.py /sandbox-worker.py

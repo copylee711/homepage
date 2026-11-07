@@ -79,7 +79,7 @@ export async function manageWorkspace(user, input) {
   if (!['mkdir', 'delete', 'move'].includes(input.action)) fail(422, '文件操作无效');
   workspacePath(input.path);
   if (input.action === 'move') workspacePath(input.destination);
-  const result = await run(user, 'file-manage', { action: input.action, path: input.path, destination: input.destination });
+  const result = await run(user, 'file-manage', { action: input.action, path: input.path, destination: input.destination, recursive: input.recursive === true });
   invalidateWorkspace(user);
   return result;
 }

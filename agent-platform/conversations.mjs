@@ -1,11 +1,26 @@
 import { lstat, mkdir, open, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { fail } from './shared.mjs';
+import { MAX_SESSION_READ_BYTES } from './session-limits.mjs';
 
 const THREAD = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const PROJECT_ID = /^[a-zA-Z0-9_\-一-龥]{1,40}$/;
 const RESERVED_PROJECTS = new Set(['__proto__', 'constructor', 'prototype', 'lost+found', 'node_modules']);
 const MAX_TITLE = 80;
-const MAX_EXPORT = 4 * 1024 * 1024;
+export const CHAT_PAGE_DEFAULT = 50, CHAT_PAGE_MAX = 500;
+
+// Optional paging over the full, sorted chat list. Without limit or cursor every chat is
+// returned, so older clients keep working. cursor is the opaque nextCursor of the previous
+// page (an offset into the pinned-first, most-recent-first order).
+export function paginateChats(chats, { limit, cursor } = {}) {
+  const given = value => value !== undefined && value !== null && value !== '';
+  if (!given(limit) && !given(cursor)) return { chats, total: chats.length, hasMore: false, nextCursor: null };
+  const size = given(limit) ? Number(limit) : CHAT_PAGE_DEFAULT;
+  if (!Number.isInteger(size) || size < 1 || size > CHAT_PAGE_MAX) fail(422, '分页数量需为 1–' + CHAT_PAGE_MAX);
+  const raw = given(cursor) ? String(cursor) : '0';
+  if (!/^\d{1,9}$/.test(raw)) fail(422, '分页游标无效');
+  const start = Number(raw), page = chats.slice(start, start + size), end = start + page.length;
+  return { chats: page, total: chats.length, hasMore: end < chats.length, nextCursor: end < chats.length ? String(end) : null };
+}
 const queues = new Map();
 
 export function validThread(value) {
@@ -227,7 +242,15 @@ export class ChatStore {
     if (!validThread(thread)) fail(422, '对话标识无效');
     return this.serialize(user, async () => {
       const meta = await this.loadMeta(user);
-      if (meta.chats[thread]) return;
+      const existing = meta.chats[thread];
+      if (existing) {
+        if (!existing.titleSource && (!existing.title || /^正在命名(?:…|\.\.\.)$/.test(existing.title))) {
+          existing.titleSource = 'pending';
+          existing.title = '新任务';
+          await this.saveMeta(user, meta);
+        }
+        return;
+      }
       if (Object.keys(meta.chats).length >= 100) fail(429, '对话元数据数量已达上限，请清理未使用的对话');
       // Legacy histories keep their default project. New histories bind exactly once,
       // before Pi starts, rather than depending on a not-yet-created JSONL file.
@@ -445,12 +468,12 @@ export class ChatStore {
     // Keep pinned first, then most recently active; archived stays in the same stream.
     const present=new Set(result.map(item=>item.id));
     for(const [id,item]of Object.entries(meta.chats||{}))if(!present.has(id)&&item.createdAt&&['pending','agent'].includes(item.titleSource))result.push({id,title:item.title||'新任务',updated:item.createdAt||item.updatedAt,projectId:item.projectId||'default',permission:item.permission,pinned:item.pinned===true,archived:item.archived===true});
-    return result.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updated - a.updated).slice(0, 100);
+    return result.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updated - a.updated || (a.id < b.id ? -1 : 1));
   }
   async export(user, thread, format, secrets = []) {
     if (format !== 'md' && format !== 'json') fail(422, '导出格式无效');
     const info = await this.assertOwned(user, thread);
-    if (info.size > MAX_EXPORT) fail(413, '此对话超过 4 MiB，无法导出');
+    if (info.size > MAX_SESSION_READ_BYTES) fail(413, '此对话超过导出上限');
     const meta = await this.loadMeta(user).catch(() => ({ chats: {} }));
     const entries = [];
     for (const line of (await readFile(this.file(user, thread), 'utf8')).split('\n')) {

@@ -12,7 +12,7 @@ Homepage 不给新应用扩大主站 Cookie 的域或路径。
 Caddy 转发至 xa 时只保留两个 ai 专属 Cookie，剥离既有 Cloud 兼容会话 Cookie，避免把主站会话交给 Agent 服务。
 
 每次访问重新检查原会话、账户停用状态与当前角色。退出原会话、修改密码撤销会话、删除账户时，
-关联 Agent 会话级联失效。任务流每 5 秒重新检查权限，失败即中止。应用退出只撤销当前 Agent 会话。
+关联 Agent 会话级联失效。回合进行中网关每 10 秒重新检查权限并续租，浏览器离开后仍然继续；登录失效、失去执行权限或撤权会停止回合，账户服务连续失败 5 次也会停止。应用退出只撤销当前 Agent 会话，并停止该用户正在运行的回合。
 管理员在侧栏“用户执行授权”按账户授予 1、7 或 30 天权限，或撤销授权。普通用户默认无权限；
 登录、绑定 GitHub 均不会自动授予执行权限。供应商配置、连接测试和用户授权管理始终仅管理员可用。
 后端 `COPYLEE_AGENT_USER_EXECUTION_ENABLED` 默认 false；必须完成本文权限和沙箱测试后才设为 true。
@@ -28,7 +28,7 @@ Caddy 转发至 xa 时只保留两个 ai 专属 Cookie，剥离既有 Cloud 兼�
 - `.env.example`、`Caddyfile.example`、`*.service.example`：配置模板；必须按实际环境生成。
 - 服务器 `.env`：客户端密钥、内部 runner 密钥、OpenCode Go 密钥，root 0600，禁止提交。
 - `data/providers.json`、`data/agent/models.json`：管理员保存的供应商密钥，服务用户 0600；不回显给浏览器。
-- `data/sessions/<用户哈希>/<对话 UUID>.jsonl`：Pi 会话；`/var/lib/copylee-sandboxes/<用户哈希>.img`：256 MiB 持久化工作区（主机端，不在 runner 中）。
+- `data/sessions/<用户哈希>/<对话 UUID>.jsonl`：Pi 会话；`data/turns/<用户哈希>/<对话 UUID>.ndjson`：该回合已脱敏的事件日志，供断线后重连，约 30 分钟；`/var/lib/copylee-sandboxes/<用户哈希>.img`：256 MiB 持久化工作区（主机端，不在 runner 中）。
   两者以及 `secrets/` 均被 Git 和 Docker 构建上下文忽略。备份这些目录时按敏感数据处理。
 
 Pi 在受信 runner 中调用模型；禁用默认内置工具和自动扩展，只注册固定 `sandbox-extension.ts` 的
@@ -39,12 +39,12 @@ read/write/edit/bash。runner 不挂载任何用户工作区，模型不能通�
 沙箱容器使用独立 internal 网络、UID 1000、只读根、cap_drop ALL、no-new-privileges；
 默认 512 MiB 内存、1 CPU、96 PIDs、256 MiB 工作区、单条命令 180 秒。管理员可在用户授权列表中
 逐个分配磁盘、内存、CPU、进程数和命令时限。磁盘 64–16384 MiB，内存 64–4096 MiB，CPU 0.1–4，
-进程 16–256，命令时限 10–600 秒；任务仍最多 10 分钟。默认磁盘分配总预算 8192 MiB，
+进程 16–256，命令时限 10–600 秒；单次模型回合最长 30 分钟。默认磁盘分配总预算 8192 MiB，
 同时运行工具的内存预算 4096 MiB，均由主机环境配置。配额不授予执行权限。
 配额保存在主机 root 专用 `quotas.json`；磁盘调整需要用户工具空闲，离线检查/resize2fs，缩容不足则拒绝，
 不删除数据强行缩容。每个用户独立 ext4 镜像，最多 16 个用户；新配额在下一次工具调用生效。
 容器不含模型密钥、服务密钥、执行租约、Docker socket、宿主机配置或其他用户挂载。
-普通工具调用结束后删除容器，普通 shell 的脱离进程终止；持久后台任务通过独立 background_start 管理。工作区文件持久化。文本预览与图片预览分别受独立大小限制，文件上传/下载最多 15 MiB，临时目录 64 MiB。
+普通工具调用结束后删除容器，普通 shell 的脱离进程终止；持久后台任务通过独立 background_start 管理，安装/构建与预览服务共用该配额。工作区文件持久化。文本预览与图片预览分别受独立大小限制，文件上传/下载最多 15 MiB，临时目录 64 MiB。
 
 工具经 `HTTP_PROXY/HTTPS_PROXY` 访问独立出口 `192.168.85.2:3128`，支持公网 HTTP 80 / HTTPS 443，
 包括 npm、pip、Git HTTPS 和 curl；SSH/Git 原生端口及直连不开放。出口每次解析并校验所有 IPv4 地址，
@@ -63,14 +63,14 @@ CLI 链接在 `.tools/bin`（自动加入 PATH）。安装任务在沙箱执行�
 Agent 可按任务需要自行下载依赖或其他工具链到 `/workspace`；Python 用 `.venv`，npm 本地安装。
 不开放 apt/root；Rust/Go/JDK 可从官方公开发行包装入工作区，需管理员分配足够磁盘/内存。
 最多同时运行 4 个工具，同用户并行工具自动串行，每用户同时只允许一个任务。
-对话另有限额：每用户最多 50 个对话、总计 32 MiB、单对话 4 MiB；运行中每 500 ms 检查，超限停止。
+对话记录每账号总计 256 MiB，单对话 32 MiB。运行中每 10 秒检查，超限停止。
 达到容量后已有对话仍可读取，新增内容需联系管理员归档。正在初始化的 Pi 进程不能被当作空闲会话淘汰，
 避免并发新建对话留下失去管理的进程。
 
 broker 是主机 root 控制面，拥有有限的固定 Docker 操作和 loop mount 权限。不能把它或 Docker socket
 挂进 runner/sandbox；仅监听 Compose 私有网关，校验网段和服务密钥。Pi 只拿到绑定用户的随机短期租约，
-不能指定用户、镜像、容器参数、主机路径或网络。网关每 5 秒重新鉴权并续租，租约最多 20 秒；撤权、
-停用、登出和账户服务故障停止续租，broker 独立杀掉过期工具。撤销按钮还会主动取消该用户所有任务。
+不能指定用户、镜像、容器参数、主机路径或网络。回合存续期间网关每 10 秒重新鉴权并续租（浏览器离开页面后仍续租），租约最多 20 秒；撤权、
+停用、登出和账户服务故障停止续租，broker 独立杀掉过期工具。执行器若超过 30 秒没有成功续租，也会停止该回合。撤销授权会取消该用户所有任务，并停止 purpose 为 install 的后台安装；预览服务不因此停止。
 容器仍共享主机内核，并非虚拟机级隔离。
 
 ## 部署
@@ -121,6 +121,21 @@ docker compose ps
 xa 外网下载慢时，可手动运行 GitHub Actions 的 `Build Agent images`，下载短期保留的
 `agent-images` 构件，传到 xa 后执行 `docker load -i agent-images.tar.gz`、
 `docker compose up -d --no-build`。镜像内不包含任何运行密钥，构建无需服务器或模型凭据。
+
+xa 直连 deb.debian.org（IPv6）会卡住：在 xa 的 `.env` 写入 `APT_MIRROR=mirrors.aliyun.com`、
+`APT_FORCE_IPV4=1`，`Dockerfile.runner` / `Dockerfile.sandbox` 的同名构建参数（默认关闭，行为与不设时相同）
+会改写 apt 源并强制 IPv4；`docker compose build` 也会从 `.env` 传给 runner。在 xa 上按 runner → sandbox →
+egress → gateway 串行构建、打 `:main-<sha>` 标签、重启并写入版本标记：
+
+```sh
+cd /opt/homepage/agent-platform
+REVISION=<完整 commit sha> sh scripts/deploy-images.sh
+# web/dist 已由同一 commit 构建且 .deployed-web-revision 等于 REVISION 时，可跳过镜像内前端构建：
+REVISION=<sha> GATEWAY_WEB=prebuilt sh scripts/deploy-images.sh
+```
+
+脚本先把现有 `:latest` 另存为 `:pre-<sha>` 以便回滚；不会改动 `data/`、`.env` 或密钥。
+`Dockerfile.gateway.prebuilt` 是 `Dockerfile.gateway` 第二阶段加上预构建的 `web/dist`。
 
 将 `agent-tunnel.service.example` 安装到 xa 的 systemd，替换 SSH 地址，使用专用 `agent-tunnel` 用户，
 校验并固定 gz 的 SSH host key。gz 端公钥限制：
@@ -180,7 +195,7 @@ Linux 主机执行 `python3 agent-platform/tests/project-mounts-live.py` 可验�
 上线验证包括匿名跳转、管理员登录、普通用户拒绝执行、CSRF、过期与重复授权码、会话撤销、
 真实模型调用、工具执行、重启后会话与文件保留、停止任务、代理连通与密钥不回显。
 `/healthz` 仅用于容器检查；runner 无宿主机公开端口，`/auth/check` 在公网 Caddy 返回 404。
-浏览器刷新或流连接断开会请求停止当前任务；每次任务上限 10 分钟。长任务请显式使用 background_start；其生命周期和预览限制见下文。
+浏览器刷新、切换标签或关闭页面不会停止正在运行的回合。回合在 runner 上继续，直到模型结束、用户显式停止（`POST /api/abort`）、撤权、登出、存储超限、续租失败或 30 分钟上限。事件留在网关内存，并追加写入 runner 的 `data/turns/`（与会话同样敏感）。恢复进度：`GET /api/turns/status?thread=` 返回 `busy`、`settled`、`cursor`；`POST /api/turns/subscribe`（JSON：`thread`、`cursor`）从游标继续接收 NDJSON。当前 Iris 页面尚未接入这两个接口。被拒绝的新 prompt（例如回合尚未结束）不会取消已在运行的回合。安装和长时间构建不要用 bash 阻塞回合，见下文后台任务。
 
 参考：[Pi RPC](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md)、
 [OpenCode 的 Pi 配置](https://opencode.ai/console/harnesses/pi)、
@@ -231,8 +246,11 @@ runner 和 sandbox 镜像并更新主机 broker 脚本。UI/权限行为见 `UX-
 - 设置页提供账户人设、全局/项目记忆；数据位于 data/memories/，仅当前主项目记忆会加载。
 - 独立搜索：百度/Bing/DuckDuckGo、DeepSeek API 预设和自定义 HTTPS JSON 来源。密钥与配置存于 data/search-settings/，不发给模型。
 - “能力、MCP 与 Skill”内置三项默认技能，支持个人 Markdown 技能、远程 HTTPS MCP 的 JSON/SSE 工具，以及 Pi 原生上下文统计/压缩。配置与生成的只读技能资源位于 data/features/。
-- 后台任务可运行 Vite 等 HTTP 服务；两项/账户、四项/全局、每项一小时。日志可查看，任务可停止。文件保留；broker 重启会清理任务容器。
+- 后台任务可运行 Vite 等 HTTP 服务，也可运行安装/构建；两项/账户、四项/全局、每项一小时，内存预算与工具容器共享。日志可查看，任务可停止。文件保留；broker 重启会清理任务容器。
+- 沙箱的系统 Python 内置 NumPy、pandas、Matplotlib、seaborn、SciPy 和 SymPy，普通命令和后台任务均可直接导入。文档处理内置 python-docx、python-pptx、openpyxl、XlsxWriter、PyPDF2、ReportLab 和 Poppler，设置中提供 DOCX、PPTX、XLSX、PDF 和 grill-me 技能。项目需要虚拟环境时，可以用 `/usr/bin/python3 -m venv --system-site-packages .venv` 创建可读取内置包的环境。已有的隔离虚拟环境保留其项目依赖配置，可用 `/usr/bin/python3` 显式调用系统 Python。
+- 安装与构建（`pip install`、`python -m pip install`、`npm install` / `npm ci`、`pnpm`/`yarn`/`bun` install、`cargo build`、`go build`、`mvn`/`gradle` 构建等）不要用 bash。模型应调用 `background_start` 且 `purpose` 为 `install`（不要设置 port）。还有其他工作时继续做；否则调用 `background_wait` 暂停当前回合，任务退出后带着状态和日志继续。bash 遇到这类命令会直接拒绝（退出码 126），避免单次工具容器被长安装占满后删除、进程一起消失。
+- 用户停止、撤权、登出、租约丢失和回合上限会停止 `purpose=install` 的任务。预览服务（`purpose=server`）不会因此被停止。回合自然结束后，仍在运行的 install 任务会继续，直到它自己结束、被 `background_stop` 或达到 1 小时。隔离、出口代理和配额与原来的后台任务相同。
 - Vite 示例：background_start 的 command 为 `npm run dev -- --host 0.0.0.0 --port 5173 --strictPort --base "$IRIS_PREVIEW_BASE"`，port=5173、previewBase=true。预览走临时私密链接，支持 HTTP，暂不支持 WebSocket/HMR。
-- 部署时同步更新 runner/gateway/sandbox 镜像、主机 background-tasks.py、web-search.py、web-access.py 与 sandbox-broker.py，并应用 Caddyfile.example 中的 /preview/* 路由。该路由依赖 gateway 对能力令牌和 CSP sandbox 的校验；不能直接反代到用户容器。
+- 部署时重建并重启 gateway 与 runner 镜像。在 xa 更新主机 `background-tasks.py` 与 `sandbox-broker.py` 后重启 `agent-sandbox`。本次不改 sandbox 工具镜像里的 `background-worker.py`，也不新增 Compose 环境变量。gz 的 Caddy / `forward_auth` 无新路由；不要为了长回合去缩短反代读超时。浏览器断开后，xa 上的 gateway 会继续占用到 runner 的连接并续租，直到回合结束或授权失效；回合不限思考与运行时长，只有模型与工具连续 10 分钟无任何输出（工具执行中为 35 分钟）才会停止。预览路由仍依赖 gateway 对能力令牌和 CSP sandbox 的校验；不能直接反代到用户容器。
 
 测试：`node --test tests/*.test.mjs`、`python3 tests/web-search.test.py`。真实模型/容器验收脚本为 `tests/interactions-runner-live.mjs`、`tests/memory-background-live.mjs`、`tests/capabilities-live.mjs`，仅在隔离的候选 runner 中按脚本说明执行，使用专用合成账户，不操作真实用户会话。MCP/搜索协议验收使用临时 HTTPS 测试端点，正式部署后移除测试路由。

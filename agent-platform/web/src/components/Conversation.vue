@@ -32,55 +32,167 @@ function updateActiveTurn() {
 }
 function jumpToTurn(index:number) {
   const root=scroller.value,target=root?.querySelector<HTMLElement>('[data-user-index="'+index+'"]');if(!root||!target)return;
-  follow.value=false;showJump.value=true;activeTurn.value=index;flashTurn.value=index;
+  scrollGen++;jumping=false;follow.value=false;showJump.value=true;activeTurn.value=index;flashTurn.value=index;
   root.scrollTo({top:root.scrollTop+target.getBoundingClientRect().top-root.getBoundingClientRect().top-16,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
   if(flashTimer)clearTimeout(flashTimer);flashTimer=setTimeout(()=>{flashTurn.value=-1;},1800);
 }
 onBeforeUnmount(()=>{if(flashTimer)clearTimeout(flashTimer);});
 
+// Clearance between the latest text and the composer stack. Overlap (the
+// project/branch row or composer covering the scroller) is added on top of a
+// small resting gap so "at bottom" means the last line is fully visible.
+const END_SLACK = 8;
+let chromeObserver: ResizeObserver | undefined;
+let detachTimer: ReturnType<typeof setTimeout> | undefined;
+let jumping = false;
+let scrollGen = 0;
+let touchY = 0;
+
+function endGap(el: HTMLElement) {
+  const raw = parseFloat(getComputedStyle(el).getPropertyValue('--thread-end-gap'));
+  return Number.isFinite(raw) ? raw : 12;
+}
+function syncEndGap() {
+  const el = scroller.value;
+  if (!el) return;
+  const stack = document.querySelector('.composer-area');
+  const overlap = stack ? Math.max(0, el.getBoundingClientRect().bottom - stack.getBoundingClientRect().top) : 0;
+  el.parentElement?.style.setProperty('--composer-overlap', Math.round(overlap) + 'px');
+  const gap = Math.round(overlap + 12) + 'px';
+  if (el.style.getPropertyValue('--thread-end-gap') !== gap) el.style.setProperty('--thread-end-gap', gap);
+}
+function distanceFromEnd(el: HTMLElement) {
+  return el.scrollHeight - el.scrollTop - el.clientHeight;
+}
 function nearBottom() {
   const el = scroller.value; if (!el) return true;
-  return el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+  return distanceFromEnd(el) <= endGap(el) + END_SLACK;
 }
-// True when the transcript actually overflows the viewport; without overflow the
-// jump button has nothing to jump to, so it must never appear.
-function scrollable() { const el = scroller.value; return !!el && el.scrollHeight - el.clientHeight > 24; }
-// Any upward intent detaches the auto-follow immediately, so streamed text can
-// never yank the reader back to the bottom mid-scroll. Over-scrolling at the top
-// of a short transcript is not intent: nothing moves, so no scroll event follows
-// to clear the jump button again.
+function hasThread() { return session.messages.length > 0 || !!live.value; }
+// The end-gap padding is clearance, not content. A short transcript must not
+// summon the jump button just because that padding exists.
+function scrollable() {
+  const el = scroller.value;
+  if (!el) return false;
+  return el.scrollHeight - el.clientHeight > endGap(el) + 24;
+}
+// Upward intent detaches auto-follow before the scroll position catches up, so
+// a streaming tick cannot yank the reader. Re-check shortly after: a touch or
+// keyboard nudge that never leaves the end gap must not leave the jump button up.
+// Over-scrolling a short transcript is not intent.
 function leaveBottom() {
   const el = scroller.value;
-  if (!follow.value || !el || !scrollable() || el.scrollTop <= 0) return;
-  follow.value = false; showJump.value = session.messages.length > 0;
+  if (!el || !scrollable() || el.scrollTop <= 0) return;
+  if (jumping) el.scrollTop = el.scrollTop;
+  scrollGen++;
+  jumping = false;
+  follow.value = false;
+  if (detachTimer) clearTimeout(detachTimer);
+  detachTimer = setTimeout(() => {
+    detachTimer = undefined;
+    const at = nearBottom();
+    if (at) follow.value = true;
+    showJump.value = !at && hasThread() && scrollable();
+    updateActiveTurn();
+  }, 90);
 }
 function onWheel(event: WheelEvent) { if (event.deltaY < 0) leaveBottom(); }
 function onKeydown(event: KeyboardEvent) { if (['PageUp', 'ArrowUp', 'Home'].includes(event.key)) leaveBottom(); }
-function onScroll() { follow.value = nearBottom(); showJump.value = !follow.value && session.messages.length > 0 && scrollable(); updateActiveTurn(); }
+function onTouchStart(event: TouchEvent) { touchY = event.touches[0]?.clientY ?? 0; }
+function onTouchMove(event: TouchEvent) {
+  const y = event.touches[0]?.clientY ?? touchY;
+  if (y > touchY + 4) leaveBottom();
+  touchY = y;
+}
+function onScroll() {
+  const at = nearBottom();
+  if (!jumping) follow.value = at;
+  else if (at) jumping = false;
+  showJump.value = !at && !jumping && hasThread() && scrollable();
+  updateActiveTurn();
+}
 function toBottom(smooth = true) {
   const el = scroller.value; if (!el) return;
-  follow.value = true; showJump.value = false;
-  el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+  if (detachTimer) { clearTimeout(detachTimer); detachTimer = undefined; }
+  jumping = true;
+  follow.value = true;
+  showJump.value = false;
+  syncEndGap();
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const behavior: ScrollBehavior = smooth && !reduced ? 'smooth' : 'auto';
+  const dest = () => Math.max(0, el.scrollHeight - el.clientHeight);
+  const gen = ++scrollGen;
+  if (distanceFromEnd(el) <= 1) {
+    jumping = false;
+    onScroll();
+    return;
+  }
+  el.scrollTo({ top: dest(), behavior });
+  let settled = false;
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    if (gen !== scrollGen || scroller.value !== el) { if (gen === scrollGen) jumping = false; return; }
+    if (follow.value && distanceFromEnd(el) > 1) el.scrollTop = el.scrollHeight;
+    jumping = false;
+    onScroll();
+  };
+  if (behavior === 'auto') finish();
+  else {
+    const timer = setTimeout(finish, 700);
+    el.addEventListener('scrollend', () => { clearTimeout(timer); finish(); }, { once: true });
+  }
+}
+function observeChrome() {
+  const el = scroller.value;
+  if (!el || !chromeObserver) return;
+  chromeObserver.observe(el);
+  const stack = document.querySelector('.composer-area');
+  if (stack) chromeObserver.observe(stack);
+  const thread = el.querySelector('.messages');
+  if (thread) chromeObserver.observe(thread);
 }
 let followFrame = 0;
-function autoFollow() { if(followFrame)return; followFrame=requestAnimationFrame(()=>{followFrame=0;nextTick(() => { if (!scrollable()) { follow.value = true; showJump.value = false; } if (follow.value) toBottom(false); updateActiveTurn(); });}); }
-onBeforeUnmount(()=>cancelAnimationFrame(followFrame));
+function autoFollow() {
+  if (followFrame) return;
+  followFrame = requestAnimationFrame(() => {
+    followFrame = 0;
+    nextTick(() => {
+      observeChrome();
+      if (!scrollable()) { follow.value = true; showJump.value = false; }
+      if (follow.value) toBottom(false);
+      else updateActiveTurn();
+    });
+  });
+}
+onBeforeUnmount(() => {
+  cancelAnimationFrame(followFrame);
+  if (detachTimer) clearTimeout(detachTimer);
+  chromeObserver?.disconnect();
+});
 
-function onResize() { if (!scrollable()) showJump.value = false; else onScroll(); }
 watch(() => session.messages.length, autoFollow);
 watch(() => live.value && JSON.stringify(live.value.blocks.map((b: any) => b.text?.length || b.state)), autoFollow);
 watch(() => session.chatId, () => { follow.value = true; showJump.value = false; nextTick(() => toBottom(false)); });
-onMounted(() => { nextTick(() => toBottom(false)); window.addEventListener('resize', onResize); });
-onBeforeUnmount(() => window.removeEventListener('resize', onResize));
+onMounted(() => {
+  if (typeof ResizeObserver !== 'undefined') {
+    chromeObserver = new ResizeObserver(() => {
+      syncEndGap();
+      if (!scrollable()) { follow.value = true; showJump.value = false; return; }
+      if (follow.value && scroller.value && distanceFromEnd(scroller.value) > endGap(scroller.value) + END_SLACK) toBottom(false);
+    });
+  }
+  nextTick(() => { syncEndGap(); observeChrome(); toBottom(false); });
+});
 </script>
 
 <template>
   <div class="stage">
     <div class="floating-panels">
-      <FloatingPlanPanel />
       <FloatingBackgroundPanel />
+      <FloatingPlanPanel />
     </div>
-    <div class="conversation" :class="{ 'is-empty': session.isEmpty && !session.loadingChat, 'is-unauthorized': session.booted && !session.canExecute }" ref="scroller" tabindex="0" aria-label="对话内容" @scroll.passive="onScroll" @wheel.passive="onWheel" @keydown="onKeydown" @touchmove.passive="leaveBottom">
+    <div class="conversation" :class="{ 'is-empty': session.isEmpty && !session.loadingChat, 'is-unauthorized': session.booted && !session.canExecute }" ref="scroller" tabindex="0" aria-label="对话内容" @scroll.passive="onScroll" @wheel.passive="onWheel" @keydown="onKeydown" @touchstart.passive="onTouchStart" @touchmove.passive="onTouchMove">
       <WelcomeHero v-if="session.isEmpty && !session.loadingChat" />
       <div v-else class="messages">
         <div v-if="session.loadingChat" class="conversation-state"><span class="spinner"></span><span>正在读取对话…</span></div>
@@ -107,6 +219,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
                 <p v-if="approval.error" class="status-error" role="alert">{{ approval.error }}</p>
               </section>
             </template>
+            <p v-if="live.stopReason === 'length'" class="assistant-limit">输出已达上限，可继续</p>
             <div v-if="live.status || live.error || live.stopped" class="message-status" :class="{ 'is-error': live.error }">
               <span v-if="live.spinner && !live.error && !live.stopped" class="working-dot"></span>
               <span v-if="live.error" class="status-error">{{ live.error }}</span>
@@ -115,6 +228,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
             </div>
           </div>
         </article>
+        <div class="scroll-anchor" aria-hidden="true"></div>
       </div>
     </div>
     <TurnNavigator :items="userTurns" :active="activeTurn" @jump="jumpToTurn" />
@@ -130,7 +244,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
   right: clamp(16px, 4vw, 36px);
   z-index: 12;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
+  flex-direction: column;
   gap: 8px;
   pointer-events: none;
 }
@@ -141,12 +256,16 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
     gap: 6px;
   }
 }
-.conversation { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable both-edges; padding: 0 clamp(16px, 4vw, 40px); scroll-behavior: auto; overscroll-behavior: contain; }
+.conversation { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable both-edges; padding: 0 clamp(16px, 4vw, 40px); padding-bottom: var(--thread-end-gap, 12px); scroll-padding-bottom: var(--thread-end-gap, 12px); scroll-behavior: auto; overscroll-behavior: contain; }
 .conversation.is-unauthorized.is-empty { justify-content: center; }
 .conversation.is-empty { display: flex; flex-direction: column; justify-content: center; align-items: center; }
-.messages { width: 100%; max-width: 760px; margin: 0 auto; padding: calc(var(--header-h) + 16px) 0 44px; display: flex; flex-direction: column; gap: 30px; }
+.messages { width: 100%; max-width: 760px; margin: 0 auto; padding: calc(var(--header-h) + 16px) 0 0; display: flex; flex-direction: column; gap: 30px; }
+.scroll-anchor { height: 1px; width: 100%; pointer-events: none; scroll-margin-bottom: var(--thread-end-gap, 12px); }
 .is-jump-target .user-bubble { box-shadow:0 0 0 2px var(--line-strong); }
-@media(max-width:640px){.conversation{padding-right:30px;}}
+@media(max-width:640px){
+  .conversation { scrollbar-gutter: auto; padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(28px, env(safe-area-inset-right)); contain: paint; }
+  .messages { gap: 22px; padding-top: calc(var(--header-h) + 8px); }
+}
 .conversation-state { padding: 40px 0; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: 12.5px; }
 .message-status { min-height: 18px; display: flex; align-items: center; gap: 8px; margin-top: 9px; color: var(--muted); font-size: 11.5px; }
 .message-status.is-error { color: var(--danger); }
@@ -157,35 +276,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
 .approval-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
 .status-error { color: var(--danger); }
 .working-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); animation: breathe 1.7s ease-in-out infinite; }
-@keyframes breathe { 0%, 100% { opacity: 1; box-shadow: 0 0 0 3px var(--accent-soft); } 50% { opacity: 0.5; box-shadow: 0 0 0 6px transparent; } }
-.jump-latest {
-  position: absolute;
-  right: 24px;
-  bottom: 18px;
-  width: 36px;
-  height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--line-2);
-  border-radius: 50%;
-  background: var(--surface);
-  color: var(--text-2);
-  box-shadow: var(--shadow-lg);
-  transition: border-color var(--fast), color var(--fast), transform var(--fast);
-  z-index: 10;
-}
-.jump-latest:hover {
-  border-color: var(--line-strong);
-  color: var(--text);
-  transform: translateY(-1px);
-}
-@media (max-width: 640px) {
-  .jump-latest {
-    right: 14px;
-    bottom: 12px;
-    width: 34px;
-    height: 34px;
-  }
-}
+@keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.82); } }
+.jump-latest { position: absolute; left: 50%; right: auto; bottom: calc(16px + var(--composer-overlap, 0px)); z-index: 5; width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-2); border-radius: 50%; background: var(--surface); color: var(--text-2); box-shadow: var(--shadow); transform: translateX(-50%); transition: border-color var(--fast), color var(--fast), transform var(--fast); }
+.jump-latest:hover { border-color: var(--line-strong); color: var(--text); transform: translateX(-50%) translateY(-1px); }
+@media(max-width:640px){ .jump-latest { left: auto; right: max(28px, calc(env(safe-area-inset-right) + 18px)); bottom: calc(12px + var(--composer-overlap, 0px)); transform: none; } .jump-latest:hover { transform: translateY(-1px); } }
 </style>

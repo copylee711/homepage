@@ -2,7 +2,7 @@
 import { ref, watch, onMounted } from 'vue';
 // @ts-ignore - JS module with no types
 import { renderMarkdown } from '../services/markdown.js';
-import { runWidget } from '../services/widgets.js';
+import { bindWidgetFrame, runWidget } from '../services/widgets.js';
 import { streamingMarkdown } from '../services/stream-markdown.js';
 import { copyText } from '../services/clipboard';
 import { useWorkspace } from '../stores/workspace';
@@ -17,18 +17,33 @@ let writer: ReturnType<typeof streamingMarkdown> | undefined;
 function render() {
   const el = host.value;
   if (!el) return;
+  const toggles = Array.from(el.querySelectorAll<HTMLElement>('[data-table-wrap]'));
+  const wrap = toggles.map(button => button.getAttribute('aria-pressed') === 'true');
+  const scrollOffsets = toggles.map(button => button.closest('.md-table-wrap')?.querySelector('.md-table-scroll')?.scrollLeft ?? 0);
+  const focused = toggles.indexOf(document.activeElement as HTMLElement);
   const options={sources:props.sources,project:useSession().currentProjectId,citations:props.citations};
   // Goal-mode control markers are for the harness, not the reader.
   const source = (props.source || '').replace(/\s*\[(GOAL_DONE|NEED_USER)\]\s*$/g, '');
   if (props.streaming) { writer ||= streamingMarkdown(el,document,options); writer(source, true,options); }
   else { writer = undefined; el.replaceChildren(renderMarkdown(source, document, options)); }
+  el.querySelectorAll<HTMLElement>('[data-table-wrap]').forEach((button, index) => {
+    if (wrap[index]) setTableWrap(button, true);
+    const scroller = button.closest('.md-table-wrap')?.querySelector('.md-table-scroll');
+    if (scroller && scrollOffsets[index]) scroller.scrollLeft = scrollOffsets[index];
+    if (index === focused && button !== toggles[index]) button.focus({ preventScroll: true });
+  });
+}
+
+function setTableWrap(button: HTMLElement, wrap: boolean) {
+  button.setAttribute('aria-pressed', String(wrap));
+  button.closest('.md-table-wrap')?.classList.toggle('is-nowrap', !wrap);
 }
 
 // Delegate copy-code buttons and workspace file links produced by the renderer.
 function onClick(event: MouseEvent) {
   const target = event.target as HTMLElement;
   const widgetAction=target.closest<HTMLElement>('[data-widget-action]');
-  if(widgetAction){const wrap=widgetAction.closest<HTMLElement>('[data-widget-source]');if(wrap){let frame=wrap.querySelector('iframe');wrap.querySelector('.status-error')?.remove();if(!frame){frame=document.createElement('iframe');frame.title='交互组件';frame.setAttribute('sandbox','allow-scripts');wrap.append(frame);}void runWidget(frame,wrap.dataset.widgetSource||'');}return;}
+  if(widgetAction){const wrap=widgetAction.closest<HTMLElement>('[data-widget-source]');if(wrap){let frame=wrap.querySelector('iframe');if(!frame){frame=document.createElement('iframe');frame.title='交互组件';frame.style.height='120px';bindWidgetFrame(frame);wrap.querySelector('.status-error')?.remove();wrap.append(frame);}void runWidget(frame,wrap.dataset.widgetSource||'');}return;}
   const image=target.closest<HTMLElement>('[data-image-preview]');
   if(image){event.preventDefault();useUi().openLightbox({url:image.dataset.imagePreview||'',name:image.querySelector('img')?.alt||'图片预览'});return;}
 
@@ -47,10 +62,7 @@ function onClick(event: MouseEvent) {
 
   const wrapToggle = target.closest<HTMLElement>('[data-table-wrap]');
   if (wrapToggle) {
-    const box = wrapToggle.closest('.md-table-wrap');
-    const on = wrapToggle.getAttribute('aria-pressed') === 'true';
-    wrapToggle.setAttribute('aria-pressed', on ? 'false' : 'true');
-    box?.classList.toggle('is-wrap', !on);
+    setTableWrap(wrapToggle, wrapToggle.getAttribute('aria-pressed') !== 'true');
     return;
   }
 
@@ -80,5 +92,11 @@ watch(() => [props.source, props.streaming,props.citations], render);
 .md-widget-pending{border-style:dashed;background:color-mix(in srgb,var(--surface) 68%,transparent);}
 .md-widget-pending .md-widget-head{border-bottom:0;padding:14px 16px;color:var(--muted);font-size:12.5px;font-weight:520;}
 .md-widget-pending .md-widget-head strong{margin-right:0;font-weight:520;color:var(--muted);}
-.md-widget-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px}.md-widget-head strong{margin-right:auto}.md-widget-refresh{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--muted);cursor:pointer}.md-widget-refresh:hover{background:var(--surface-2);color:var(--text)}.md-widget iframe{display:block;width:100%;height:360px;border:0;background:#fff;overflow:hidden;scrollbar-width:none;}@media(max-width:640px){.md-widget{margin:14px 0;border-radius:14px}.md-widget-head{padding:9px 12px}.md-widget iframe{height:300px}}.md-widget details{padding:10px 14px;font-size:12px;color:var(--muted)}.md-widget summary{cursor:pointer}.md-widget pre{max-height:240px;overflow:auto;white-space:pre-wrap}
+.md-widget-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px}.md-widget-head strong{margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.md-widget iframe{display:block;width:100%;height:120px;border:0;overflow:hidden;background:var(--surface)}
+@media(max-width:640px){
+  .md-widget{margin:10px 0;border:0;border-radius:0;background:transparent;overflow:visible;}
+  .md-widget-head{padding:0 0 6px;border-bottom:0;background:transparent;}
+  .md-widget iframe{border-radius:12px;}
+  .md-widget-pending{border:1px dashed var(--line);border-radius:12px;background:color-mix(in srgb,var(--surface) 68%,transparent);overflow:hidden;}
+}
 </style>

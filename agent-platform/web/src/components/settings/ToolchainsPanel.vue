@@ -81,7 +81,7 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer); });
 </script>
 
 <template>
-  <div class="settings-pad">
+  <div class="settings-pad toolchains-settings">
     <div class="panel-top">
       <p class="hint" style="flex: 1" role="status">{{ status }}</p>
       <button v-if="running" type="button" class="btn btn-quiet btn-sm is-danger" @click="cancelJob">
@@ -142,7 +142,9 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer); });
   </div>
 </template>
 
-<style>
+<style scoped>
+.toolchains-settings { display: flex; flex-direction: column; gap: 12px; }
+.toolchains-settings > * { flex-shrink: 0; }
 .tc-actions { display: flex; align-items: center; gap: 6px; flex: none; flex-wrap: wrap; }
 .tc-ver-input { width: 92px; height: 32px; padding: 0 9px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface-2); color: var(--text); font-family: var(--font-mono); font-size: 12px; outline: 0; }
 .tc-ver-input:focus { border-color: var(--line-focus); background: var(--surface); }

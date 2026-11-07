@@ -83,7 +83,12 @@ Escape closes idle dialogs and focus returns to their trigger.
   Continue appends an instruction. Tools and thinking expose real lifecycle states.
   Message/code copy operates only on the visible selected content.
 - Streaming follows the bottom while the reader stays nearby; scrolling up pauses follow
-  and exposes “回到最新”. A premature stream close is an error rather than a completed task.
+  and exposes “回到最新”. The end gap (scroll padding / padding-bottom) includes any
+  overlap of the composer stack, so “at bottom” means the latest text sits fully above
+  that chrome and the jump control hides once it does. A click scrolls to that same end.
+  The project/branch row is part of the composer stack, not an overlay on the transcript.
+  Hiding the tab does not cancel an in-flight prompt; only the stop control does.
+  A premature stream close is an error rather than a completed task.
 - Workspace files are listed, previewed, uploaded and downloaded through the user's sandbox.
   Preview is UTF-8 text (first 64 KiB), including valid empty/truncated text. Stale responses
   cannot replace a more recently selected preview. Paths can be inserted into the composer.
@@ -139,6 +144,9 @@ Escape closes idle dialogs and focus returns to their trigger.
   snapshots reconcile missing deltas. Text/thinking/tool order is preserved in
   live views and replay. Groups include adjacent tools only, across consecutive
   assistant messages in the same user turn; intervening text splits groups.
+  A multi-operation group stays open while any child is running or pending, and
+  collapses once every child has succeeded or failed. Reopening that settled
+  group pins it open until the reader collapses it or a child runs again.
 - Thinking preview follows the newest lines until the reader scrolls upward.
   Parent conversation follow also pauses on manual scrolling. User timestamps
   appear below their message bubbles.

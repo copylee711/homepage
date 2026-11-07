@@ -1,6 +1,9 @@
+import { assignToolArgs, finishedPlan } from './plan-state.mjs';
+import { readToolImage } from './tool-images.mjs';
+
 // A plain reactive-friendly object describing the streaming assistant turn.
 export function reactiveLive() {
-  return { blocks: [], approvals: [], questions: [], status: '正在连接模型…', spinner: true, finished: false, error: '', stopped: false, tools: {} };
+  return { blocks: [], approvals: [], questions: [], status: '正在连接模型…', spinner: true, finished: false, error: '', stopped: false, stopReason: '', tools: {} };
 }
 
 // Reduce a runner stream event into the live view model's block list.
@@ -39,9 +42,18 @@ export function handleEvent(event, live) {
       if (part.type === 'text' || part.type === 'thinking') {
         const b = ensureBlock(index, part.type); b.type = part.type; b.text = part.type === 'text' ? part.text || '' : part.thinking || '';
       } else if (part.type === 'toolCall') {
-        const b = ensureBlock(index, 'tool'); b.type = 'tool'; b.id = part.id; b.name = part.name; b.args = JSON.stringify(part.arguments || {}, null, 2); b.state ||= 'pending';
+        // Reconcile by id so a late message snapshot cannot open a second,
+        // older copy of a plan that already finished.
+        const existing = part.id ? vm.blocks.find((x) => x.type === 'tool' && x.id === part.id) : null;
+        const b = existing || ensureBlock(index, 'tool');
+        b.type = 'tool'; b.id = part.id || b.id; b.name = part.name || b.name;
+        assignToolArgs(b, part.arguments || {});
+        if (!b.state) b.state = 'pending';
       }
     }
+    // Pi sends stopReason on the assistant message. "length" means this reply
+    // stopped because the output token budget was used up.
+    if (event.message.stopReason === 'length') vm.stopReason = 'length';
     return;
   }
   if (event.type === 'message_update') {
@@ -53,29 +65,67 @@ export function handleEvent(event, live) {
       case 'thinking_start': ensureBlock(u.contentIndex, 'thinking'); break;
       case 'thinking_delta': { const b = ensureBlock(u.contentIndex, 'thinking'); b.text += u.delta || ''; break; }
       case 'thinking_end': { const b = ensureBlock(u.contentIndex, 'thinking'); if (typeof u.content === 'string') b.text = u.content; break; }
-      case 'toolcall_start': { const b = ensureBlock(u.contentIndex, 'tool'); b.id = u.id || u.toolCall?.id; b.name = u.toolName || u.toolCall?.name || 'tool'; b.state = 'pending'; b.args = ''; vm.status = '正在准备工具…'; break; }
-      case 'toolcall_delta': { const b = ensureBlock(u.contentIndex, 'tool'); b.args = (b.args || '') + (u.delta || ''); break; }
-      case 'toolcall_end': { const b = ensureBlock(u.contentIndex, 'tool'); const tc = u.toolCall || {}; b.id = tc.id || b.id; b.name = tc.name || b.name; b.args = tc.arguments ? JSON.stringify(tc.arguments, null, 2) : b.args; b.state = 'pending'; break; }
+      case 'toolcall_start': {
+        const b = ensureBlock(u.contentIndex, 'tool');
+        if (!finishedPlan(b)) {
+          b.id = u.id || u.toolCall?.id || b.id;
+          b.name = u.toolName || u.toolCall?.name || b.name || 'tool';
+          b.state = 'pending';
+          b.args = '';
+        }
+        if (b.name !== 'set_chat_title') vm.status = '正在准备工具…';
+        break;
+      }
+      case 'toolcall_delta': {
+        const b = ensureBlock(u.contentIndex, 'tool');
+        if (finishedPlan(b)) break;
+        b.args = (b.args || '') + (u.delta || '');
+        break;
+      }
+      case 'toolcall_end': {
+        const b = ensureBlock(u.contentIndex, 'tool');
+        const tc = u.toolCall || {};
+        const keep = finishedPlan(b);
+        if (!keep) { b.id = tc.id || b.id; b.name = tc.name || b.name; }
+        if (tc.arguments) assignToolArgs(b, tc.arguments);
+        if (!keep) b.state = 'pending';
+        break;
+      }
     }
     return;
   }
   if (event.type === 'tool_execution_start') {
     const b = vm.blocks.find((x) => x.type === 'tool' && x.id === event.toolCallId) || ensureBlock(1e6 + vm.blocks.length, 'tool');
-    b.id = event.toolCallId; b.name = event.toolName || b.name; b.state = 'running'; if (event.args) b.args = JSON.stringify(event.args, null, 2);
-    b.started = Date.now(); vm.status = '正在执行工具 · ' + (event.toolName || ''); vm.spinner = true;
+    const keep = finishedPlan(b);
+    b.id = event.toolCallId; b.name = event.toolName || b.name;
+    if (!keep) b.state = 'running';
+    if (event.args) assignToolArgs(b, event.args);
+    b.started = Date.now();
+    if (b.name !== 'set_chat_title') { vm.status = '正在执行工具 · ' + (event.toolName || ''); vm.spinner = true; }
     return;
   }
   if (event.type === 'tool_execution_end') {
     const b = vm.blocks.find((x) => x.type === 'tool' && x.id === event.toolCallId);
-    if (b) { b.state = event.isError ? 'error' : 'success'; b.result = toolText(event.result); b.durationMs = event.durationMs || (b.started ? Date.now() - b.started : 0); }
-    vm.status = '正在整理结果…'; return;
+    if (b) {
+      b.state = event.isError ? 'error' : 'success';
+      b.result = toolText(event.result);
+      b.imageUrl = event.isError ? undefined : readToolImage(b.name, event.result);
+      b.durationMs = event.durationMs || (b.started ? Date.now() - b.started : 0);
+    }
+    if (b?.name !== 'set_chat_title') vm.status = '正在整理结果…'; return;
   }
   if (event.type === 'gateway_error') throw new Error(event.error || '任务中断，请重试');
   if (event.type === 'auto_retry_start') { vm.status = `模型调用失败，${Math.round((event.delayMs || 0) / 1000)} 秒后自动重试（${event.attempt}/${event.maxAttempts}）…`; vm.spinner = true; return; }
   if (event.type === 'auto_retry_end') { vm.status = event.success ? '重试成功，继续执行…' : '多次重试仍失败：' + (event.finalError || '模型服务不可用'); return; }
   if (event.type === 'goal_progress') { vm.goal = { continues: event.continues, max: event.max }; vm.status = `长目标自动续跑 ${event.continues}/${event.max}…`; vm.spinner = true; return; }
   if (event.type === 'compaction_start') { vm.status = '上下文接近上限，正在自动压缩…'; vm.spinner = true; return; }
-  if (event.type === 'agent_settled') { if (event.aborted) vm.stopped = true; vm.status = ''; vm.spinner = false; }
+  if (event.type === 'agent_settled') { if (event.aborted) vm.stopped = true; settleTools(vm, vm.stopped ? 'stopped' : 'interrupted'); vm.status = ''; vm.spinner = false; }
+}
+
+export function settleTools(vm, state) {
+  for (const block of vm.blocks) {
+    if (block.type === 'tool' && ['pending', 'running'].includes(block.state)) block.state = state;
+  }
 }
 
 function toolText(value) {

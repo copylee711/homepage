@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue';
 import Icon from './Icon.vue';
+import SiteIcon from './SiteIcon.vue';
+import WebToolPages from './WebToolPages.vue';
+import ToolImagePreview from './ToolImagePreview.vue';
 import { formatDuration } from '../services/format';
+import { rowSiteUrl } from '../services/site-icon.mjs';
 import { useWorkspace } from '../stores/workspace';
 import { useSession } from '../stores/session';
-import { useUi } from '../stores/ui';
 
 const props = defineProps<{ block?: any; tools?: any[] }>();
 
@@ -17,10 +20,14 @@ const isGroup = computed(() => list.value.length > 1);
 
 // 3-state machine for multi-tool groups (identical behavior to ThinkingBlock):
 //   'preview'   -> initial state (~4 rows scrollable window, auto-scrolls to newest)
-//   'collapsed' -> first click collapses to 0px
+//   'collapsed' -> collapsed to the summary line
 //   'expanded'  -> subsequent clicks toggle full list <-> collapsed
+// A group stays in preview while any child is still running or pending, then
+// collapses once every child has finished. Reopening that settled group pins it
+// open so the same settled snapshot does not collapse again immediately.
 type GroupMode = 'preview' | 'collapsed' | 'expanded';
 const mode = ref<GroupMode>('preview');
+const pinnedOpen = ref(false);
 const listEl = ref<HTMLElement | null>(null);
 const userScrolledUp = ref(false);
 const openRows = ref<Record<string, boolean>>({});
@@ -37,9 +44,13 @@ function toggleRow(b: any, idx: number) {
 }
 
 function toggleGroup() {
-  if (mode.value === 'preview') mode.value = 'collapsed';
-  else if (mode.value === 'collapsed') mode.value = 'expanded';
-  else mode.value = 'collapsed';
+  if (mode.value === 'collapsed') {
+    mode.value = 'expanded';
+    if (runningCount.value === 0) pinnedOpen.value = true;
+    return;
+  }
+  mode.value = 'collapsed';
+  pinnedOpen.value = false;
 }
 
 function onGroupScroll() {
@@ -59,6 +70,16 @@ watch(
 );
 
 const runningCount = computed(() => list.value.filter(b => b?.state === 'running' || b?.state === 'pending').length);
+watch([isGroup, runningCount], ([group, running], previous) => {
+  if (!group) return;
+  if (running > 0) {
+    pinnedOpen.value = false;
+    if (mode.value === 'collapsed' && previous?.[1] === 0) mode.value = 'preview';
+    return;
+  }
+  if (!pinnedOpen.value) mode.value = 'collapsed';
+}, { immediate: true });
+const stoppedCount = computed(() => list.value.filter(b => b.state === 'stopped' || b.state === 'interrupted').length);
 const failedCount = computed(() => list.value.filter(b => b?.state === 'error').length);
 const totalDurationMs = computed(() => list.value.reduce((acc, b) => acc + (Number(b?.durationMs) || 0), 0));
 
@@ -97,6 +118,10 @@ function parseArgs(raw: any): Record<string, any> {
   try { return JSON.parse(String(raw)) || {}; } catch { return {}; }
 }
 
+function isWebTool(block: any) {
+  return ['web_fetch', 'fetch', 'web_search', 'image_search'].includes(block?.name);
+}
+
 function actionParts(b: any): { verb: string; target: string; full: string } {
   const name = String(b?.name || 'tool').trim();
   const key = name.toLowerCase();
@@ -110,8 +135,12 @@ function actionParts(b: any): { verb: string; target: string; full: string } {
     return { verb: '运行', target: t, full: `运行 ${t}` };
   }
   let target = String(a.path || a.file_path || a.pattern || a.query || a.url || a.name || '').replace(/\s+/g, ' ').trim();
+  if (isWebTool(b) && (key === 'web_fetch' || key === 'fetch')) {
+    try { target = new URL(a.url).hostname; } catch {}
+    return { verb, target, full: target ? verb + ' ' + target : verb };
+  }
   if (target) {
-    if (target.includes('/')) {
+    if (target.includes('/') && !isWebTool(b)) {
       const parts = target.split('/');
       target = parts[parts.length - 1] || target;
     }
@@ -182,7 +211,7 @@ const claudeSummary = computed(() => {
     ? `正在执行 (${total - runningCount.value}/${total}) · ${phrase(shown[shown.length - 1] || ordered[0])}`
     : shown.map(phrase).join('，');
   const moreText = remaining > 0 ? `还有 ${remaining} 项操作` : '';
-  const failedText = failedCount.value > 0 ? `(${failedCount.value} 项失败)` : '';
+  const failedText = failedCount.value > 0 ? `(${failedCount.value} 项失败)` : stoppedCount.value ? `(${stoppedCount.value} 项中断)` : '';
 
   return { headText, moreText, failedText, diffAdd, diffDel };
 });
@@ -213,46 +242,36 @@ function openArgFile(v: string) {
   void useWorkspace().locateAndOpenFile(v, proj);
 }
 
-// Images the agent looked at show as small thumbnails on the summary line.
-const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
-function workspaceImagePath(b: any): string {
-  if (String(b?.name || '').toLowerCase() !== 'read' || b?.state === 'error') return '';
-  const raw = String(parseArgs(b?.args).path || parseArgs(b?.args).file_path || '').trim();
-  if (!IMAGE_EXT.test(raw)) return '';
-  if (raw.startsWith('/workspace/')) return raw.slice('/workspace/'.length);
-  return `${useSession().currentProjectId}/${raw.replace(/^\.?\//, '')}`;
+function imageName(block: any) {
+  const args = parseArgs(block.args);
+  return String(args.path || args.file_path || '').split(/[\\/]/).pop() || '读取的图片';
 }
-const thumbs = computed(() => list.value.map(workspaceImagePath).filter(Boolean)
-  .filter((p, i, all) => all.indexOf(p) === i).slice(0, 6)
-  .map(path => ({ path, name: path.split('/').pop() || path, url: '/api/files/download?path=' + encodeURIComponent(path) + '&inline=1' })));
-const brokenThumbs = ref<Record<string, boolean>>({});
-function openThumb(t: { url: string; name: string }) { useUi().openLightbox({ url: t.url, name: t.name }); }
 </script>
 
 <template>
   <!-- Single tool call: Claude-style quiet inline row -->
   <div v-if="!isGroup && list[0]" class="tc-single" :data-state="list[0].state" :class="{ 'is-open': isRowOpen(list[0], 0) }">
-    <button
-      type="button"
-      class="tc-line"
-      :aria-expanded="isRowOpen(list[0], 0)"
-      @click="toggleRow(list[0], 0)"
-    >
-      <span v-if="list[0].state === 'running' || list[0].state === 'pending'" class="tc-dots" aria-hidden="true">
-        <i></i><i></i><i></i>
-      </span>
-      <span v-else class="tc-mini-icon" aria-hidden="true">
-        <Icon :name="toolIcon(list[0])" :size="13" />
-      </span>
-      <span class="tc-summary" :title="summarize(list[0])">{{ summarize(list[0]) }}</span>
-      <span v-if="list[0].state === 'error'" class="tc-failed">失败</span>
-      <span v-if="list[0].durationMs" class="tc-dur">{{ formatDuration(list[0].durationMs) }}</span>
-      <span class="tc-chevron"><Icon name="chevron-right" :size="12" /></span>
-    </button>
-    <div v-if="thumbs.length" class="tc-thumbs">
-      <button v-for="t in thumbs" v-show="!brokenThumbs[t.path]" :key="t.path" type="button" class="tc-thumb" :title="t.name" @click="openThumb(t)">
-        <img :src="t.url" :alt="t.name" loading="lazy" @error="brokenThumbs[t.path] = true">
+    <div class="tc-row-head">
+      <button
+        type="button"
+        class="tc-line"
+        :aria-expanded="isRowOpen(list[0], 0)"
+        @click="toggleRow(list[0], 0)"
+      >
+        <span v-if="list[0].state === 'running' || list[0].state === 'pending'" class="tc-dots" aria-hidden="true">
+          <i></i><i></i><i></i>
+        </span>
+        <SiteIcon v-else-if="isWebTool(list[0])" :url="rowSiteUrl(list[0])" />
+        <span v-else class="tc-mini-icon" aria-hidden="true">
+          <Icon :name="toolIcon(list[0])" :size="13" />
+        </span>
+        <span class="tc-summary" :title="summarize(list[0])">{{ summarize(list[0]) }}</span>
+        <span v-if="list[0].state === 'error'" class="tc-failed">失败</span>
+        <span v-else-if="list[0].state === 'stopped' || list[0].state === 'interrupted'" class="tc-time">{{ list[0].state === 'stopped' ? '已停止' : '已中断' }}</span>
+        <span v-if="list[0].durationMs" class="tc-dur">{{ formatDuration(list[0].durationMs) }}</span>
+        <span class="tc-chevron"><Icon name="chevron-right" :size="12" /></span>
       </button>
+      <ToolImagePreview v-if="list[0].imageUrl" :url="list[0].imageUrl" :name="imageName(list[0])" />
     </div>
     <div v-if="isRowOpen(list[0], 0)" class="tc-detail">
       <dl v-if="argRows(list[0]).length" class="tc-args">
@@ -267,6 +286,7 @@ function openThumb(t: { url: string; name: string }) { useUi().openLightbox({ ur
           </dd>
         </template>
       </dl>
+      <WebToolPages v-if="isWebTool(list[0])" :block="list[0]" />
       <div v-if="list[0].result" class="tc-out" :class="{ 'is-error': list[0].state === 'error' }">{{ list[0].result }}</div>
     </div>
   </div>
@@ -295,12 +315,6 @@ function openThumb(t: { url: string; name: string }) { useUi().openLightbox({ ur
         </span>
       </div>
     </button>
-    <div v-if="thumbs.length" class="tc-thumbs">
-      <button v-for="t in thumbs" v-show="!brokenThumbs[t.path]" :key="t.path" type="button" class="tc-thumb" :title="t.name" @click="openThumb(t)">
-        <img :src="t.url" :alt="t.name" loading="lazy" @error="brokenThumbs[t.path] = true">
-      </button>
-    </div>
-
     <div
       v-show="mode !== 'collapsed'"
       ref="listEl"
@@ -314,21 +328,26 @@ function openThumb(t: { url: string; name: string }) { useUi().openLightbox({ ur
         :data-state="b.state"
         :class="{ 'is-open': isRowOpen(b, idx) }"
       >
-        <button
-          type="button"
-          class="tg-row"
-          :aria-expanded="isRowOpen(b, idx)"
-          @click="toggleRow(b, idx)"
-        >
-          <span v-if="b.state === 'running' || b.state === 'pending'" class="tc-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span class="tg-row-summary" :title="summarize(b)">
-            <span class="tg-row-verb">{{ actionParts(b).verb }}</span>
-            <span class="tg-row-target">{{ actionParts(b).target }}</span>
-          </span>
-          <span v-if="b.state === 'error'" class="tc-failed">失败</span>
-          <span v-else-if="b.durationMs" class="tc-dur">{{ formatDuration(b.durationMs) }}</span>
-          <span class="tc-chevron"><Icon name="chevron-right" :size="12" /></span>
-        </button>
+        <div class="tc-row-head">
+          <button
+            type="button"
+            class="tg-row"
+            :aria-expanded="isRowOpen(b, idx)"
+            @click="toggleRow(b, idx)"
+          >
+            <span v-if="b.state === 'running' || b.state === 'pending'" class="tc-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <SiteIcon v-else-if="isWebTool(b)" :url="rowSiteUrl(b)" />
+            <span class="tg-row-summary" :title="summarize(b)">
+              <span class="tg-row-verb">{{ actionParts(b).verb }}</span>
+              <span class="tg-row-target">{{ actionParts(b).target }}</span>
+            </span>
+            <span v-if="b.state === 'error'" class="tc-failed">失败</span>
+            <span v-else-if="b.state === 'stopped' || b.state === 'interrupted'" class="tc-time">{{ b.state === 'stopped' ? '已停止' : '已中断' }}</span>
+            <span v-else-if="b.durationMs" class="tc-dur">{{ formatDuration(b.durationMs) }}</span>
+            <span class="tc-chevron"><Icon name="chevron-right" :size="12" /></span>
+          </button>
+          <ToolImagePreview v-if="b.imageUrl" :url="b.imageUrl" :name="imageName(b)" />
+        </div>
         <div v-if="isRowOpen(b, idx)" class="tc-detail">
           <dl v-if="argRows(b).length" class="tc-args">
             <template v-for="(r, ri) in argRows(b)" :key="ri">
@@ -342,6 +361,7 @@ function openThumb(t: { url: string; name: string }) { useUi().openLightbox({ ur
               </dd>
             </template>
           </dl>
+          <WebToolPages v-if="isWebTool(b)" :block="b" />
           <div v-if="b.result" class="tc-out" :class="{ 'is-error': b.state === 'error' }">{{ b.result }}</div>
         </div>
       </div>
@@ -350,10 +370,6 @@ function openThumb(t: { url: string; name: string }) { useUi().openLightbox({ ur
 </template>
 
 <style>
-.tc-thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 6px 2px; }
-.tc-thumb { width: 64px; height: 48px; padding: 0; overflow: hidden; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface-2); cursor: zoom-in; transition: border-color var(--fast), transform var(--fast); }
-.tc-thumb:hover { border-color: var(--line-strong); transform: translateY(-1px); }
-.tc-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
 /* Single-line Claude-style tool row (borderless, quiet, inline) */
 .tc-single {
   margin: 4px 0 6px;
@@ -364,6 +380,7 @@ function openThumb(t: { url: string; name: string }) { useUi().openLightbox({ ur
   align-items: center;
   gap: 7px;
   max-width: 100%;
+  min-width: 0;
   min-height: 26px;
   padding: 2px 6px 2px 2px;
   border-radius: 7px;
@@ -444,10 +461,11 @@ function openThumb(t: { url: string; name: string }) { useUi().openLightbox({ ur
   color: var(--faint);
   transition: transform 180ms var(--ease);
 }
-.is-open > .tc-line .tc-chevron,
-.is-open > .tg-row .tc-chevron {
+.is-open > .tc-row-head .tc-chevron {
   transform: rotate(90deg);
 }
+.tc-row-head { display: flex; align-items: center; gap: 6px; }
+.tg-item .tool-image-preview { margin: 3px 8px 3px 0; }
 
 /* Grouped multi-tool block: Claude-style full summary line + box */
 .tg {
@@ -581,6 +599,7 @@ function openThumb(t: { url: string; name: string }) { useUi().openLightbox({ ur
 }
 .tg-row {
   width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;

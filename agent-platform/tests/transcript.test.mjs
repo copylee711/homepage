@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { reactiveLive, handleEvent } from '../web/src/services/live.mjs';
-import { segmentBlocks, buildTranscript } from '../web/src/services/transcript.mjs';
+import { segmentBlocks, buildTranscript, groupExecution } from '../web/src/services/transcript.mjs';
 test('multiple model messages reset contentIndex without merging text or moving tools', () => {
   const live = reactiveLive();
   for (const [text, id] of [['before', 'a'], ['between', 'b'], ['after', null]]) {
@@ -30,4 +30,62 @@ test('only adjacent tools group, across history message boundaries; source histo
   assert.deepEqual(segments.map(s => s.type === 'tools' ? s.items.map(t => t.id) : s.text), [['1', '2'], 'explain', ['3']]);
   assert.equal(segments[0].items[0].result, 'found');
   assert.equal(JSON.stringify(messages), before);
+});
+test('reloaded history keeps stopReason length, including when a later assistant message is merged', () => {
+  const limited = buildTranscript([
+    { role: 'user', content: '继续' },
+    { role: 'assistant', stopReason: 'toolUse', content: [{ type: 'text', text: '先看一下' }] },
+    { role: 'toolResult', toolCallId: 't', content: [{ type: 'text', text: 'ok' }] },
+    { role: 'assistant', stopReason: 'length', content: [{ type: 'text', text: '截断的回答' }] },
+  ]);
+  assert.equal(limited[1].stopReason, 'length');
+  assert.equal(limited[1].content.some(block => block.text === '截断的回答'), true);
+  const finished = buildTranscript([
+    { role: 'user', content: 'hi' },
+    { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: '完成' }] },
+  ]);
+  assert.equal(finished[1].stopReason, 'stop');
+});
+test('message_end records an output-limit stop without treating a normal stop as one', () => {
+  const live = reactiveLive();
+  handleEvent({ type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'ok' }] } }, live);
+  assert.equal(live.stopReason, '');
+  handleEvent({ type: 'message_end', message: { role: 'assistant', stopReason: 'length', content: [{ type: 'text', text: 'cut' }] } }, live);
+  assert.equal(live.stopReason, 'length');
+  handleEvent({ type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [] } }, live);
+  assert.equal(live.stopReason, 'length');
+});
+
+test('execution disclosure stops at each visible answer segment', () => {
+  const blocks = [
+    { type: 'thinking', text: 'first thought' },
+    { type: 'text', text: 'first answer' },
+    { type: 'tool', id: 'read' },
+    { type: 'text', text: 'second answer' },
+    { type: 'tool', id: 'wait' },
+  ];
+  for (const streaming of [true, false]) {
+    const groups = groupExecution(blocks, streaming);
+    assert.deepEqual(groups.filter(block => block.type === 'text'), [blocks[1], blocks[3]]);
+    assert.deepEqual(groups.filter(block => block.type === 'execution').map(group => group.items), [[blocks[0]], [blocks[2]], [blocks[4]]]);
+    assert.deepEqual(groups.filter(block => block.type === 'execution').map(group => group.collapsed), [true, true, !streaming]);
+  }
+});
+
+test('image reads preserve the returned preview in both live and reloaded transcripts', () => {
+  const call = { type: 'toolCall', id: 'photo', name: 'read', arguments: { path: 'photo.png' } };
+  const content = [{ type: 'text', text: 'Image read' }, { type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' }];
+  for (const isError of [false, true]) {
+    const live = reactiveLive();
+    handleEvent({ type: 'tool_execution_start', toolCallId: call.id, toolName: call.name, args: call.arguments }, live);
+    handleEvent({ type: 'tool_execution_end', toolCallId: call.id, isError, result: { content } }, live);
+    const history = buildTranscript([
+      { role: 'user', content: 'Read the image' },
+      { role: 'assistant', content: [call] },
+      { role: 'toolResult', toolCallId: call.id, isError, content },
+    ]);
+    const expected = isError ? undefined : 'data:image/png;base64,aW1hZ2U=';
+    assert.equal(live.blocks[0].imageUrl, expected);
+    assert.equal(history[1].content[0].imageUrl, expected);
+  }
 });

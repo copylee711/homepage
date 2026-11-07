@@ -13,29 +13,46 @@ function widgetTitle(html, label) {
   } catch {}
   return '交互组件';
 }
+// Content height comes from the widget document, not from the iframe viewport.
+// Accept later reports so a chart can grow or shrink after it finishes drawing.
+export function bindWidgetFrame(frame) {
+  frame.setAttribute('sandbox', 'allow-scripts');
+  frame.setAttribute('referrerpolicy', 'no-referrer');
+  frame.setAttribute('scrolling', 'no');
+  frame.dataset.widgetFrame = '';
+  frame.style.overflow = 'hidden';
+  if (!frame.style.height) frame.style.height = '120px';
+  if (frame.dataset.widgetSized === '1') return frame;
+  frame.dataset.widgetSized = '1';
+  let applied = 0;
+  const onHeight = (event) => {
+    if (!frame.isConnected) { window.removeEventListener('message', onHeight); return; }
+    if (event.source !== frame.contentWindow) return;
+    const data = event.data;
+    if (!data || data.type !== 'iris-widget-height') return;
+    const height = Number(data.height);
+    if (!Number.isFinite(height) || height < 32) return;
+    const next = Math.min(4000, Math.ceil(height));
+    if (Math.abs(next - applied) < 2) return;
+    applied = next;
+    frame.style.height = next + 'px';
+  };
+  window.addEventListener('message', onHeight);
+  return frame;
+}
 export function widget(doc, html, label) {
   const wrap=doc.createElement('section');wrap.className='md-widget';wrap.dataset.widgetSource=html;
   const heading=doc.createElement('div');heading.className='md-widget-head';
   const title=doc.createElement('strong');title.textContent=widgetTitle(html, label);heading.append(title);
-  // One action only: reload the widget. A pause toggle was noise the widget
-  // rarely needed, so it stays out of the card.
-  const button=doc.createElement('button');button.type='button';button.className='md-widget-refresh';button.dataset.widgetAction='restart';button.title='重新运行';button.setAttribute('aria-label','重新运行');
-  button.innerHTML='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>';
-  heading.append(button);
-  const frame=doc.createElement('iframe');frame.title=title.textContent;frame.setAttribute('sandbox','allow-scripts');frame.setAttribute('referrerpolicy','no-referrer');frame.setAttribute('scrolling','no');
-  frame.dataset.widgetFrame='';frame.style.height='360px';frame.style.overflow='hidden';
-  // The widget document posts its own height so the card can grow to fit the
-  // whole visual instead of trapping it behind an inner scrollbar.
-  const onHeight=(event)=>{
-    if(!frame.isConnected){window.removeEventListener('message',onHeight);return;}
-    if(event.source!==frame.contentWindow)return;
-    const data=event.data;
-    if(!data||data.type!=='iris-widget-height')return;
-    const height=Number(data.height);
-    if(!Number.isFinite(height)||height<40)return;
-    frame.style.height=Math.min(960,Math.ceil(height))+'px';
-  };
-  window.addEventListener('message',onHeight);
+  const refresh=doc.createElement('button');refresh.type='button';refresh.className='md-widget-refresh';refresh.dataset.widgetAction='refresh';
+  refresh.title='刷新组件';refresh.setAttribute('aria-label','刷新组件');
+  refresh.innerHTML='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3v5h-5M3 21v-5h5M3 12a9 9 0 0 1 15.7-6L21 8M21 12a9 9 0 0 1-15.7 6L3 16"/></svg>';
+  heading.append(refresh);
+  const frame=doc.createElement('iframe');frame.title=title.textContent;
+  // A short placeholder. A tall floor becomes the document viewport, and a
+  // scrollHeight report of that viewport then locks in a tall empty card.
+  frame.style.height='120px';
+  bindWidgetFrame(frame);
   wrap.append(heading,frame);
   queueMicrotask(()=>{if(frame.isConnected)void runWidget(frame,html);});
   return wrap;
@@ -47,5 +64,5 @@ export async function runWidget(frame,html) {
     const theme=document.documentElement.dataset.theme==='dark'?'dark':'light';
     frame.src=result.url+(result.url.includes('?')?'&':'?')+'theme='+theme;
   }
-  catch {const message=frame.ownerDocument.createElement('p');message.className='status-error';message.textContent='组件加载失败，请点击重新运行。';frame.replaceWith(message);}
+  catch {const message=frame.ownerDocument.createElement('p');message.className='status-error';message.textContent='组件加载失败，请点击刷新。';frame.replaceWith(message);}
 }

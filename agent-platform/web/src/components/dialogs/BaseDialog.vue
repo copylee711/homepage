@@ -70,6 +70,9 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey));
 .provider-status { margin: 11px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
 .provider-status.is-success { color: var(--ok); }
 .provider-status.is-error { color: var(--danger); }
+@media (max-width: 860px) {
+  .dialog-backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
 @media (max-width: 640px) {
   .dialog-backdrop {
     padding: 0;

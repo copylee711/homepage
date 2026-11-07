@@ -1,34 +1,38 @@
 <script setup lang="ts">
-import { computed,ref,watch } from 'vue';
+import { computed } from 'vue';
 import MarkdownView from './MarkdownView.vue';
 import ThinkingBlock from './ThinkingBlock.vue';
-import { segmentBlocks } from '../services/transcript.mjs';
+import { segmentBlocks, groupExecution } from '../services/transcript.mjs';
 import PlanCard from './PlanCard.vue';
 import ToolCard from './ToolCard.vue';
 import SourceList from './SourceList.vue';
-import { collectSources } from '../services/markdown.js';
+import { collectSources, splitSourceBlocks } from '../services/markdown.js';
 
 // Accepts normalized blocks: { type:'text'|'thinking'|'tool', text?, ...tool fields }
 const props = defineProps<{ blocks: any[]; streaming?: boolean; nested?:boolean; references?:any[] }>();
-const bodyIndex=computed(()=>props.nested?-1:props.blocks.findLastIndex(b=>b.type==='text'&&b.text?.trim()));
-const prelude=computed(()=>props.nested?[]:bodyIndex.value>0?props.blocks.slice(0,bodyIndex.value):bodyIndex.value<0?props.blocks:[]);
-const visibleBlocks=computed(()=>props.nested?props.blocks:bodyIndex.value<0?[]:props.blocks.slice(bodyIndex.value));
-const preludeOpen=ref(true);
-watch(bodyIndex,(index,previous)=>{if(index>0&&index!==previous)preludeOpen.value=false;},{immediate:true});
-
-const segments = computed(() => segmentBlocks(visibleBlocks.value));
+const sourceBlocks = computed(() => props.blocks.map(block =>
+  block.type === 'text' ? splitSourceBlocks(block.text) : null));
+const displayBlocks = computed(() => props.blocks
+  .map((block, index) => sourceBlocks.value[index] ? { ...block, text: sourceBlocks.value[index].text } : block)
+  .filter(block => block.type !== 'tool' || block.name !== 'set_chat_title'));
+const segments = computed(() => {
+  return props.nested ? segmentBlocks(displayBlocks.value) : groupExecution(displayBlocks.value, props.streaming);
+});
 const citations=computed(()=>{
   if(props.references)return props.references;
   const metadata=[];for(const block of props.blocks||[]){if(block.type==='tool'&&block.result){try{const result=JSON.parse(block.result);if(Array.isArray(result.results)&&!result.images)metadata.push(...result.results);}catch{}}}
-  return collectSources((props.blocks||[]).filter(b=>b.type==='text').map(b=>b.text||'').join('\n\n'),metadata);
+  return collectSources(sourceBlocks.value.map(block => block?.text || '').join('\n\n'), metadata, sourceBlocks.value.flatMap(block => block?.sources || []));
 });
 </script>
 
 <template>
   <div class="blocks">
-    <details v-if="!nested" v-show="prelude.length" :open="preludeOpen" class="work-prelude" :class="{'has-body':bodyIndex>=0}" @toggle="preludeOpen=($event.target as HTMLDetailsElement).open"><summary>查看执行过程 · {{prelude.length}} 项</summary><BlockList :blocks="prelude" :streaming="streaming" :nested="true" :references="citations" /></details>
-    <template v-for="(seg, i) in segments" :key="i">
-      <MarkdownView v-if="seg.type === 'text'" :source="seg.text" :citations="citations" :streaming="streaming" />
+    <template v-for="(seg, i) in segments" :key="seg.type === 'tools' ? seg.items[0]?.id || i : i">
+      <details v-if="seg.type === 'execution'" :open="!seg.collapsed" class="work-prelude" :class="{ 'has-body': seg.collapsed }">
+        <summary>查看执行过程 · {{ seg.items.length }} 项</summary>
+        <BlockList :blocks="seg.items" :streaming="streaming" nested :references="citations" />
+      </details>
+      <MarkdownView v-else-if="seg.type === 'text'" :source="seg.text" :citations="citations" :streaming="streaming && i === segments.length - 1" />
       <ThinkingBlock v-else-if="seg.type === 'thinking'" :text="seg.text" />
       <PlanCard v-else-if="seg.type === 'plan'" :block="seg.block" />
       <ToolCard v-else-if="seg.type === 'tools'" :tools="seg.items" />
