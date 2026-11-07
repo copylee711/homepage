@@ -3,13 +3,13 @@ import { ref, computed, watch, nextTick, onMounted } from 'vue';
 import Icon from './Icon.vue';
 import { fileToBase64 } from '../services/files';
 import MarkdownView from './MarkdownView.vue';
+import TerminalPane from './TerminalPane.vue';
 import DropMenu, { type MenuItem } from './DropMenu.vue';
 import { useWorkspace, FILES_TAB, TERMINAL_TAB, type OpenFileTab } from '../stores/workspace';
 import { useUi } from '../stores/ui';
 import { useSession } from '../stores/session';
 import { formatBytes } from '../services/format';
 import { highlightInto } from '../services/highlight.js';
-import { renderAnsiToHtml } from '../services/ansi';
 
 const ws = useWorkspace();
 const ui = useUi();
@@ -83,30 +83,15 @@ const currentFolderLabel = computed(() => {
   return 'workspace';
 });
 
-// Terminal interactive state
-const termInput = ref('');
-const termHistoryIndex = ref(-1);
-const termInputRef = ref<HTMLInputElement | null>(null);
-const termLogsRef = ref<HTMLElement | null>(null);
-
-function scrollTerminalToBottom() {
-  void nextTick(() => {
-    if (termLogsRef.value) {
-      termLogsRef.value.scrollTop = termLogsRef.value.scrollHeight;
-    }
-  });
-}
+// Terminal: a real PTY relayed by the sandbox broker. The component is kept
+// mounted while the workspace is open so switching tabs never drops the shell.
+const terminalEverOpened = ref(false);
+const termRef = ref<InstanceType<typeof TerminalPane> | null>(null);
 
 function openTerminalTab() {
   ws.activeTab = TERMINAL_TAB;
-  const proj = session.currentProjectId || 'default';
-  if (!ws.terminalCwd || ws.terminalCwd === '/workspace' || ws.terminalCwd === '/workspace/default') {
-    ws.terminalCwd = `/workspace/${proj}`;
-  }
-  void nextTick(() => {
-    termInputRef.value?.focus();
-    scrollTerminalToBottom();
-  });
+  terminalEverOpened.value = true;
+  void nextTick(() => termRef.value?.focus());
 }
 
 function toggleTerminal() {
@@ -115,59 +100,6 @@ function toggleTerminal() {
   } else {
     openTerminalTab();
   }
-}
-
-function onTermKeydown(ev: KeyboardEvent) {
-  if (ev.key === 'ArrowUp') {
-    ev.preventDefault();
-    const history = ws.terminalHistory;
-    if (!history.length) return;
-    if (termHistoryIndex.value === -1) {
-      termHistoryIndex.value = history.length - 1;
-    } else if (termHistoryIndex.value > 0) {
-      termHistoryIndex.value--;
-    }
-    termInput.value = history[termHistoryIndex.value] || '';
-  } else if (ev.key === 'ArrowDown') {
-    ev.preventDefault();
-    const history = ws.terminalHistory;
-    if (termHistoryIndex.value === -1) return;
-    if (termHistoryIndex.value < history.length - 1) {
-      termHistoryIndex.value++;
-      termInput.value = history[termHistoryIndex.value] || '';
-    } else {
-      termHistoryIndex.value = -1;
-      termInput.value = '';
-    }
-  } else if (ev.key === 'c' && ev.ctrlKey) {
-    termInput.value = '';
-    termHistoryIndex.value = -1;
-  } else if (ev.key === 'l' && ev.ctrlKey) {
-    ev.preventDefault();
-    ws.clearTerminal();
-  }
-}
-
-async function submitTermCommand() {
-  const cmd = termInput.value.trim();
-  if (!cmd) return;
-  termInput.value = '';
-  termHistoryIndex.value = -1;
-  await ws.execTerminal(cmd);
-  scrollTerminalToBottom();
-  void nextTick(() => termInputRef.value?.focus());
-}
-
-function execQuickCmd(cmd: string) {
-  termInput.value = cmd;
-  void submitTermCommand();
-}
-
-function formatTermCwd(cwd?: string) {
-  if (!cwd) return '~';
-  if (cwd === '/workspace') return '/workspace';
-  if (cwd.startsWith('/workspace/')) return cwd.replace('/workspace/', '');
-  return cwd;
 }
 
 const activeFileTab = computed<OpenFileTab | null>(() => {
@@ -700,8 +632,8 @@ onMounted(() => {
           type="button"
           class="icon-button small"
           :class="{ 'is-on': isTerminalActive }"
-          aria-label="打开 Linux 终端"
-          title="虚拟 Linux 终端"
+          aria-label="打开沙箱 Linux 终端"
+          title="沙箱 Linux 终端"
           @click="toggleTerminal"
         >
           <Icon name="terminal" :size="15" />
@@ -862,61 +794,39 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- Terminal Pane (Linux Sandbox Control) -->
-      <section v-if="isTerminalActive" class="ws-terminal-pane">
+      <!-- Terminal Pane: a real PTY inside the sandbox -->
+      <section v-show="isTerminalActive" class="ws-terminal-pane">
         <header class="ws-term-bar">
           <div class="ws-term-meta">
             <span class="ws-term-title"><Icon name="terminal" :size="13" /> 终端</span>
+            <span class="ws-term-project">/workspace/{{ session.currentProjectId || 'default' }}</span>
           </div>
           <div class="ws-term-tools">
             <button
               type="button"
               class="icon-button mini"
-              title="清屏 (Ctrl+L)"
+              title="清屏"
               aria-label="清屏"
-              @click="ws.clearTerminal"
+              @click="termRef?.clear()"
             >
               <Icon name="trash" :size="13" />
             </button>
+            <button
+              type="button"
+              class="icon-button mini"
+              title="重新连接"
+              aria-label="重新连接"
+              @click="termRef?.reconnect()"
+            >
+              <Icon name="refresh" :size="13" />
+            </button>
           </div>
         </header>
-
-        <div ref="termLogsRef" class="ws-term-logs" @click="termInputRef?.focus()">
-          <div v-for="line in ws.terminalLines" :key="line.id" class="ws-term-line" :class="'is-' + line.type">
-            <template v-if="line.type === 'cmd'">
-              <span class="ws-term-prompt">
-                <span class="ws-term-u">iris</span><span class="ws-term-at">@</span><span class="ws-term-h">sandbox</span>:<span class="ws-term-d">{{ formatTermCwd(line.cwd) }}</span>$&nbsp;
-              </span>
-              <span class="ws-term-cmd-text">{{ line.text }}</span>
-            </template>
-            <pre v-else-if="line.type === 'output'" class="ws-term-out" v-html="renderAnsiToHtml(line.text)"></pre>
-            <pre v-else-if="line.type === 'error'" class="ws-term-out is-error" v-html="renderAnsiToHtml(line.text)"></pre>
-            <div v-else class="ws-term-info">{{ line.text }}</div>
-          </div>
-
-          <!-- Active Prompt Line -->
-          <form novalidate class="ws-term-input-line" @submit.prevent="submitTermCommand">
-            <span class="ws-term-prompt">
-              <span class="ws-term-u">iris</span><span class="ws-term-at">@</span><span class="ws-term-h">sandbox</span>:<span class="ws-term-d">{{ formatTermCwd(ws.terminalCwd) }}</span>$&nbsp;
-            </span>
-            <input
-              ref="termInputRef"
-              v-model="termInput"
-              type="text"
-              class="ws-term-input"
-              spellcheck="false"
-              autocomplete="off"
-              :disabled="ws.terminalLoading"
-              placeholder="输入 shell 命令…"
-              @keydown="onTermKeydown"
-            />
-            <span v-if="ws.terminalLoading" class="spinner ws-term-spinner" aria-label="执行中…"></span>
-          </form>
-        </div>
+        <TerminalPane v-if="terminalEverOpened" ref="termRef" />
       </section>
 
       <!-- File Viewer / Editor Pane -->
-      <section v-else-if="isDual || activeFileTab" class="ws-viewer">
+      <section v-if="!isTerminalActive && (isDual || activeFileTab)" class="ws-viewer">
         <!-- In dual mode, file tabs sit across the top of the right column -->
         <div v-if="isDual && (ws.tabs.length || isTerminalActive)" class="ws-tabs ws-tabs-dual" role="tablist">
           <button

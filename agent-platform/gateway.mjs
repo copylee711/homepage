@@ -370,7 +370,7 @@ export const server = createServer(async (req, res) => {
         });
         return json(res, 200, await response.json());
       }
-      const input = await body(req, url.pathname === '/api/prompt' ? 15 * 1024 * 1024 : url.pathname === '/api/features/save' ? 256 * 1024 : url.pathname === '/api/search/settings/save' ? 512 * 1024 : 65536);
+      const input = await body(req, url.pathname === '/api/prompt' ? 15 * 1024 * 1024 : url.pathname === '/api/features/save' ? 256 * 1024 : (url.pathname === '/api/search/settings/save' || url.pathname === '/api/terminal/write') ? 512 * 1024 : 65536);
       if (['/api/features/save','/api/features/mcp/test','/api/context/compact'].includes(url.pathname)) { const response = await runner(url.pathname.replace('/api',''), auth.user.id, {config:input.config,id:input.id,thread:input.thread,instructions:input.instructions}, AbortSignal.timeout(190000));return json(res,200,await response.json()); }
       if (url.pathname === '/api/memory/update') {
         const response = await runner('/memory/update', auth.user.id, { project: input.project, scope: input.scope, action: input.action, content: input.content, revision: input.revision }); return json(res, 200, await response.json());
@@ -421,7 +421,7 @@ export const server = createServer(async (req, res) => {
         return json(res, 200, await response.json());
       }
 
-      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/chats/fork', '/api/chats/truncate', '/api/chats/project', '/api/chats/permission', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/terminal/exec', '/api/git/status', '/api/git/checkout', '/api/chats/settings/save'].includes(url.pathname)) {
+      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/chats/fork', '/api/chats/truncate', '/api/chats/project', '/api/chats/permission', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/terminal/exec', '/api/terminal/open', '/api/terminal/write', '/api/terminal/read', '/api/terminal/close', '/api/git/status', '/api/git/checkout', '/api/chats/settings/save'].includes(url.pathname)) {
         const response = await runner(url.pathname.replace('/api', ''), auth.user.id, input);
         return json(res, 200, await response.json());
       }

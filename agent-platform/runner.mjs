@@ -652,6 +652,32 @@ export const server = createServer(async (req, res) => {
       }
       return json(res, 200, { output, exitCode: result.exitCode ?? 0, cwd: nextCwd });
     }
+    // Interactive PTY. The shell lives in a disposable container with the same
+    // mounts and hardening as a tool run; the browser only relays keystrokes and
+    // output, so no host command surface is exposed.
+    if (req.url === '/terminal/open') {
+      assertUserIdle(input.user);
+      const project = normalizeProjectId(input.project || 'default');
+      const cols = Math.max(20, Math.min(Number(input.cols) || 100, 500));
+      const rows = Math.max(5, Math.min(Number(input.rows) || 30, 300));
+      await sandbox('/pty/open', input.user, undefined, { project, scope: 'project_only' }, { cols, rows });
+      return json(res, 200, { ok: true, project });
+    }
+    if (req.url === '/terminal/write') {
+      const data = typeof input.data === 'string' ? input.data : '';
+      if (data.length > 350000) fail(413, '终端输入过大');
+      const cols = Number(input.cols) || 0, rows = Number(input.rows) || 0;
+      const result = await sandbox('/pty/write', input.user, undefined, null, { data, cols, rows });
+      return json(res, 200, result);
+    }
+    if (req.url === '/terminal/read') {
+      const after = Math.max(0, Number(input.after) || 0);
+      const wait = Math.max(0, Math.min(Number(input.wait) || 0, 10));
+      return json(res, 200, await sandbox('/pty/read', input.user, undefined, null, { after, wait }));
+    }
+    if (req.url === '/terminal/close') {
+      return json(res, 200, await sandbox('/pty/close', input.user, undefined, null, {}));
+    }
     if (req.url === '/chats') {
       const busy = new Set([...sessions.values()].filter(e => e.pi.user === input.user && (e.pi.busy || e.initializing)).map(e => e.pi.thread));
       await chats.autoArchive(input.user, busy).catch(() => {});

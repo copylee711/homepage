@@ -6,7 +6,15 @@ export async function sandbox(path, user, token, policy, extra) {
   const response = await fetch(url + path, { method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + required('SANDBOX_SECRET') },
     body: JSON.stringify(payload), signal: AbortSignal.timeout(15000) });
-  if (!response.ok) fail(503, '独立沙箱不可用，执行已关闭');
+  if (!response.ok) {
+    // Terminal control is interactive: the broker's own reason (memory budget,
+    // terminal gone after a restart) is what the user needs to see.
+    if (path.startsWith('/pty/')) {
+      const detail = await response.json().catch(() => ({}));
+      if (typeof detail.error === 'string' && detail.error) fail(response.status === 400 || response.status === 409 ? 409 : 503, detail.error);
+    }
+    fail(503, '独立沙箱不可用，执行已关闭');
+  }
   return response.json();
 }
 // Tool requests use the short-lived per-user lease, never the host control secret.

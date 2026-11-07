@@ -68,6 +68,7 @@ function webTool(id, name, args, result) {
   return { type: 'tool', id, name, args: JSON.stringify(args, null, 2), state: 'success', result: JSON.stringify(result), durationMs: 640 };
 }
 const directImage = 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png';
+const mockTerminals = new Map();
 const sessions = {
   '66666666-6666-4666-8666-666666666666': {
     busy: false,
@@ -416,6 +417,54 @@ export function devMock() {
           }
           gitBranches[proj].current = branch;
           return send({ ok: true, branch });
+        }
+        // Simulated PTY for the dev preview: echoes typing and answers a few
+        // commands so the xterm pane can be checked without a sandbox.
+        if (path.startsWith('/api/terminal/')) {
+          const user = 'dev-user';
+          let term = mockTerminals.get(user);
+          const prompt = () => `\x1b[1;32miris\x1b[0m@\x1b[32msandbox\x1b[0m:\x1b[34m${term.cwd}\x1b[0m$ `;
+          const push = text => { term.buffer += text; term.cursor += Buffer.byteLength(text); };
+          if (path === '/api/terminal/open') {
+            term = { cwd: '/workspace/' + String(body.project || 'default'), line: '', buffer: '', cursor: 0 };
+            mockTerminals.set(user, term);
+            push('\x1b[2mIris 演示终端 · 仅开发预览\x1b[0m\r\n');
+            push(prompt());
+            return send({ ok: true });
+          }
+          if (!term) return send({ error: '终端未打开' }, 404);
+          if (path === '/api/terminal/write') {
+            const text = Buffer.from(String(body.data || ''), 'base64').toString('utf8');
+            for (const ch of text) {
+              if (ch === '\r' || ch === '\n') {
+                const cmd = term.line.trim(); term.line = '';
+                push('\r\n');
+                if (cmd === 'clear') { term.buffer = ''; term.cursor = 0; }
+                else if (cmd === 'pwd') push(term.cwd + '\r\n');
+                else if (cmd === 'ls' || cmd === 'ls -la') push('AGENTS.md  README.md  demo.py\r\n');
+                else if (cmd.startsWith('cd ')) {
+                  const target = cmd.slice(3).trim();
+                  term.cwd = target.startsWith('/') ? target : (term.cwd + '/' + target).replace(/\/+/g, '/');
+                } else if (cmd.startsWith('echo ')) push(cmd.slice(5) + '\r\n');
+                else if (cmd) push('\x1b[33m演示环境\x1b[0m 已收到命令：' + cmd + '\r\n');
+                push(prompt());
+              } else if (ch === '\u007f') {
+                if (term.line) { term.line = term.line.slice(0, -1); push('\b \b'); }
+              } else if (ch === '\u0003') { push('^C\r\n' + prompt()); term.line = ''; }
+              else if (ch >= ' ') { term.line += ch; push(ch); }
+            }
+            return send({ ok: true });
+          }
+          if (path === '/api/terminal/read') {
+            const after = Number(body.after) || 0;
+            const started = Date.now();
+            while (term.cursor <= after && Date.now() - started < 1500) await new Promise(resolve => setTimeout(resolve, 30));
+            const bytes = Buffer.from(term.buffer || '', 'utf8');
+            const base = term.cursor - bytes.length;
+            const slice = bytes.subarray(Math.max(0, after - base));
+            return send({ data: slice.toString('base64'), cursor: term.cursor, base, closed: false });
+          }
+          if (path === '/api/terminal/close') { mockTerminals.delete(user); return send({ ok: true }); }
         }
         if (path === '/api/terminal/exec') {
           const rawCmd = String(body.command || '').trim();

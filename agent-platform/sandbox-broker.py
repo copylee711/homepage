@@ -1,4 +1,5 @@
 """Host control plane. Never mounted into a tool container; no arbitrary Docker API."""
+import base64
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
@@ -7,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import struct
 import subprocess
 import threading
 import time
@@ -177,6 +179,182 @@ def run_tool(user, value, lease):
         lock.release()
 
 
+class Terminal:
+    """One interactive shell per user, relayed to the console over long polls.
+
+    The container is disposable like a tool container: same mounts, quota and
+    hardening, but kept alive while the user types. stdin carries framed control
+    messages, stdout carries the raw pty bytes.
+    """
+
+    BUFFER_LIMIT = 1024 * 1024
+    CHUNK = 256 * 1024
+
+    def __init__(self, user, mount, policy, quota, cols, rows):
+        self.user = user
+        self.policy = policy
+        self.name = 'cl-term-' + user
+        self.lock = threading.Lock()
+        self.cond = threading.Condition(self.lock)
+        self.stdin_lock = threading.Lock()
+        self.buffer = bytearray()
+        self.base = 0
+        self.closed = False
+        self.error = ''
+        self.last_use = time.monotonic()
+        self.proc = None
+        self.reader = None
+        self.memory = quota['memory_mib']
+        self.start(mount, quota, cols, rows)
+
+    @property
+    def cursor(self):
+        return self.base + len(self.buffer)
+
+    def start(self, mount, quota, cols, rows):
+        with open(Path(__file__).with_name('sandbox-pty.py'), 'rb') as file:
+            program = base64.b64encode(file.read()).decode()
+        project = (self.policy or {}).get('project') or ''
+        workdir = f'/workspace/{project}' if project else '/workspace'
+        docker('rm', '-f', self.name)
+        created = docker(
+            'create', '-i', '--name', self.name, '--label', 'copylee.terminal=1',
+            '--network', NETWORK, '--read-only',
+            '--sysctl', 'net.ipv6.conf.all.disable_ipv6=1',
+            '--user', '1000:1000', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
+            '--memory', str(quota['memory_mib']) + 'm', '--memory-swap', str(quota['memory_mib']) + 'm',
+            '--cpus', str(quota['cpus']), '--pids-limit', str(quota['pids']),
+            '--ulimit', 'nofile=256:256', '--ulimit', f"fsize={quota['disk_mib'] * 1048576}:{quota['disk_mib'] * 1048576}",
+            '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m,mode=1777', '--shm-size', '8m',
+            *project_policy.mount_arguments(mount, self.policy),
+            '--workdir', workdir,
+            '--env', 'HOME=/tmp', '--env', 'TERM=xterm-256color', '--env', 'COLORTERM=truecolor',
+            '--env', 'PI_CODING_AGENT_DIR=/tmp/pi',
+            '--env', f'IRIS_PROJECT={project or "default"}', '--env', f'IRIS_PTY_PROGRAM={program}',
+            '--env', 'HTTP_PROXY=http://192.168.85.2:3128', '--env', 'HTTPS_PROXY=http://192.168.85.2:3128',
+            # The image entrypoint is the JSON tool worker; the terminal replaces
+            # it with the PTY helper so the shell owns stdin/stdout.
+            '--log-driver', 'none', '--entrypoint', 'python3', IMAGE,
+            '-c', 'import base64,os;exec(base64.b64decode(os.environ["IRIS_PTY_PROGRAM"]))')
+        if created.returncode:
+            raise ValueError('终端容器创建失败')
+        try:
+            self.proc = subprocess.Popen(
+                ['docker', 'start', '-ai', self.name],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except Exception:
+            docker('rm', '-f', self.name)
+            raise ValueError('终端容器启动失败')
+        self.resize(cols, rows, initial=True)
+        self.reader = threading.Thread(target=self._pump, daemon=True)
+        self.reader.start()
+
+    def _pump(self):
+        stream = self.proc.stdout
+        while True:
+            try:
+                chunk = stream.read1(65536) if hasattr(stream, 'read1') else stream.read(65536)
+            except (ValueError, OSError):
+                break
+            if not chunk:
+                break
+            with self.cond:
+                self.buffer.extend(chunk)
+                if len(self.buffer) > self.BUFFER_LIMIT:
+                    cut = len(self.buffer) - self.BUFFER_LIMIT
+                    del self.buffer[:cut]
+                    self.base += cut
+                self.cond.notify_all()
+        with self.cond:
+            self.closed = True
+            self.cond.notify_all()
+        try:
+            self.proc.wait(timeout=5)
+        except Exception:
+            pass
+
+    def _frame(self, kind, payload):
+        # Keystrokes and resizes arrive on different HTTP threads; one frame
+        # must never interleave with another or the helper loses sync.
+        with self.stdin_lock:
+            self.proc.stdin.write(kind + struct.pack('>I', len(payload)) + payload)
+            self.proc.stdin.flush()
+
+    def write(self, data):
+        self.last_use = time.monotonic()
+        if self.closed:
+            return False
+        try:
+            self._frame(b'i', data)
+            return True
+        except (BrokenPipeError, ValueError, OSError):
+            self.close()
+            return False
+
+    def resize(self, cols, rows, initial=False):
+        self.last_use = time.monotonic()
+        cols, rows = max(20, min(int(cols or 100), 500)), max(5, min(int(rows or 30), 300))
+        try:
+            self._frame(b'r', f'{cols},{rows}'.encode())
+        except (BrokenPipeError, ValueError, OSError):
+            if not initial:
+                self.close()
+
+    def read(self, after, wait):
+        with self.cond:
+            deadline = time.monotonic() + max(0.0, min(wait, 20.0))
+            while self.cursor <= after and not self.closed:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self.cond.wait(remaining)
+            self.last_use = time.monotonic()
+            start = max(0, after - self.base)
+            chunk = bytes(self.buffer[start:start + self.CHUNK])
+            return {'data': base64.b64encode(chunk).decode(),
+                    'cursor': self.base + start + len(chunk), 'base': self.base,
+                    'closed': self.closed, 'error': self.error}
+
+    def close(self):
+        with self.cond:
+            if self.closed and self.proc is None:
+                return
+            self.closed = True
+            self.cond.notify_all()
+        if self.proc is not None:
+            try:
+                self.proc.stdin.close()
+            except Exception:
+                pass
+            try:
+                self.proc.terminate()
+            except Exception:
+                pass
+            try:
+                self.proc.wait(timeout=5)
+            except Exception:
+                try: self.proc.kill()
+                except Exception: pass
+        cancel_terminal(self.user)
+
+
+terminals = {}
+terminal_memory = {}
+TERMINAL_IDLE = int(os.environ.get('SANDBOX_TERMINAL_IDLE_SECONDS', '1800'))
+
+
+def cancel_terminal(user):
+    docker('rm', '-f', 'cl-term-' + user)
+
+
+def close_terminal(user):
+    with guard:
+        item = terminals.pop(user, None)
+        terminal_memory.pop(user, None)
+    if item:
+        item.close()
+
+
 backgrounds = background_module.BackgroundTasks(workspace, quotas, project_policy, IMAGE, NETWORK, active_memory)
 
 class Handler(BaseHTTPRequestHandler):
@@ -201,6 +379,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, run_tool(user, value, token))
             if not hmac.compare_digest(token, SECRET):
                 return self.reply(401, {"error": "服务认证失败"})
+            if self.path.startswith('/pty/'):
+                return self.pty(value)
             if self.path == '/background/preview':
                 return self.reply(200, backgrounds.preview(value.get('token'), value.get('path', '/')))
             if self.path == "/package":
@@ -257,6 +437,46 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             self.reply(503, {"error": "沙箱服务不可用"})
 
+    def pty(self, value):
+        user = value.get('user', '')
+        if not USER.fullmatch(user):
+            return self.reply(422, {'error': '用户无效'})
+        if self.path == '/pty/open':
+            close_terminal(user)
+            quota = quotas.get(user)
+            rules = project_policy.policy(value.get('policy'))
+            with guard:
+                used = sum(active_memory.values()) + backgrounds.memory_used() + sum(terminal_memory.values())
+                if used + quota['memory_mib'] > int(os.environ.get('SANDBOX_ACTIVE_MEMORY_MIB', '4096')):
+                    return self.reply(409, {'error': '沙箱运行内存预算已满，请稍后重试'})
+                terminal_memory[user] = quota['memory_mib']
+            try:
+                item = Terminal(user, workspace(user), rules, quota, value.get('cols'), value.get('rows'))
+            except ValueError as error:
+                with guard: terminal_memory.pop(user, None)
+                return self.reply(400, {'error': str(error)})
+            with guard:
+                terminals[user] = item
+            return self.reply(200, {'ok': True})
+        with guard:
+            item = terminals.get(user)
+        if not item:
+            return self.reply(404, {'error': '终端未打开'})
+        if self.path == '/pty/write':
+            if value.get('cols') and value.get('rows'):
+                item.resize(value.get('cols'), value.get('rows'))
+            data = value.get('data') or ''
+            if len(data) > 256 * 1024:
+                return self.reply(413, {'error': '输入过大'})
+            ok = item.write(base64.b64decode(data)) if data else True
+            return self.reply(200, {'ok': ok})
+        if self.path == '/pty/read':
+            return self.reply(200, item.read(int(value.get('after') or 0), float(value.get('wait') or 0)))
+        if self.path == '/pty/close':
+            close_terminal(user)
+            return self.reply(200, {'ok': True})
+        return self.reply(404, {'error': '接口不存在'})
+
     def reply(self, status, value):
         data = json.dumps(value, ensure_ascii=False).encode()
         self.send_response(status)
@@ -273,6 +493,13 @@ def sweep():
     while True:
         time.sleep(1)
         with guard:
+            stale = [user for user, item in terminals.items()
+                     if item.closed or time.monotonic() - item.last_use > TERMINAL_IDLE]
+        # Removing a terminal shells out to docker; keep that off the guard so a
+        # slow container teardown cannot stall every other sandbox request.
+        for user in stale:
+            close_terminal(user)
+        with guard:
             backgrounds.sweep()
             expired = {lease["user"] for lease in leases.values() if lease["expires"] <= time.monotonic()}
             for key, lease in list(leases.items()):
@@ -285,7 +512,7 @@ def sweep():
 
 if __name__ == "__main__":
     # Fail closed across control-plane restarts; kill only our labelled tool containers.
-    old = docker("ps", "-aq", "--filter", "label=copylee.sandbox=1").stdout.decode().split() + docker('ps', '-aq', '--filter', 'label=copylee.background=1').stdout.decode().split()
+    old = docker("ps", "-aq", "--filter", "label=copylee.sandbox=1").stdout.decode().split() + docker('ps', '-aq', '--filter', 'label=copylee.background=1').stdout.decode().split() + docker('ps', '-aq', '--filter', 'label=copylee.terminal=1').stdout.decode().split()
     if old:
         docker("rm", "-f", *old)
     threading.Thread(target=sweep, daemon=True).start()

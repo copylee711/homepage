@@ -361,6 +361,16 @@
   flex: none;
   white-space: nowrap;
 }
+.ws-term-project {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--term-title);
+  opacity: 0.75;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
 .ws-term-tools {
   display: flex;
   align-items: center;
