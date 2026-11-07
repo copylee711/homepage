@@ -6,8 +6,8 @@ import shutil
 import subprocess
 import threading
 
-DEFAULT = {'disk_mib': 1024, 'memory_mib': 512, 'cpus': 1, 'pids': 96, 'timeout': 180}
-RANGES = {'disk_mib': (64, 16384), 'memory_mib': (64, 4096), 'cpus': (.1, 4), 'pids': (16, 256), 'timeout': (10, 600)}
+DEFAULT = {'disk_mib': 1024, 'memory_mib': 512, 'cpus': 1, 'pids': 224, 'timeout': 180}
+RANGES = {'disk_mib': (64, 16384), 'memory_mib': (64, 4096), 'cpus': (.1, 4), 'pids': (16, 512), 'timeout': (10, 600)}
 lock = threading.RLock()
 
 class Quotas:
