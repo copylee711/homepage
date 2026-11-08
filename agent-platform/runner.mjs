@@ -559,14 +559,17 @@ export const server = createServer(async (req, res) => {
         return json(res, 200, image);
       }
       if (req.url === '/runtime/wiki') {
-        const { topic } = await body(req);
-        if (!WIKI_TOPICS.includes(topic)) fail(422, '来源类别无效');
+        const { topic, prompt } = await body(req);
+        if (topic != null && !WIKI_TOPICS.includes(topic)) fail(422, '来源类别无效');
         const turn = pi.wikiTurn;
         const snapshot = turn ? await (turn.loaded ||= sourceWiki.get(pi.user)) : await sourceWiki.get(pi.user);
-        if (turn) { turn.snapshot = snapshot; turn.topic = topic; }
-        return json(res, 200, { sources: snapshot.sources
-          .filter(source => source.topic === topic && source.enabled && (source.failures || 0) < 3)
-          .slice(0, 12).map(({ title, url }) => ({ title, url })) });
+        const semantic = typeof prompt === 'string'
+          ? await sourceWiki.semanticMatch(pi.user, snapshot, pi.mask(prompt)).catch(() => []) : [];
+        const matchedTopic = topic || semantic[0]?.topic;
+        if (turn && matchedTopic) { turn.snapshot = snapshot; turn.topic = matchedTopic; }
+        const sources = semantic.length ? semantic : snapshot.sources.filter(source =>
+          source.topic === topic && source.enabled && (source.failures || 0) < 3);
+        return json(res, 200, { sources: sources.slice(0, 12).map(({ title, url }) => ({ title, url })) });
       }
       if (req.url === '/runtime/fetch') {
         const input = await body(req);
@@ -683,8 +686,8 @@ export const server = createServer(async (req, res) => {
       const config = await activeProvider().catch(() => undefined);
       return json(res, 200, { label: modelLabel(config?.model || model.split('/').pop()) });
     }
-    if (req.url === '/search/wiki') return json(res, 200, await sourceWiki.get(input.user));
-    if (req.url === '/search/wiki/save') return json(res, 200, await sourceWiki.save(input.user, input.config || {}));
+    if (req.url === '/search/wiki') return json(res, 200, { ...await sourceWiki.get(input.user), semanticAvailable: sourceWiki.semanticAvailable });
+    if (req.url === '/search/wiki/save') return json(res, 200, { ...await sourceWiki.save(input.user, input.config || {}), semanticAvailable: sourceWiki.semanticAvailable });
     if (req.url === '/search/settings') return json(res, 200, publicSearch(await searchSettings.get(input.user)));
     if (req.url === '/search/settings/save') return json(res, 200, await searchSettings.save(input.user, input.config));
     if (req.url === '/search/test') {
@@ -930,28 +933,33 @@ export const server = createServer(async (req, res) => {
       return;
     }
     if (req.url === '/browser/input') {
-      const kind = String(input.kind || '');
-      if (!['mouse', 'click', 'dblclick', 'move', 'wheel', 'text', 'key'].includes(kind)) fail(422, '浏览器输入类型无效');
-      const payload = { kind };
-      if (kind === 'mouse') {
-        const action = String(input.action || '');
-        if (!['down', 'up', 'move'].includes(action)) fail(422, '鼠标动作无效');
-        payload.action = action;
-        payload.button = ['right', 'middle'].includes(input.button) ? input.button : 'left';
-        payload.clickCount = Math.max(1, Math.min(Number(input.clickCount) || 1, 3));
-      }
-      if (kind === 'key' && ['down', 'up', 'press'].includes(input.action)) payload.action = input.action;
-      for (const key of ['x', 'y', 'dx', 'dy']) if (Number.isFinite(Number(input[key]))) payload[key] = Math.round(Number(input[key]));
-      if (kind === 'text') {
-        if (typeof input.text !== 'string' || !input.text || input.text.length > 20000) fail(422, '输入内容无效');
-        payload.text = input.text;
-      }
-      if (kind === 'key') {
-        if (typeof input.key !== 'string' || !input.key || input.key.length > 40) fail(422, '按键无效');
-        payload.key = input.key;
-        if (Array.isArray(input.modifiers)) payload.modifiers = input.modifiers.filter(m => ['Control', 'Shift', 'Alt', 'Meta'].includes(m)).slice(0, 4);
-      }
-      return json(res, 200, await sandbox('/browser/input', input.user, undefined, null, payload, 30000));
+      const events = input.events ?? [input];
+      if (!Array.isArray(events) || !events.length || events.length > 16) fail(422, '浏览器输入批次无效');
+      const commands = events.map(input => {
+        const kind = String(input.kind || '');
+        if (!['mouse', 'click', 'dblclick', 'move', 'wheel', 'text', 'key'].includes(kind)) fail(422, '浏览器输入类型无效');
+        const payload = { kind };
+        if (kind === 'mouse') {
+          const action = String(input.action || '');
+          if (!['down', 'up', 'move'].includes(action)) fail(422, '鼠标动作无效');
+          payload.action = action;
+          payload.button = ['right', 'middle'].includes(input.button) ? input.button : 'left';
+          payload.clickCount = Math.max(1, Math.min(Number(input.clickCount) || 1, 3));
+        }
+        if (kind === 'key' && ['down', 'up', 'press'].includes(input.action)) payload.action = input.action;
+        for (const key of ['x', 'y', 'dx', 'dy']) if (Number.isFinite(Number(input[key]))) payload[key] = Math.round(Number(input[key]));
+        if (kind === 'text') {
+          if (typeof input.text !== 'string' || !input.text || input.text.length > 20000) fail(422, '输入内容无效');
+          payload.text = input.text;
+        }
+        if (kind === 'key') {
+          if (typeof input.key !== 'string' || !input.key || input.key.length > 40) fail(422, '按键无效');
+          payload.key = input.key;
+          if (Array.isArray(input.modifiers)) payload.modifiers = input.modifiers.filter(m => ['Control', 'Shift', 'Alt', 'Meta'].includes(m)).slice(0, 4);
+        }
+        return payload;
+      });
+      return json(res, 200, await sandbox('/browser/input', input.user, undefined, null, { events: commands }, 30000));
     }
     if (req.url === '/browser/navigate') {
       const action = String(input.action || '');
@@ -1015,7 +1023,16 @@ export const server = createServer(async (req, res) => {
     if (req.url.startsWith('/files/') && [...sessions.values()].some(entry => entry.pi.user === input.user && entry.pi.busy)) invalidateWorkspace(input.user);
     if (req.url === '/files/list') return json(res, 200, await listWorkspace(input.user, input.path, input.fresh === true));
     if (req.url === '/files/preview') return json(res, 200, await previewWorkspace(input.user, input.path, input.limit, input.fresh === true));
-    if (req.url === '/files/download') return json(res, 200, await downloadWorkspace(input.user, input.path));
+    if (req.url === '/files/download') {
+      const { response, abort } = await sandboxStream('/files/download', input.user, { path: input.path, range: input.range });
+      const headers = Object.fromEntries(['accept-ranges', 'content-range', 'content-length']
+        .filter(key => response.headers.has(key)).map(key => [key, response.headers.get(key)]));
+      res.writeHead(response.status, headers);
+      const stream = Readable.fromWeb(response.body);
+      res.on('close', () => { stream.destroy(); abort(); });
+      stream.on('error', error => res.destroy(error));
+      return stream.pipe(res);
+    }
     if (req.url === '/files/upload') return json(res, 200, await uploadWorkspace(input.user, input.path, input.content, input.overwrite === true, input.revision, input.encoding));
     if (req.url === '/files/manage') return json(res, 200, await manageWorkspace(input.user, input));
     if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(input.thread || '')) fail(422, '对话标识无效');

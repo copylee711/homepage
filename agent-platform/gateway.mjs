@@ -72,7 +72,7 @@ async function runnerStream(path, user, payload) {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Runner-Secret': runnerSecret },
     body: JSON.stringify({ ...payload, user: createHash('sha256').update(user).digest('hex') }), redirect: 'error',
   });
-  if (!response.ok) {
+  if (!response.ok && !(path === '/files/download' && response.status === 416)) {
     const value = await response.json().catch(() => ({}));
     fail(response.status, value.error || 'Agent 服务暂时不可用');
   }
@@ -135,16 +135,17 @@ function attachment(name) {
 // Extra types only for inline workspace previews (never for the app shell).
 const previewMime = { ...mimeByExt, '.pdf': 'application/pdf', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
   '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.flac': 'audio/flac', '.htm': 'text/html', '.txt': 'text/plain' };
-function sendFile(res, file, inline = false) {
-  const buffer = Buffer.from(file.data || '', 'base64');
-  const ext = (file.name || '').slice((file.name || '').lastIndexOf('.')).toLowerCase();
+function sendFile(res, upstream, name, inline = false) {
+  const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
   const type = (inline ? previewMime[ext] : mimeByExt[ext]) || 'application/octet-stream';
-  const headers = { 'Content-Type': type + (/^text\//.test(type) ? '; charset=utf-8' : ''), 'Content-Length': buffer.length };
+  const headers = { 'Content-Type': type + (/^text\//.test(type) ? '; charset=utf-8' : ''), 'Cache-Control': 'private, no-store' };
+  for (const key of ['accept-ranges', 'content-range', 'content-length']) {
+    if (upstream.headers.has(key)) headers[key] = upstream.headers.get(key);
+  }
   if (!inline) {
-    headers['Content-Disposition'] = attachment(downloadName(file.name));
+    headers['Content-Disposition'] = attachment(downloadName(name));
   } else {
     headers['Content-Disposition'] = 'inline';
-    headers['Cache-Control'] = 'private, max-age=300';
     headers['X-Frame-Options'] = 'SAMEORIGIN';
     // Workspace content is untrusted: scriptable documents run in an opaque
     // sandbox origin, and only this app may frame a preview. PDF viewers refuse
@@ -152,8 +153,11 @@ function sendFile(res, file, inline = false) {
     headers['Content-Security-Policy'] = type === 'application/pdf' ? "frame-ancestors 'self'; object-src 'none'"
       : "sandbox allow-scripts; default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; img-src * data: blob:; connect-src 'none'; frame-ancestors 'self'";
   }
-  res.writeHead(200, headers);
-  res.end(buffer);
+  res.writeHead(upstream.status, headers);
+  const stream = Readable.fromWeb(upstream.body);
+  res.on('close', () => stream.destroy());
+  stream.on('error', error => res.destroy(error));
+  stream.pipe(res);
 }
 function sendBinary(res, value) {
   const name = downloadName(value.filename);
@@ -315,8 +319,9 @@ export const server = createServer(async (req, res) => {
         return json(res, 200, await response.json());
       }
       if (url.pathname === '/api/files/download' && req.method === 'GET') {
-        const response = await runner('/files/download', auth.user.id, { path: filePath(url) });
-        return sendFile(res, await response.json(), url.searchParams.get('inline') === '1');
+        const path = filePath(url);
+        const response = await runnerStream('/files/download', auth.user.id, { path, range: req.headers.range });
+        return sendFile(res, response, path.split('/').pop(), url.searchParams.get('inline') === '1');
       }
       if (url.pathname === '/api/providers' && req.method === 'GET') {
         const response = await runner('/providers', auth.user.id, {}); return json(res, 200, await response.json());
@@ -400,7 +405,7 @@ export const server = createServer(async (req, res) => {
         });
         return json(res, 200, await response.json());
       }
-      const input = await body(req, url.pathname === '/api/prompt' ? 15 * 1024 * 1024 : url.pathname === '/api/features/save' ? 256 * 1024 : (url.pathname === '/api/search/settings/save' || url.pathname === '/api/search/wiki/save' || url.pathname === '/api/terminal/write') ? 512 * 1024 : 65536);
+      const input = await body(req, url.pathname === '/api/prompt' ? 15 * 1024 * 1024 : url.pathname === '/api/features/save' ? 256 * 1024 : (url.pathname === '/api/search/settings/save' || url.pathname === '/api/search/wiki/save' || url.pathname === '/api/terminal/write' || url.pathname === '/api/browser/input') ? 512 * 1024 : 65536);
       if (['/api/features/save','/api/features/mcp/test','/api/context/compact'].includes(url.pathname)) { const response = await runner(url.pathname.replace('/api',''), auth.user.id, {config:input.config,id:input.id,thread:input.thread,instructions:input.instructions}, AbortSignal.timeout(190000));return json(res,200,await response.json()); }
       if (url.pathname === '/api/memory/update') {
         const response = await runner('/memory/update', auth.user.id, { project: input.project, scope: input.scope, action: input.action, content: input.content, revision: input.revision }); return json(res, 200, await response.json());

@@ -190,6 +190,7 @@ function sizeFor(key: string) {
 
 async function open(): Promise<boolean> {
   const gen = ++generation;
+  pendingInputs = [];
   phase.value = 'connecting';
   detail.value = '';
   hasFrame.value = false;
@@ -201,7 +202,7 @@ async function open(): Promise<boolean> {
     phase.value = 'open';
     running = true;
     void pump(gen);
-    void nextTick(() => stage.value?.focus());
+    void nextTick(() => focusRemoteKeyboard());
     return true;
   } catch (error: any) {
     phase.value = 'error';
@@ -218,8 +219,39 @@ async function reconnect() {
   await open();
 }
 
-function sendInput(payload: Record<string, unknown>) {
-  void post('/api/browser/input', payload).catch(() => {});
+type BrowserInput = Record<string, unknown>;
+let pendingInputs: BrowserInput[] = [];
+let sendingInput = false;
+let inputTimer: number | undefined;
+const isMove = (event?: BrowserInput) => event?.kind === 'mouse' && event.action === 'move';
+
+function sendInput(payload: BrowserInput) {
+  if (!running) return;
+  if (isMove(payload) && isMove(pendingInputs.at(-1))) pendingInputs.pop();
+  pendingInputs.push(payload);
+  if (!sendingInput && inputTimer === undefined) {
+    inputTimer = window.setTimeout(() => { inputTimer = undefined; void flushInput(); }, 8);
+  }
+}
+
+async function flushInput() {
+  if (sendingInput) return;
+  sendingInput = true;
+  const gen = generation;
+  try {
+    while (running && generation === gen && pendingInputs.length) {
+      const events = pendingInputs.splice(0, 16);
+      await post('/api/browser/input', { events });
+    }
+  } catch (error: any) {
+    if (generation === gen) {
+      pendingInputs = [];
+      ui.toast(error?.message || '浏览器输入未送达', { tone: 'error' });
+    }
+  } finally {
+    sendingInput = false;
+    if (running && pendingInputs.length) void flushInput();
+  }
 }
 
 function navigate(action: 'goto' | 'back' | 'forward' | 'reload') {
@@ -228,7 +260,7 @@ function navigate(action: 'goto' | 'back' | 'forward' | 'reload') {
     if (!value) return;
     editing = false;
     addressEl.value?.blur();
-    stage.value?.focus();
+    focusRemoteKeyboard();
     phase.value = phase.value === 'closed' ? phase.value : phase.value;
     void post('/api/browser/navigate', { action, url: value })
       .catch(error => { detail.value = error?.message || ''; });
@@ -244,7 +276,7 @@ function changeSize(item: { key: string; width: number; height: number }) {
   if (!running) return;
   const size = sizeFor(item.key);
   void post('/api/browser/navigate', { action: 'resize', width: size.width, height: size.height }).catch(() => {});
-  stage.value?.focus();
+  focusRemoteKeyboard();
 }
 
 const sizeLabel = computed(() => (SIZES.find(s => s.key === sizeKey.value) || SIZES[0]).label);
@@ -274,7 +306,7 @@ function moveCursor(event: PointerEvent | MouseEvent) {
 
 function onPointerDown(event: PointerEvent) {
   if (event.button === 2) return;
-  stage.value?.focus();
+  focusRemoteKeyboard();
   try { (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); } catch {}
   const { x, y } = point(event);
   const now = Date.now();
@@ -358,25 +390,15 @@ function onKeyDown(event: KeyboardEvent) {
     navigate('reload');
     return;
   }
-  if (MODIFIER_KEYS.has(event.key)) {
-    sendInput({ kind: 'key', action: 'down', key: event.key, modifiers: mods });
-    return;
-  }
+  if (MODIFIER_KEYS.has(event.key)) return;
   if (SPECIAL.has(event.key)) {
     event.preventDefault();
-    sendInput({ kind: 'key', action: 'down', key: event.key, modifiers: mods });
-    sendInput({ kind: 'key', action: 'up', key: event.key, modifiers: mods });
+    sendInput({ kind: 'key', action: 'press', key: event.key, modifiers: mods });
     return;
   }
   if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
     event.preventDefault();
     sendInput({ kind: 'text', text: event.key });
-  }
-}
-
-function onKeyUp(event: KeyboardEvent) {
-  if (MODIFIER_KEYS.has(event.key)) {
-    sendInput({ kind: 'key', action: 'up', key: event.key, modifiers: [] });
   }
 }
 
@@ -397,12 +419,18 @@ function onAddressKey(event: KeyboardEvent) {
     editing = false;
     address.value = url === 'about:blank' ? '' : url;
     addressEl.value?.blur();
-    stage.value?.focus();
+    focusRemoteKeyboard();
   }
 }
 
-function onStagePointer() {
-  if (document.activeElement !== stage.value) stage.value?.focus();
+const keyboardInput = ref<HTMLTextAreaElement>();
+function focusRemoteKeyboard() {
+  if (document.activeElement !== keyboardInput.value) keyboardInput.value?.focus({ preventScroll: true });
+}
+
+function onCompositionEnd(event: CompositionEvent) {
+  if (event.data) sendInput({ kind: 'text', text: event.data.slice(0, 20000) });
+  if (keyboardInput.value) keyboardInput.value.value = '';
 }
 
 async function saveScreenshot() {
@@ -544,11 +572,12 @@ defineExpose({ reload: reconnect });
       ref="stage"
       class="browser-stage"
       tabindex="0"
-      @pointerdown="onStagePointer"
+      @pointerdown="focusRemoteKeyboard" @focus.self="focusRemoteKeyboard"
       @keydown="onKeyDown"
-      @keyup="onKeyUp"
       @paste="onPaste"
     >
+      <textarea ref="keyboardInput" class="browser-keyboard-input" tabindex="-1" aria-label="远程浏览器键盘输入"
+        autocomplete="off" spellcheck="false" @compositionend="onCompositionEnd"></textarea>
       <div class="browser-canvas-wrap">
         <canvas
           ref="canvas"
@@ -556,7 +585,8 @@ defineExpose({ reload: reconnect });
           @pointerdown="onPointerDown"
           @pointermove="onPointerMove"
           @pointerup="onPointerUp"
-          @pointerleave="cursor.visible = false; onPointerUp($event)"
+          @pointerleave="cursor.visible = false"
+          @pointercancel="onPointerUp"
           @wheel="onWheel"
           @contextmenu="onContextMenu"
         ></canvas>
@@ -607,6 +637,7 @@ defineExpose({ reload: reconnect });
 .browser-canvas-wrap { position: relative; flex: 1; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
 .browser-canvas { max-width: 100%; max-height: 100%; width: auto; height: auto; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 8px 24px rgba(0,0,0,.08); touch-action: none; user-select: none; -webkit-user-drag: none; }
 @media (pointer: fine) { .browser-canvas { cursor: none; } }
+.browser-keyboard-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .browser-cursor { position: absolute; width: 16px; height: 16px; margin: -1px 0 0 -1px; pointer-events: none; filter: drop-shadow(0 1px 1px rgba(0,0,0,.35)); }
 .browser-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 10px; border-radius: 8px; background: color-mix(in srgb, var(--surface-2) 88%, transparent); color: var(--muted); font-size: 12.5px; }
 .browser-note { max-width: 70%; text-align: center; }

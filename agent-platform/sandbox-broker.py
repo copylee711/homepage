@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import stat
 import struct
 import subprocess
 import threading
@@ -580,6 +581,8 @@ class Handler(BaseHTTPRequestHandler):
             user = value.get("user", "")
             if not USER.fullmatch(user):
                 return self.reply(422, {"error": "用户无效"})
+            if self.path == '/files/download':
+                return self.download(user, value)
             if self.path == '/background/stop-user':
                 backgrounds.stop_user(user); return self.reply(200, {'ok': True})
             if self.path in {"/quota/get", "/quota/set"}:
@@ -625,6 +628,67 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             self.reply(503, {"error": "沙箱服务不可用"})
 
+    def download(self, user, value):
+        path = value.get('path')
+        if not isinstance(path, str) or len(path) > 1024 or any(c in path for c in '\x00\r\n'):
+            return self.reply(422, {'error': '工作区路径无效'})
+        parts = path.removeprefix('/workspace/').split('/')
+        if any(part in {'', '.', '..'} for part in parts):
+            return self.reply(422, {'error': '工作区路径无效'})
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        directory = os.open(workspace(user), flags)
+        try:
+            for part in parts[:-1]:
+                child = os.open(part, flags, dir_fd=directory)
+                os.close(directory)
+                directory = child
+            fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        except OSError:
+            return self.reply(404, {'error': '文件不存在或不可下载'})
+        finally:
+            os.close(directory)
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            os.close(fd)
+            return self.reply(404, {'error': '请选择普通文件'})
+        with os.fdopen(fd, 'rb') as file:
+            size = info.st_size
+            start, end, status = 0, size - 1, 200
+            requested = value.get('range')
+            if requested:
+                match = re.fullmatch(r'bytes=(\d{0,20})-(\d{0,20})', str(requested))
+                if match and match[1]:
+                    start = int(match[1])
+                    end = min(end, int(match[2])) if match[2] else end
+                elif match and match[2] and int(match[2]):
+                    start = max(0, size - int(match[2]))
+                else:
+                    start = size
+                if start > end:
+                    self.send_response(416)
+                    self.send_header('Content-Range', f'bytes */{size}')
+                    self.send_header('Content-Length', '0')
+                    self.end_headers()
+                    return
+                status = 206
+            remaining = end - start + 1
+            self.send_response(status)
+            self.send_header('Accept-Ranges', 'bytes')
+            self.send_header('Content-Length', str(remaining))
+            if status == 206:
+                self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
+            self.end_headers()
+            file.seek(start)
+            try:
+                while remaining:
+                    chunk = file.read(min(remaining, 256 * 1024))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
     def pty(self, value):
         user = value.get('user', '')
         if not USER.fullmatch(user):
@@ -667,6 +731,40 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {'ok': True})
         return self.reply(404, {'error': '接口不存在'})
 
+    def browser_input(self, value):
+        if not isinstance(value, dict):
+            raise ValueError('浏览器输入无效')
+        kind = value.get('kind')
+        if kind not in {'mouse', 'click', 'dblclick', 'move', 'wheel', 'text', 'key'}:
+            raise ValueError('浏览器输入类型无效')
+        payload = {'kind': kind}
+        if kind == 'mouse':
+            action = value.get('action')
+            if action not in {'down', 'up', 'move'}:
+                raise ValueError('鼠标动作无效')
+            payload['action'] = action
+            payload['button'] = value.get('button') if value.get('button') in {'left', 'right', 'middle'} else 'left'
+            payload['clickCount'] = max(1, min(int(value.get('clickCount') or 1), 3))
+        if kind == 'key' and value.get('action') in {'down', 'up', 'press'}:
+            payload['action'] = value.get('action')
+        for key in ('x', 'y', 'dx', 'dy'):
+            if value.get(key) is not None:
+                payload[key] = int(value.get(key))
+        if kind == 'text':
+            text = value.get('text')
+            if not isinstance(text, str) or len(text) > 20000:
+                raise ValueError('输入内容无效')
+            payload['text'] = text
+        if kind == 'key':
+            key = value.get('key')
+            if not isinstance(key, str) or not key or len(key) > 40:
+                raise ValueError('按键无效')
+            payload['key'] = key
+            modifiers = value.get('modifiers')
+            if isinstance(modifiers, list):
+                payload['modifiers'] = [m for m in modifiers if m in {'Control', 'Shift', 'Alt', 'Meta'}][:4]
+        return payload
+
     def browser(self, value):
         user = value.get('user', '')
         if not USER.fullmatch(user):
@@ -706,38 +804,13 @@ class Handler(BaseHTTPRequestHandler):
             wait = max(0.0, min(float(value.get('wait') or 0), 10.0))
             return self.reply(200, item.read(after, wait))
         if self.path == '/browser/input':
-            kind = value.get('kind')
-            if kind not in {'mouse', 'click', 'dblclick', 'move', 'wheel', 'text', 'key'}:
-                return self.reply(422, {'error': '浏览器输入类型无效'})
-            payload = {'kind': kind}
-            if kind == 'mouse':
-                action = value.get('action')
-                if action not in {'down', 'up', 'move'}:
-                    return self.reply(422, {'error': '鼠标动作无效'})
-                payload['action'] = action
-                payload['button'] = value.get('button') if value.get('button') in {'left', 'right', 'middle'} else 'left'
-                payload['clickCount'] = max(1, min(int(value.get('clickCount') or 1), 3))
-            if kind == 'key' and value.get('action') in {'down', 'up', 'press'}:
-                payload['action'] = value.get('action')
-            for key in ('x', 'y', 'dx', 'dy'):
-                if value.get(key) is not None:
-                    payload[key] = int(value.get(key))
-            if kind == 'text':
-                text = value.get('text')
-                if not isinstance(text, str) or len(text) > 20000:
-                    return self.reply(422, {'error': '输入内容无效'})
-                payload['text'] = text
-            if kind == 'key':
-                key = value.get('key')
-                if not isinstance(key, str) or not key or len(key) > 40:
-                    return self.reply(422, {'error': '按键无效'})
-                payload['key'] = key
-                modifiers = value.get('modifiers')
-                if isinstance(modifiers, list):
-                    payload['modifiers'] = [m for m in modifiers if m in {'Control', 'Shift', 'Alt', 'Meta'}][:4]
+            events = value.get('events', [value])
+            if not isinstance(events, list) or not 1 <= len(events) <= 16:
+                return self.reply(422, {'error': '浏览器输入批次无效'})
             try:
-                return self.reply(200, {'ok': True, 'value': item.command('input', 20, **payload)})
-            except ValueError as error:
+                commands = [self.browser_input(event) for event in events]
+                return self.reply(200, {'ok': True, 'value': item.command('inputs', 20, events=commands)})
+            except (ValueError, TypeError) as error:
                 return self.reply(400, {'error': str(error)})
         if self.path == '/browser/navigate':
             action = value.get('action')

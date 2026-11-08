@@ -31,8 +31,9 @@ export async function sandboxStream(path, user, extra) {
   } catch {
     fail(503, '独立沙箱暂时不可用，请稍后重试');
   }
-  if (!response.ok) {
+  if (!response.ok && !(path === '/files/download' && response.status === 416)) {
     const detail = await response.json().catch(() => ({}));
+    if (path === '/files/download' && [404, 422].includes(response.status)) fail(response.status, detail.error);
     fail(response.status === 404 ? 409 : 503, typeof detail.error === 'string' && detail.error ? detail.error : '浏览器画面不可用');
   }
   return { response, abort: () => controller.abort() };

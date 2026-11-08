@@ -185,7 +185,7 @@ export const useWorkspace = defineStore('workspace', {
       tab.note = '';
       const embed = embedKind(tab.name);
       if (embed) {
-        // No text preview for media: the viewer streams the file (15 MiB download cap).
+        // No text preview for media: the viewer streams the file.
         tab.embed = embed;
         tab.embedUrl = `/api/files/download?path=${encodeURIComponent(path)}&inline=1&t=${Date.now()}`;
         tab.binary = true; tab.text = ''; tab.draft = ''; tab.meta = embed === 'pdf' ? 'PDF' : embed === 'video' ? '视频' : '音频';

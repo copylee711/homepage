@@ -22,7 +22,7 @@ const MAX_WIDTH = 1440;
 const MAX_HEIGHT = 1000;
 // Chromium keeps a few frames unacknowledged; acking about 60ms after arrival
 // caps the stream near 16 fps, which is smooth on a page and cheap on one CPU.
-const ACK_PACE_MS = 60;
+const ACK_PACE_MS = 34;
 
 let browser = null;
 let context = null;
@@ -273,6 +273,10 @@ async function handle(command) {
     return { width: viewport.width, height: viewport.height };
   }
   if (op === 'input') return input(command);
+  if (op === 'inputs') {
+    for (const event of command.events) await input(event);
+    return {};
+  }
   if (op === 'text') {
     return { text: String(await page.evaluate(() => document.body?.innerText || '')).slice(0, 200000) };
   }
@@ -298,9 +302,9 @@ async function start() {
     viewport, deviceScaleFactor: 1, locale: 'zh-CN', timezoneId: 'Asia/Shanghai',
     acceptDownloads: false, javaScriptEnabled: true,
   });
-  context.on('page', target => { attach(target); });
   const first = await context.newPage();
   attach(first);
+  context.on('page', target => { attach(target); });
   await first.goto('about:blank');
   history.stack = [];
   history.index = -1;

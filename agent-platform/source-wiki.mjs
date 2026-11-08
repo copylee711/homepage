@@ -3,6 +3,20 @@ import { randomUUID } from 'node:crypto';
 import { fail } from './shared.mjs';
 
 export const WIKI_TOPICS = ['news', 'llm', 'github', 'images', 'mathematics', 'physics', 'biology'];
+const topicDescription = {
+  news: '时事新闻 今日热点 world news current events',
+  llm: '大模型榜单 LLM AI benchmark model rankings',
+  github: '开源项目 GitHub 热门仓库 trending repositories',
+  images: '通用图库 照片 illustrations stock photography image search',
+  mathematics: '数学 公式 图解 微积分 概率 几何 mathematics calculus geometry probability',
+  physics: '物理 电磁学 力学 光学 physics electromagnetism mechanics optics',
+  biology: '生物 细胞 基因 蛋白质 biology cells genes proteins',
+};
+function unitVector(vector) {
+  if (!Array.isArray(vector) || !vector.length || vector.length > 4096 || !vector.every(Number.isFinite)) return null;
+  const norm = Math.hypot(...vector);
+  return norm > 0 && Number.isFinite(norm) ? vector.map(value => value / norm) : null;
+}
 const builtins = [
   ['news', 'Reuters World', 'https://www.reuters.com/world/'],
   ['news', 'Associated Press', 'https://apnews.com/world-news'],
@@ -46,12 +60,13 @@ export function discoveredSource(topic, url) {
   catch { return null; }
 }
 
-const initial = () => ({ revision: 0, auto: false, knownBuiltins: builtins.map(key), sources: builtins.map(source => ({ ...source })) });
+const initial = () => ({ revision: 0, auto: false, semantic: false, knownBuiltins: builtins.map(key), sources: builtins.map(source => ({ ...source })) });
 
 export class SourceWiki {
   constructor(root = '/data/source-wiki') {
     this.root = root;
     this.queue = new Map();
+    this.vectors = new Map();
   }
   file(user) {
     if (!/^[a-f0-9]{64}$/.test(user)) fail(422, '用户标识无效');
@@ -98,8 +113,45 @@ export class SourceWiki {
       const suppressed = new Set(current.suppressed || []);
       for (const source of current.sources) if (!retained.has(key(source))) suppressed.add(key(source));
       for (const id of retained) suppressed.delete(id);
-      return { ...current, auto: input.auto === true, sources, suppressed: [...suppressed].slice(-320) };
+      return { ...current, auto: input.auto === true, semantic: input.semantic === true, sources, suppressed: [...suppressed].slice(-320) };
     });
+  }
+  get semanticAvailable() {
+    return Boolean(process.env.WIKI_EMBEDDING_URL && process.env.WIKI_EMBEDDING_MODEL && process.env.WIKI_EMBEDDING_KEY);
+  }
+
+  async semanticMatch(user, snapshot, prompt) {
+    if (!this.semanticAvailable || !snapshot.semantic || typeof prompt !== 'string' || !prompt.trim()) return [];
+    const endpoint = new URL(process.env.WIKI_EMBEDDING_URL);
+    if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password) return [];
+    const model = process.env.WIKI_EMBEDDING_MODEL;
+    const sources = snapshot.sources.filter(source => source.enabled && (source.failures || 0) < 3);
+    if (!sources.length) return [];
+    const descriptions = sources.map(source => `${topicDescription[source.topic]} | ${source.title} | ${source.url}`);
+    const fingerprint = JSON.stringify([endpoint.href, model, descriptions]);
+    const cached = this.vectors.get(user);
+    const index = cached?.fingerprint === fingerprint ? cached.vectors : null;
+    const query = prompt.trim().slice(0, 1800);
+    const input = index ? [query] : [query, ...descriptions];
+    const response = await fetch(endpoint, {
+      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(1200),
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + process.env.WIKI_EMBEDDING_KEY },
+      body: JSON.stringify({ model, input, encoding_format: 'float' }),
+    });
+    if (!response.ok) return [];
+    const result = await response.json();
+    if (!Array.isArray(result.data) || result.data.length !== input.length) return [];
+    const vectors = input.map((_, i) => unitVector(result.data.find(item => item.index === i)?.embedding));
+    const [queryVector, ...built] = vectors;
+    const sourceVectors = index || built;
+    if (!queryVector || sourceVectors.some(vector => vector?.length !== queryVector.length)) return [];
+    if (!index) {
+      if (this.vectors.size >= 16) this.vectors.delete(this.vectors.keys().next().value);
+      this.vectors.set(user, { fingerprint, vectors: built });
+    }
+    return sources.map((source, i) => ({
+      source, score: sourceVectors[i].reduce((sum, value, j) => sum + value * queryVector[j], 0),
+    })).filter(item => item.score >= 0.42).sort((a, b) => b.score - a.score).slice(0, 4).map(item => item.source);
   }
   maintain(user, proposals, checks, revision) {
     return this.update(user, current => {

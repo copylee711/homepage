@@ -8,6 +8,20 @@ const runner = createServer(async (req, res) => {
   let raw = ''; for await (const chunk of req) raw += chunk;
   lastRunner = { path: req.url, value: JSON.parse(raw) };
   if (req.url === '/prompt') lastPrompt = lastRunner.value;
+  if (req.url === '/files/download') {
+    const size = 40 * 1024 * 1024;
+    const range = lastRunner.value.range;
+    const length = range ? 8 : size;
+    const headers = { 'Accept-Ranges': 'bytes', 'Content-Length': length };
+    if (range) headers['Content-Range'] = `bytes 0-7/${size}`;
+    res.writeHead(range ? 206 : 200, headers);
+    res.write('%PDF-1.7');
+    const block = Buffer.alloc(64 * 1024);
+    for (let remaining = length - 8; remaining > 0; remaining -= block.length) {
+      if (!res.write(block.subarray(0, remaining))) await new Promise(resolve => res.once('drain', resolve));
+    }
+    return res.end();
+  }
   assert.equal(req.headers['x-runner-secret'], 'b'.repeat(64));
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify(req.url === '/model' ? { label: 'DeepSeek V4.1 Flash' } : { ok: true, entries: [] }));
@@ -155,4 +169,21 @@ test('chat list forwards only the optional paging parameters to the runner', asy
   assert.equal(lastRunner.path, '/chats'); assert.equal('limit' in lastRunner.value, false); assert.equal('cursor' in lastRunner.value, false);
   assert.equal((await fetch(base + '/api/chats?limit=20&cursor=40&user=evil', { headers: { cookie } })).status, 200);
   assert.equal(lastRunner.value.limit, '20'); assert.equal(lastRunner.value.cursor, '40'); assert.notEqual(lastRunner.value.user, 'evil');
+});
+
+test('workspace PDF streams past 15 MiB and accepts byte ranges in its same-origin frame', async () => {
+  const headers = { cookie: 'copylee_ai=' + 't'.repeat(64) };
+  const url = base + '/api/files/download?path=default%2F%E6%B5%8B%E8%AF%95.pdf';
+  const response = await fetch(url, { headers });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-disposition'), /^attachment;/);
+  let bytes = 0;
+  for await (const chunk of response.body) bytes += chunk.length;
+  assert.equal(bytes, 40 * 1024 * 1024);
+  const preview = await fetch(url + '&inline=1', { headers: { ...headers, Range: 'bytes=0-7' } });
+  assert.equal(preview.status, 206);
+  assert.equal(preview.headers.get('content-type'), 'application/pdf');
+  assert.equal(preview.headers.get('x-frame-options'), 'SAMEORIGIN');
+  assert.equal(preview.headers.get('content-range'), 'bytes 0-7/41943040');
+  assert.equal(await preview.text(), '%PDF-1.7');
 });

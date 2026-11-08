@@ -4,7 +4,7 @@ import { get, post } from '../../services/api';
 import SelectMenu from '../SelectMenu.vue';
 
 type Source = { topic: string; title: string; url: string; origin: string; enabled: boolean; failures?: number; retry?: boolean };
-type Directory = { revision: number; auto: boolean; sources: Source[] };
+type Directory = { revision: number; auto: boolean; semantic?: boolean; semanticAvailable?: boolean; sources: Source[] };
 const topics = [
   { value: 'news', label: '新闻' }, { value: 'llm', label: '模型榜单' },
   { value: 'github', label: 'GitHub 趋势' }, { value: 'images', label: '通用图库' },
@@ -71,6 +71,11 @@ async function save() {
         <input id="wiki-auto" v-model="directory.auto" type="checkbox" :disabled="!editing || busy" />
       </div>
       <p class="question-hint">利用任务已访问的来源。连续三次访问失败会标记待核查，并从 Agent 的推荐中暂时移除。</p>
+      <div class="setting-row">
+        <label for="wiki-semantic">发送消息时检索相似来源</label>
+        <input id="wiki-semantic" v-model="directory.semantic" type="checkbox" :disabled="!editing || busy || !directory.semanticAvailable" />
+      </div>
+      <p class="question-hint">{{ directory.semanticAvailable ? '开启后，会将本轮消息的前 1800 字符和已启用的来源目录交给配置的向量服务。超时会回退到主题匹配。' : '服务器尚未配置向量服务，当前使用主题匹配。' }}</p>
       <p v-if="!rows.length" class="question-hint">此主题暂无来源。</p>
       <div v-for="(source, i) in rows" :key="i" class="source-wiki-row">
         <template v-if="editing">

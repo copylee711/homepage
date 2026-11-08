@@ -73,12 +73,25 @@ function palette() {
   };
 }
 
+let inputQueued = false;
 function flush() {
   if (pendingTimer != null) { clearTimeout(pendingTimer); pendingTimer = null; }
-  if (!pending) return;
-  const data = toBase64(encoder.encode(pending));
-  pending = '';
-  writes = writes.then(() => post('/api/terminal/write', { data })).catch(() => {});
+  if (!pending || !running || inputQueued) return;
+  inputQueued = true;
+  const gen = generation;
+  writes = writes.then(async () => {
+    if (!pending || !running || generation !== gen) return;
+    let end = Math.min(pending.length, 32000);
+    if (end < pending.length && /[\uD800-\uDBFF]/.test(pending[end - 1])) end--;
+    const chunk = pending.slice(0, end);
+    pending = pending.slice(end);
+    await post('/api/terminal/write', { data: toBase64(encoder.encode(chunk)) });
+  }).catch(error => {
+    if (generation === gen) useUi().toast(error?.message || '终端输入未送达', { tone: 'error' });
+  }).finally(() => {
+    inputQueued = false;
+    if (running && pending) flush();
+  });
 }
 
 function sendResize() {
@@ -167,6 +180,7 @@ async function pump(gen: number) {
 async function open(): Promise<boolean> {
   if (!term) return false;
   const gen = ++generation;
+  pending = '';
   phase.value = 'connecting';
   detail.value = '';
   try {
