@@ -442,6 +442,33 @@ export function devMock() {
           mockBrowser.keys = 0;
           return send({ ok: true, width: mockBrowser.width, height: mockBrowser.height });
         }
+        if (path === '/api/browser/stream') {
+          if (!mockBrowser.open) return send({ error: '浏览器未打开' }, 409);
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          let seq = Math.max(0, Number(body.after) || 0);
+          let stopped = false;
+          let timer = null;
+          const stop = () => { stopped = true; if (timer) clearTimeout(timer); };
+          req.on('close', stop);
+          const emit = () => {
+            if (stopped) return;
+            seq += 1;
+            const frame = {
+              seq, mime: 'image/png', data: mockBrowserPng().toString('base64'),
+              url: mockBrowser.url, title: mockBrowser.title,
+              width: mockBrowser.width, height: mockBrowser.height,
+              canBack: mockBrowser.index > 0,
+              canForward: mockBrowser.index >= 0 && mockBrowser.index < mockBrowser.history.length - 1,
+              loading: false,
+            };
+            res.write(JSON.stringify({ type: 'frame', frame }) + '\n');
+            timer = setTimeout(emit, 900);
+          };
+          emit();
+          return;
+        }
         if (path === '/api/browser/frame') {
           if (!mockBrowser.open) return send({ closed: true, error: '浏览器已关闭', seq: 0, frame: null });
           const after = Math.max(0, Number(body.after) || 0);
@@ -463,6 +490,7 @@ export function devMock() {
           });
         }
         if (path === '/api/browser/input') {
+          if (body.kind === 'mouse' && body.action === 'down') mockBrowser.clicks.push({ x: Number(body.x) || 0, y: Number(body.y) || 0 });
           if (body.kind === 'click' || body.kind === 'dblclick') mockBrowser.clicks.push({ x: Number(body.x) || 0, y: Number(body.y) || 0 });
           if (body.kind === 'text') mockBrowser.keys += String(body.text || '').length;
           if (body.kind === 'key') mockBrowser.keys += 1;
@@ -583,6 +611,27 @@ export function devMock() {
             return send({ ok: true });
           }
           if (!term) return send({ error: '终端未打开' }, 404);
+          if (path === '/api/terminal/stream') {
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-store');
+            let sent = Math.max(0, Number(body.after) || 0);
+            let stopped = false;
+            const timer = setInterval(() => {
+              if (stopped) return;
+              const bytes = Buffer.from(term.buffer || '', 'utf8');
+              if (bytes.length > sent) {
+                const slice = bytes.subarray(Math.min(sent, bytes.length));
+                sent = bytes.length;
+                res.write(JSON.stringify({ type: 'data', data: slice.toString('base64'), cursor: sent, base: 0 }) + '\n');
+              } else if (bytes.length < sent) {
+                sent = bytes.length;
+                res.write(JSON.stringify({ type: 'data', data: '', cursor: sent, base: 0 }) + '\n');
+              }
+            }, 80);
+            req.on('close', () => { stopped = true; clearInterval(timer); });
+            return;
+          }
           if (path === '/api/terminal/write') {
             const text = Buffer.from(String(body.data || ''), 'base64').toString('utf8');
             for (const ch of text) {

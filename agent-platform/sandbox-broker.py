@@ -658,6 +658,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(413, {'error': '输入过大'})
             ok = item.write(base64.b64decode(data)) if data else True
             return self.reply(200, {'ok': ok})
+        if self.path == '/pty/stream':
+            return self.pty_stream(item, int(value.get('after') or 0))
         if self.path == '/pty/read':
             return self.reply(200, item.read(int(value.get('after') or 0), float(value.get('wait') or 0)))
         if self.path == '/pty/close':
@@ -697,15 +699,26 @@ class Handler(BaseHTTPRequestHandler):
             item = browsers.get(user)
         if not item:
             return self.reply(404, {'error': '浏览器未打开'})
-        if self.path == '/browser/frame':
+        if self.path in {'/browser/stream', '/browser/frame'}:
             after = max(0, int(value.get('after') or 0))
+            if self.path == '/browser/stream':
+                return self.browser_stream(item, after)
             wait = max(0.0, min(float(value.get('wait') or 0), 10.0))
             return self.reply(200, item.read(after, wait))
         if self.path == '/browser/input':
             kind = value.get('kind')
-            if kind not in {'click', 'dblclick', 'move', 'wheel', 'text', 'key'}:
+            if kind not in {'mouse', 'click', 'dblclick', 'move', 'wheel', 'text', 'key'}:
                 return self.reply(422, {'error': '浏览器输入类型无效'})
             payload = {'kind': kind}
+            if kind == 'mouse':
+                action = value.get('action')
+                if action not in {'down', 'up', 'move'}:
+                    return self.reply(422, {'error': '鼠标动作无效'})
+                payload['action'] = action
+                payload['button'] = value.get('button') if value.get('button') in {'left', 'right', 'middle'} else 'left'
+                payload['clickCount'] = max(1, min(int(value.get('clickCount') or 1), 3))
+            if kind == 'key' and value.get('action') in {'down', 'up', 'press'}:
+                payload['action'] = value.get('action')
             for key in ('x', 'y', 'dx', 'dy'):
                 if value.get(key) is not None:
                     payload[key] = int(value.get(key))
@@ -747,6 +760,76 @@ class Handler(BaseHTTPRequestHandler):
             close_browser(user)
             return self.reply(200, {'ok': True})
         return self.reply(404, {'error': '接口不存在'})
+
+    def pty_stream(self, item, after):
+        # Terminal output follows the same shape as the browser: one open
+        # response, pushed chunks, no per-keystroke round trip to poll.
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/x-ndjson; charset=utf-8')
+        self.send_header('Cache-Control', 'no-store, no-transform')
+        self.send_header('X-Accel-Buffering', 'no')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        self.close_connection = True
+        deadline = time.monotonic() + 120
+        last_ping = time.monotonic()
+        try:
+            while time.monotonic() < deadline:
+                payload = item.read(after, 1.0)
+                cursor = int(payload.get('cursor') or 0)
+                if payload.get('data'):
+                    if cursor <= after:
+                        cursor = after + 1
+                    line = json.dumps({'type': 'data', 'data': payload['data'], 'cursor': cursor,
+                                       'base': payload.get('base', 0)}, ensure_ascii=False).encode() + b'\n'
+                    self.wfile.write(line)
+                    self.wfile.flush()
+                    after = cursor
+                    last_ping = time.monotonic()
+                elif cursor > after:
+                    after = cursor
+                if payload.get('closed'):
+                    self.wfile.write(b'{"type":"closed"}\n')
+                    self.wfile.flush()
+                    return
+                if time.monotonic() - last_ping >= 5.0:
+                    last_ping = time.monotonic()
+                    self.wfile.write(b'{"type":"ping"}\n')
+                    self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+
+    def browser_stream(self, item, after):
+        # One long response carries every frame the page produces, the way a
+        # remote-desktop viewer works. Frames are acknowledged by Chromium only
+        # after they leave this socket, so the browser never outruns the client.
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/x-ndjson; charset=utf-8')
+        self.send_header('Cache-Control', 'no-store, no-transform')
+        self.send_header('X-Accel-Buffering', 'no')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        self.close_connection = True
+        deadline = time.monotonic() + 120
+        last_ping = 0.0
+        try:
+            while time.monotonic() < deadline:
+                payload = item.read(after, 1.0)
+                if payload.get('closed'):
+                    self.wfile.write(b'{"type":"closed"}\n')
+                    self.wfile.flush()
+                    return
+                frame = payload.get('frame')
+                if frame and int(payload.get('seq') or 0) > after:
+                    after = int(payload['seq'])
+                    self.wfile.write(json.dumps({'type': 'frame', 'frame': frame}, ensure_ascii=False).encode() + b'\n')
+                    self.wfile.flush()
+                elif time.monotonic() - last_ping >= 1.0:
+                    last_ping = time.monotonic()
+                    self.wfile.write(b'{"type":"ping"}\n')
+                    self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
 
     def reply(self, status, value):
         data = json.dumps(value, ensure_ascii=False).encode()

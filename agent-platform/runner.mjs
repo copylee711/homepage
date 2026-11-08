@@ -7,6 +7,7 @@ import { MemoryStore, memoryContext } from './memory.mjs';
 import { requiresApproval, EXECUTION_MODES } from './execution-policy.mjs';
 import { streamEvent } from './stream-wire.mjs';
 import { createServer } from 'node:http';
+import { Readable } from 'node:stream';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { appendFile, mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
@@ -15,7 +16,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { body, equal, fail, json, modelLabel, required } from './shared.mjs';
 import { TurnFanout } from './turn-stream.mjs';
 import { publicProviders, saveProvider, deleteProvider, activeProvider, activateProvider, testProvider, discoverProviderModels, proxyEnvironment, loadProviders, refreshModelsJson, syncProviderFiles } from './providers.mjs';
-import { sandbox, sandboxTool } from './sandbox-client.mjs';
+import { sandbox, sandboxStream, sandboxTool } from './sandbox-client.mjs';
 import { sessionCapacity } from './session-limits.mjs';
 import { prepareSessionCwd } from './session-cwd.mjs';
 import { usageSummary, sessionUsageStats } from './usage.mjs';
@@ -889,6 +890,17 @@ export const server = createServer(async (req, res) => {
       const wait = Math.max(0, Math.min(Number(input.wait) || 0, 10));
       return json(res, 200, await sandbox('/pty/read', input.user, undefined, null, { after, wait }));
     }
+    if (req.url === '/terminal/stream') {
+      const after = Math.max(0, Number(input.after) || 0);
+      const { response: upstream, abort } = await sandboxStream('/pty/stream', input.user, { after });
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store, no-transform', 'X-Accel-Buffering': 'no' });
+      const stream = Readable.fromWeb(upstream.body);
+      const stop = () => { try { stream.destroy(); } catch {} try { abort(); } catch {} };
+      stream.on('error', stop);
+      res.on('close', stop);
+      stream.pipe(res);
+      return;
+    }
     if (req.url === '/terminal/close') {
       return json(res, 200, await sandbox('/pty/close', input.user, undefined, null, {}));
     }
@@ -901,10 +913,21 @@ export const server = createServer(async (req, res) => {
       const result = await sandbox('/browser/open', input.user, undefined, null, { width, height }, 70000);
       return json(res, 200, result);
     }
-    if (req.url === '/browser/frame') {
+    // One long response carries every frame the page paints, the way a remote
+    // desktop viewer streams its screen, instead of a request per picture.
+    if (req.url === '/browser/stream') {
       const after = Math.max(0, Number(input.after) || 0);
-      const wait = Math.max(0, Math.min(Number(input.wait) || 0, 8));
-      return json(res, 200, await sandbox('/browser/frame', input.user, undefined, null, { after, wait }, 25000));
+      const { response: upstream, abort } = await sandboxStream('/browser/stream', input.user, { after });
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store, no-transform', 'X-Accel-Buffering': 'no' });
+      const stream = Readable.fromWeb(upstream.body);
+      const stop = () => {
+        try { stream.destroy(); } catch {}
+        try { abort(); } catch {}
+      };
+      stream.on('error', stop);
+      res.on('close', stop);
+      stream.pipe(res);
+      return;
     }
     if (req.url === '/browser/input') {
       const kind = String(input.kind || '');

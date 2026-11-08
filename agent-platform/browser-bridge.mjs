@@ -1,11 +1,15 @@
-// Runs inside the user's disposable browser container. Plays the part the PTY
-// helper plays for the terminal: it drives one real Chromium page with
-// Playwright and talks to the host broker over newline-delimited JSON on
-// stdin/stdout, so no network port is ever exposed to the sandbox.
+// Runs inside the user's disposable browser container and drives one real
+// Chromium page with Playwright. It talks to the host broker over
+// newline-delimited JSON on stdin/stdout, so no port is ever exposed.
+//
+// The picture follows the approach used by noVNC-style remote desktops: the
+// page pushes a frame whenever it actually changed (CDP screencast), each frame
+// is acknowledged before the next one is produced, and input is applied the
+// moment it arrives instead of being polled for.
 //
 // Host -> here:  {"id":7,"op":"goto","url":"https://example.com/"}
 // Here -> host:  {"type":"result","id":7,"ok":true,"value":{...}}
-//                {"type":"frame","seq":12,"data":"<base64 jpeg>","url":...,"title":...}
+//                {"type":"frame","seq":12,"mime":"image/jpeg","data":"<base64>"}
 import { createHash } from 'node:crypto';
 
 let chromium = null;
@@ -13,20 +17,18 @@ for (const candidate of ['playwright-core', '/usr/local/lib/node_modules/playwri
   try { ({ chromium } = await import(candidate)); break; } catch {}
 }
 
-const JPEG_QUALITY = 58;
-const FRAME_IDLE_MS = 2500;   // nobody is watching: keep the tab alive, cheaply
-const FRAME_WATCH_MS = 300;   // a pane is polling: near live video
-const WATCH_WINDOW_MS = 5000;
+const QUALITY = 62;
+const MAX_WIDTH = 1440;
+const MAX_HEIGHT = 1000;
 
 let browser = null;
 let context = null;
 let page = null;
+let cdp = null;
 let viewport = { width: 1280, height: 800 };
 let seq = 0;
 let lastHash = '';
-let watchUntil = 0;
 let closed = false;
-let pendingFrame = false;
 let navigating = false;
 let cachedTitle = '';
 let ready = null;
@@ -63,10 +65,6 @@ function cleanUrl(raw) {
   return url.href;
 }
 
-function isBlank(text) {
-  return !text || text === 'about:blank';
-}
-
 function pageUrl() {
   try { return page ? page.url() : ''; } catch { return ''; }
 }
@@ -76,12 +74,6 @@ async function pageTitle() {
     cachedTitle = await Promise.race([page.title(), new Promise(r => setTimeout(() => r(''), 800))]) || '';
   } catch { cachedTitle = ''; }
   return cachedTitle;
-}
-
-// A polling pane keeps the frame loop at video rate; otherwise it drops back
-// so an idle tab costs almost nothing.
-function watch() {
-  watchUntil = Date.now() + WATCH_WINDOW_MS;
 }
 
 function trackNavigation(url, mode) {
@@ -95,86 +87,172 @@ function trackNavigation(url, mode) {
   history.index = history.stack.length - 1;
 }
 
+async function emitFrame(base64, width, height) {
+  const hash = createHash('sha1').update(base64).digest('hex');
+  if (hash === lastHash) return;
+  lastHash = hash;
+  seq += 1;
+  await send({
+    type: 'frame',
+    seq,
+    mime: 'image/jpeg',
+    data: base64,
+    url: pageUrl(),
+    title: cachedTitle,
+    width: width || viewport.width,
+    height: height || viewport.height,
+    canBack: history.index > 0,
+    canForward: history.index >= 0 && history.index < history.stack.length - 1,
+    loading: navigating,
+  });
+}
+
+async function startScreencast() {
+  const session = await context.newCDPSession(page);
+  cdp = session;
+  session.on('Page.screencastFrame', async params => {
+    try { await session.send('Page.screencastFrameAck', { sessionId: params.sessionId }); } catch {}
+    if (closed || session !== cdp) return;
+    const width = Number(params.metadata?.deviceWidth) || viewport.width;
+    const height = Number(params.metadata?.deviceHeight) || viewport.height;
+    await emitFrame(params.data, width, height);
+  });
+  await session.send('Page.enable');
+  await session.send('Page.startScreencast', {
+    format: 'jpeg',
+    quality: QUALITY,
+    maxWidth: Math.min(MAX_WIDTH, viewport.width),
+    maxHeight: Math.min(MAX_HEIGHT, viewport.height),
+    everyNthFrame: 1,
+  });
+}
+
+async function restartScreencast() {
+  try { await cdp?.send('Page.stopScreencast'); } catch {}
+  try { await cdp?.detach(); } catch {}
+  cdp = null;
+  lastHash = '';
+  try { await startScreencast(); } catch {}
+}
+
 function attach(target) {
   page = target;
   cachedTitle = '';
   target.on('framenavigated', frame => {
-    if (frame === target.mainFrame()) { watch(); void pageTitle(); }
+    if (frame === target.mainFrame()) { void pageTitle(); }
   });
-  target.on('load', () => { navigating = false; watch(); void pageTitle(); });
-  target.on('domcontentloaded', () => { watch(); });
-  target.on('close', () => { watch(); });
-  watch();
-}
-
-async function frameLoop() {
-  while (!closed) {
-    const interval = Date.now() < watchUntil ? FRAME_WATCH_MS : FRAME_IDLE_MS;
-    await new Promise(resolve => setTimeout(resolve, interval));
-    if (closed || !page || pendingFrame || page.isClosed()) continue;
-    pendingFrame = true;
-    try {
-      const data = await page.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, scale: 'css', timeout: 5000 });
-      const hash = createHash('sha1').update(data).digest('hex');
-      if (hash === lastHash) continue;
-      lastHash = hash;
-      seq += 1;
-      await send({
-        type: 'frame',
-        seq,
-        mime: 'image/jpeg',
-        data: data.toString('base64'),
-        url: pageUrl(),
-        title: cachedTitle,
-        width: viewport.width,
-        height: viewport.height,
-        canBack: history.index > 0,
-        canForward: history.index >= 0 && history.index < history.stack.length - 1,
-        loading: navigating,
-      });
-    } catch {
-      // A screenshot during navigation or a closed tab is not an error.
-    } finally {
-      pendingFrame = false;
-    }
-  }
+  target.on('load', () => { navigating = false; void pageTitle(); });
+  target.on('close', () => { if (page === target) { page = context?.pages()[0] || null; } });
+  void restartScreencast();
 }
 
 async function navigate(url, waitUntil = 'domcontentloaded') {
   const target = cleanUrl(url);
   if (!page || page.isClosed()) throw new Error('浏览器页面已关闭');
   navigating = true;
-  watch();
   const response = await page.goto(target, { waitUntil, timeout: 30000 });
   trackNavigation(pageUrl(), 'goto');
   navigating = false;
-  watch();
   return { url: pageUrl(), title: await pageTitle(), status: response ? response.status() : 0 };
+}
+
+function keyName(raw) {
+  const key = String(raw || '');
+  if (key === ' ') return 'Space';
+  if (key === 'Esc') return 'Escape';
+  if (key === 'Del') return 'Delete';
+  return key;
+}
+
+async function input(command) {
+  const kind = String(command.kind || '');
+  const x = Math.max(0, Math.min(viewport.width, Math.round(Number(command.x) || 0)));
+  const y = Math.max(0, Math.min(viewport.height, Math.round(Number(command.y) || 0)));
+  const button = ['right', 'middle'].includes(command.button) ? command.button : 'left';
+  if (kind === 'mouse') {
+    const action = String(command.action || '');
+    if (action === 'move') {
+      await page.mouse.move(x, y);
+      return {};
+    }
+    if (action === 'down') {
+      await page.mouse.move(x, y);
+      await page.mouse.down({ button, clickCount: Math.max(1, Math.min(3, Number(command.clickCount) || 1)) });
+      return {};
+    }
+    if (action === 'up') {
+      await page.mouse.up({ button, clickCount: Math.max(1, Math.min(3, Number(command.clickCount) || 1)) });
+      return {};
+    }
+    throw new Error('鼠标动作无效');
+  }
+  if (kind === 'click' || kind === 'dblclick') {
+    await page.mouse.click(x, y, { button, clickCount: kind === 'dblclick' ? 2 : 1 });
+    return {};
+  }
+  if (kind === 'wheel') {
+    const dx = Math.max(-4000, Math.min(4000, Number(command.dx) || 0));
+    const dy = Math.max(-4000, Math.min(4000, Number(command.dy) || 0));
+    await page.mouse.move(x, y);
+    await page.mouse.wheel(dx, dy);
+    return {};
+  }
+  if (kind === 'text') {
+    const text = String(command.text || '');
+    if (!text) return {};
+    if (text.length > 20000) throw new Error('输入内容过长');
+    // Long blocks (pasted text) go in as one edit; typing keeps key events.
+    if (text.length > 60) await page.keyboard.insertText(text);
+    else await page.keyboard.type(text, { delay: 0 });
+    return {};
+  }
+  if (kind === 'key') {
+    const key = keyName(command.key);
+    if (!key) return {};
+    const action = String(command.action || 'press');
+    const modifiers = Array.isArray(command.modifiers)
+      ? command.modifiers.filter(m => ['Control', 'Shift', 'Alt', 'Meta'].includes(m)) : [];
+    if (action === 'down' || action === 'up') {
+      if (['Control', 'Shift', 'Alt', 'Meta'].includes(key)) {
+        if (action === 'down') await page.keyboard.down(key); else await page.keyboard.up(key);
+        return {};
+      }
+      for (const modifier of modifiers.slice().reverse()) await page.keyboard.down(modifier);
+      try {
+        if (action === 'down') await page.keyboard.down(key); else await page.keyboard.up(key);
+      } finally {
+        for (const modifier of modifiers) await page.keyboard.up(modifier);
+      }
+      return {};
+    }
+    for (const modifier of modifiers) await page.keyboard.down(modifier);
+    try { await page.keyboard.press(key); } finally {
+      for (const modifier of [...modifiers].reverse()) await page.keyboard.up(modifier);
+    }
+    return {};
+  }
+  throw new Error('浏览器输入类型无效');
 }
 
 async function handle(command) {
   const op = String(command.op || '');
-  if (op === 'watch') { watch(); return { ok: true }; }
   if (op === 'state') {
     return { url: pageUrl(), title: await pageTitle(), width: viewport.width, height: viewport.height,
       canBack: history.index > 0, canForward: history.index >= 0 && history.index < history.stack.length - 1 };
   }
   if (op === 'goto' || op === 'open') return navigate(command.url);
   if (op === 'back') {
-    watch();
     await page.goBack({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
     trackNavigation(pageUrl(), 'back');
     return { url: pageUrl(), title: await pageTitle() };
   }
   if (op === 'forward') {
-    watch();
     await page.goForward({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
     trackNavigation(pageUrl(), 'forward');
     return { url: pageUrl(), title: await pageTitle() };
   }
   if (op === 'reload') {
     navigating = true;
-    watch();
     await page.reload({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
     navigating = false;
     return { url: pageUrl(), title: await pageTitle() };
@@ -185,53 +263,14 @@ async function handle(command) {
       height: Math.max(320, Math.min(1400, Math.round(Number(command.height) || viewport.height))),
     };
     await page.setViewportSize(viewport);
-    watch();
+    await restartScreencast();
     return { width: viewport.width, height: viewport.height };
   }
   if (op === 'input') return input(command);
   if (op === 'text') {
-    // The readable text of the page, for the "复制正文" action.
     return { text: String(await page.evaluate(() => document.body?.innerText || '')).slice(0, 200000) };
   }
   throw new Error('浏览器操作无效');
-}
-
-async function input(command) {
-  watch();
-  const kind = String(command.kind || '');
-  const x = Math.max(0, Math.min(viewport.width, Math.round(Number(command.x) || 0)));
-  const y = Math.max(0, Math.min(viewport.height, Math.round(Number(command.y) || 0)));
-  if (kind === 'click' || kind === 'dblclick') {
-    await page.mouse.click(x, y, { button: 'left', clickCount: kind === 'dblclick' ? 2 : 1 });
-    return { x, y };
-  }
-  if (kind === 'move') { await page.mouse.move(x, y); return { x, y }; }
-  if (kind === 'wheel') {
-    const dx = Math.max(-4000, Math.min(4000, Number(command.dx) || 0));
-    const dy = Math.max(-4000, Math.min(4000, Number(command.dy) || 0));
-    await page.mouse.move(x, y);
-    await page.mouse.wheel(dx, dy);
-    return { x, y };
-  }
-  if (kind === 'text') {
-    const text = String(command.text || '');
-    if (!text) return {};
-    if (text.length > 20000) throw new Error('输入内容过长');
-    await page.keyboard.type(text, { delay: 0 });
-    return {};
-  }
-  if (kind === 'key') {
-    const key = String(command.key || '').slice(0, 40);
-    if (!key) return {};
-    const modifiers = Array.isArray(command.modifiers)
-      ? command.modifiers.filter(m => ['Control', 'Shift', 'Alt', 'Meta'].includes(m)) : [];
-    for (const modifier of modifiers) await page.keyboard.down(modifier);
-    try { await page.keyboard.press(key); } finally {
-      for (const modifier of [...modifiers].reverse()) await page.keyboard.up(modifier);
-    }
-    return {};
-  }
-  throw new Error('浏览器输入类型无效');
 }
 
 async function start() {
@@ -245,7 +284,7 @@ async function start() {
     '--mute-audio', '--no-first-run', '--no-default-browser-check', '--disable-sync',
     '--disable-background-networking', '--disable-features=Translate,MediaRouter',
     '--renderer-process-limit=2', '--js-flags=--max-old-space-size=192',
-    '--force-device-scale-factor=1', '--lang=zh-CN',
+    '--force-device-scale-factor=1', '--lang=zh-CN', '--hide-scrollbars=false',
   ];
   if (proxy) args.push('--proxy-server=' + proxy);
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', args, timeout: 45000 });
@@ -260,7 +299,6 @@ async function start() {
   history.stack = [];
   history.index = -1;
   await send({ type: 'ready', width: viewport.width, height: viewport.height });
-  void frameLoop();
 }
 
 async function stop() {

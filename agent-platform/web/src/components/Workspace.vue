@@ -124,6 +124,15 @@ function toggleBrowser() {
   }
 }
 
+// Both panes can take the whole viewport: a real page and a real shell are
+// unreadable in a 600px column.
+const fullscreen = ref<'terminal' | 'browser' | null>(null);
+function togglePaneFullscreen(pane: 'terminal' | 'browser') {
+  fullscreen.value = fullscreen.value === pane ? null : pane;
+  void nextTick(() => { if (pane === 'terminal') termRef.value?.fitPane(); });
+}
+watch(fullscreen, value => { if (value !== 'browser' && value !== 'terminal') termRef.value?.fitPane(); });
+
 const activeFileTab = computed<OpenFileTab | null>(() => {
   if (ws.activeTab === FILES_TAB || ws.activeTab === TERMINAL_TAB || ws.activeTab === BROWSER_TAB) {
     if (isDual.value && ws.activeTab === FILES_TAB) {
@@ -838,13 +847,25 @@ onMounted(() => {
       </div>
 
       <!-- Terminal Pane: a real PTY inside the sandbox -->
-      <section v-show="isTerminalActive" class="ws-terminal-pane">
+      <section v-show="isTerminalActive" class="ws-terminal-pane" :class="{ 'is-fullscreen': fullscreen === 'terminal' }">
         <header class="ws-term-bar">
           <div class="ws-term-meta">
             <span class="ws-term-title"><Icon name="terminal" :size="13" /> 终端</span>
             <span class="ws-term-project">/workspace/{{ session.currentProjectId || 'default' }}</span>
           </div>
           <div class="ws-term-tools">
+            <button type="button" class="icon-button mini" title="粘贴剪贴板" aria-label="粘贴" @click="termRef?.paste()">
+              <Icon name="clipboard" :size="13" />
+            </button>
+            <button type="button" class="icon-button mini" title="复制选中内容" aria-label="复制选中内容" @click="termRef?.copySelection()">
+              <Icon name="copy" :size="13" />
+            </button>
+            <button type="button" class="icon-button mini" title="缩小字号" aria-label="缩小字号" @click="termRef?.setFontSize(-1)">
+              <Icon name="minus" :size="13" />
+            </button>
+            <button type="button" class="icon-button mini" title="放大字号" aria-label="放大字号" @click="termRef?.setFontSize(1)">
+              <Icon name="plus" :size="13" />
+            </button>
             <button
               type="button"
               class="icon-button mini"
@@ -863,14 +884,29 @@ onMounted(() => {
             >
               <Icon name="refresh" :size="13" />
             </button>
+            <button
+              type="button"
+              class="icon-button mini"
+              :class="{ 'is-on': fullscreen === 'terminal' }"
+              :title="fullscreen === 'terminal' ? '退出全屏' : '全屏终端'"
+              :aria-label="fullscreen === 'terminal' ? '退出全屏' : '全屏终端'"
+              @click="togglePaneFullscreen('terminal')"
+            >
+              <Icon :name="fullscreen === 'terminal' ? 'minimize-2' : 'maximize-2'" :size="13" />
+            </button>
           </div>
         </header>
         <TerminalPane v-if="terminalEverOpened" ref="termRef" />
       </section>
 
       <!-- Live Browser Pane: a real Chromium page, streamed as frames -->
-      <section v-show="isBrowserActive" class="ws-browser-pane">
-        <BrowserPane v-if="browserEverOpened || isBrowserActive" ref="browserRef" />
+      <section v-show="isBrowserActive" class="ws-browser-pane" :class="{ 'is-fullscreen': fullscreen === 'browser' }">
+        <BrowserPane
+          v-if="browserEverOpened || isBrowserActive"
+          ref="browserRef"
+          :fullscreen="fullscreen === 'browser'"
+          @toggle-fullscreen="togglePaneFullscreen('browser')"
+        />
       </section>
 
       <!-- File Viewer / Editor Pane -->

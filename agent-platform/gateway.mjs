@@ -1,5 +1,6 @@
 import { promptInput } from './prompt-input.mjs';
 import { createServer } from 'node:http';
+import { Readable } from 'node:stream';
 import { createHmac, createHash, randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { body, equal, fail, json, modelLabel, required } from './shared.mjs';
@@ -63,6 +64,19 @@ const cloudTurns = createCloudTurns({
 });
 function writeAccess(req, auth) {
   if (req.headers.origin !== publicURL || !equal(req.headers['x-csrf-token'], csrf(auth.token))) fail(403, '请求校验失败');
+}
+// Frame streams stay open for minutes, so they use their own request without
+// the ordinary runner timeout; the caller cancels it when the pane closes.
+async function runnerStream(path, user, payload) {
+  const response = await fetch(runnerURL + path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Runner-Secret': runnerSecret },
+    body: JSON.stringify({ ...payload, user: createHash('sha256').update(user).digest('hex') }), redirect: 'error',
+  });
+  if (!response.ok) {
+    const value = await response.json().catch(() => ({}));
+    fail(response.status, value.error || 'Agent 服务暂时不可用');
+  }
+  return response;
 }
 async function runner(path, user, payload, signal) {
   const response = await fetch(runnerURL + path, {
@@ -441,7 +455,20 @@ export const server = createServer(async (req, res) => {
         return json(res, 200, await response.json());
       }
 
-      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/chats/fork', '/api/chats/truncate', '/api/chats/project', '/api/chats/permission', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/terminal/exec', '/api/terminal/open', '/api/terminal/write', '/api/terminal/read', '/api/terminal/close', '/api/browser/open', '/api/browser/frame', '/api/browser/input', '/api/browser/navigate', '/api/browser/close', '/api/git/status', '/api/git/checkout', '/api/chats/settings/save'].includes(url.pathname)) {
+      if (url.pathname === '/api/terminal/stream' || url.pathname === '/api/browser/stream') {
+        const streamPath = url.pathname === '/api/browser/stream' ? '/browser/stream' : '/terminal/stream';
+        const upstream = await runnerStream(streamPath, auth.user.id, { after: Math.max(0, Number(input.after) || 0) });
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store, no-transform', 'X-Accel-Buffering': 'no' });
+        const stream = Readable.fromWeb(upstream.body);
+        // Destroying the node stream cancels the web stream it wraps; calling
+        // cancel() on the body directly would hit a locked stream.
+        const stop = () => { try { stream.destroy(); } catch {} };
+        stream.on('error', stop);
+        res.on('close', stop);
+        stream.pipe(res);
+        return;
+      }
+      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/chats/fork', '/api/chats/truncate', '/api/chats/project', '/api/chats/permission', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/terminal/exec', '/api/terminal/open', '/api/terminal/write', '/api/terminal/read', '/api/terminal/close', '/api/browser/open', '/api/browser/input', '/api/browser/navigate', '/api/browser/close', '/api/git/status', '/api/git/checkout', '/api/chats/settings/save'].includes(url.pathname)) {
         // A cold Chromium launch or a slow first navigation outlasts the
         // ordinary 45s runner budget; only these two may take that long.
         const slow = ['/api/browser/open', '/api/browser/navigate'].includes(url.pathname);

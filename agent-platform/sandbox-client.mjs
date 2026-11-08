@@ -17,6 +17,27 @@ export async function sandbox(path, user, token, policy, extra, timeout = 15000)
   }
   return response.json();
 }
+// A long-lived frame stream: the broker keeps the response open and pushes
+// newline-delimited JSON frames. The caller aborts it when the pane goes away.
+export async function sandboxStream(path, user, extra) {
+  const payload = { user, policy: null };
+  if (extra && typeof extra === 'object') Object.assign(payload, extra);
+  const controller = new AbortController();
+  let response;
+  try {
+    response = await fetch(url + path, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + required('SANDBOX_SECRET') },
+      body: JSON.stringify(payload), redirect: 'error', signal: controller.signal });
+  } catch {
+    fail(503, '独立沙箱暂时不可用，请稍后重试');
+  }
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    fail(response.status === 404 ? 409 : 503, typeof detail.error === 'string' && detail.error ? detail.error : '浏览器画面不可用');
+  }
+  return { response, abort: () => controller.abort() };
+}
+
 // Tool requests use the short-lived per-user lease, never the host control secret.
 export async function sandboxTool(token, value, timeout = 30000) {
   let response;

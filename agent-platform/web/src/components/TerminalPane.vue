@@ -4,7 +4,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
-import { post } from '../services/api';
+import { getCsrf, post } from '../services/api';
 import { useSession } from '../stores/session';
 import { useUi } from '../stores/ui';
 
@@ -26,6 +26,10 @@ let pending = '';
 let pendingTimer: number | null = null;
 let writes: Promise<unknown> = Promise.resolve();
 let resizeTimer: number | null = null;
+let streamAbort: AbortController | null = null;
+let visibilityObserver: IntersectionObserver | null = null;
+let visible = true;
+let fontSize = 12.5;
 
 function toBase64(bytes: Uint8Array) {
   let text = '';
@@ -94,25 +98,68 @@ function scheduleResize() {
   resizeTimer = window.setTimeout(() => { resizeTimer = null; sendResize(); }, 200);
 }
 
+// Output arrives on one long-lived response instead of a poll per chunk, so a
+// keystroke's echo comes back as soon as the shell writes it.
 async function pump(gen: number) {
   while (running && gen === generation) {
+    if (!visible || document.hidden) {
+      await wait(500);
+      continue;
+    }
+    let response: Response;
     try {
-      const result = await post('/api/terminal/read', { after, wait: 10 });
-      if (!running || gen !== generation || !term) return;
-      if (typeof result.base === 'number' && result.base > after) after = result.base; // sync after buffer trim
-      if (result.data) term.write(fromBase64(result.data));
-      if (typeof result.cursor === 'number') after = result.cursor;
-      if (result.closed) {
+      streamAbort = new AbortController();
+      response = await fetch('/api/terminal/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrf() },
+        body: JSON.stringify({ after }),
+        signal: streamAbort.signal, credentials: 'same-origin', redirect: 'error',
+      });
+      if (response.status === 409) {
         phase.value = 'closed';
         detail.value = '终端已结束';
         return;
       }
+      if (!response.ok || !response.body) throw new Error('终端连接失败');
     } catch (error: any) {
       if (!running || gen !== generation) return;
+      if (error?.name === 'AbortError') { await wait(200); continue; }
       phase.value = 'error';
       detail.value = error?.message || '终端连接中断';
       return;
     }
+    try {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (running && gen === generation) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let index;
+        while ((index = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, index);
+          buffer = buffer.slice(index + 1);
+          if (!line.trim()) continue;
+          let chunk;
+          try { chunk = JSON.parse(line); } catch { continue; }
+          if (chunk.type === 'data') {
+            if (typeof chunk.base === 'number' && chunk.base > after) after = chunk.base;
+            if (chunk.data && term) term.write(fromBase64(chunk.data));
+            if (typeof chunk.cursor === 'number') after = chunk.cursor;
+          } else if (chunk.type === 'closed') {
+            phase.value = 'closed';
+            detail.value = '终端已结束';
+            return;
+          }
+        }
+      }
+    } catch {
+      // Dropped stream: reconnect on the next pass.
+    } finally {
+      streamAbort = null;
+    }
+    await wait(120);
   }
 }
 
@@ -144,8 +191,36 @@ async function open(): Promise<boolean> {
 async function reconnect() {
   running = false;
   generation += 1;
+  streamAbort?.abort();
   await wait(30);
   await open();
+}
+
+function setFontSize(delta: number) {
+  fontSize = Math.max(9, Math.min(20, Math.round((fontSize + delta) * 2) / 2));
+  if (term) term.options.fontSize = fontSize;
+  requestAnimationFrame(fitPane);
+}
+
+async function paste() {
+  let text = '';
+  try { text = await navigator.clipboard.readText(); } catch { text = ''; }
+  if (!text) { useUi().toast('无法读取剪贴板，请用 Ctrl/⌘ + V 粘贴', { tone: 'info' }); return; }
+  queue(text.replace(/\r\n/g, '\r'));
+  flush();
+  term?.focus();
+}
+
+async function copySelection() {
+  const text = term?.getSelection() || '';
+  if (!text) { useUi().toast('先在终端里选中文本', { tone: 'info' }); return; }
+  try {
+    await navigator.clipboard.writeText(text);
+    term?.clearSelection();
+    useUi().toast('已复制选中内容', { tone: 'success' });
+  } catch {
+    useUi().toast('复制失败', { tone: 'error' });
+  }
 }
 
 function clear() {
@@ -188,16 +263,21 @@ onMounted(() => {
   term.onResize(() => scheduleResize());
   observer = new ResizeObserver(() => fitPane());
   observer.observe(element);
+  visibilityObserver = new IntersectionObserver(entries => { visible = entries[0]?.isIntersecting === true; }, { threshold: 0 });
+  visibilityObserver.observe(element);
   void open();
 });
 
 onBeforeUnmount(() => {
   running = false;
   generation += 1;
+  streamAbort?.abort();
   if (pendingTimer != null) clearTimeout(pendingTimer);
   if (resizeTimer != null) clearTimeout(resizeTimer);
   observer?.disconnect();
   observer = null;
+  visibilityObserver?.disconnect();
+  visibilityObserver = null;
   term?.dispose();
   term = null;
   void post('/api/terminal/close', {}).catch(() => {});
@@ -206,7 +286,7 @@ onBeforeUnmount(() => {
 watch(() => useUi().theme, () => { appliedTheme(); requestAnimationFrame(fitPane); });
 watch(() => useSession().currentProjectId, () => { if (phase.value === 'open') void reconnect(); });
 
-defineExpose({ focus, clear, reconnect, fitPane });
+defineExpose({ focus, clear, reconnect, fitPane, setFontSize, paste, copySelection });
 </script>
 
 <template>
