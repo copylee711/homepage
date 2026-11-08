@@ -72,7 +72,7 @@ function refTitle(r: any) {
 }
 
 const REF_BLOCK_RE = /^【工作区引用文件】\n((?:- `?\/workspace\/[^\n]+`?\n?)+)\n*/;
-const QUOTE_BLOCK_RE = /(?:^|\n\n)【引用内容】\n((?:> [^\n]+\n?)+)/;
+const QUOTE_BLOCK_RE = /(?:^|\n\n)【引用内容】\n(> [^\n]*(?:\n(?:\n)?(?=> )> [^\n]*)*)/;
 
 function refRecord(raw: any) {
   const p = typeof raw === 'string' ? raw : raw?.path;
@@ -142,7 +142,7 @@ const parsedUserQuotes = computed(() => {
   const match = userRawText.value.match(QUOTE_BLOCK_RE);
   if (!match) return [];
   const rawQuoted = match[1];
-  const items = rawQuoted.split(/\n+(?=> )/).filter(Boolean);
+  const items = rawQuoted.split(/\n(?:> \n|\n)(?=> )/).filter(Boolean);
   return items.map((b, idx) => ({
     id: 'q_' + idx,
     text: b.split('\n').map(l => l.replace(/^>\s?/, '')).join('\n').trim(),
@@ -155,7 +155,8 @@ const userDisplayText = computed(() => {
   txt = txt.replace(QUOTE_BLOCK_RE, '');
   txt = txt.trim();
   // Older image-only sends stored a filler sentence as the whole prompt.
-  if (imageAttachments.value.length && /^(请查看并分析我发送的图片。|请根据以上引用内容进行分析并回答。)$/.test(txt)) return '';
+  if (imageAttachments.value.length && txt === '请查看并分析我发送的图片。') return '';
+  if ((imageAttachments.value.length || parsedUserQuotes.value.length || parsedUserRefs.value.length) && txt === '请根据以上引用内容进行分析并回答。') return '';
   return txt;
 });
 

@@ -82,8 +82,12 @@ function paintSelection() {
   const element = host.value;
   if (!element) return;
   element.querySelectorAll('[data-iris-selected]').forEach(node => node.removeAttribute('data-iris-selected'));
+  element.querySelectorAll('.op-table-select').forEach(node => node.setAttribute('aria-pressed', 'false'));
   for (const id of selectedIds) {
-    element.querySelector(`[data-iris-el="${CSS.escape(id)}"]`)?.setAttribute('data-iris-selected', '');
+    element.querySelectorAll(`[data-iris-el="${CSS.escape(id)}"]`).forEach(node => {
+      node.setAttribute('data-iris-selected', '');
+      if (node.matches('.op-table-select')) node.setAttribute('aria-pressed', 'true');
+    });
   }
 }
 
@@ -861,6 +865,20 @@ onBeforeUnmount(() => {
 
 /* Selection chrome inside rendered documents. */
 .op-host :deep([data-iris-el]) { cursor: pointer; }
+.op-host :deep(.op-table-select) {
+  display: block;
+  margin-inline-start: auto;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 5px;
+  color: #62646c;
+  background: #fff;
+  font: 12px/1.4 system-ui, sans-serif;
+}
+.op-host :deep(.op-table-select[data-iris-selected] + table) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .op-host :deep([data-iris-hover]) { outline: 1.5px solid color-mix(in srgb, var(--accent) 42%, transparent); outline-offset: 1px; background: color-mix(in srgb, var(--accent) 5%, transparent); border-radius: 2px; }
 .op-host :deep([data-iris-selected]) { outline: 2px solid var(--accent); outline-offset: 1px; background: color-mix(in srgb, var(--accent) 9%, transparent); border-radius: 2px; }
 .op-host :deep([data-iris-agent]) { outline: 2px dashed color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 2px; background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 2px; animation: op-agent-pulse 1.4s ease-in-out 2; }

@@ -403,7 +403,7 @@ function mockBrowserPng() {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), pngChunk('IHDR', ihdr), pngChunk('IDAT', deflateSync(raw)), pngChunk('IEND', Buffer.alloc(0))]);
 }
 
-export function devMock() {
+export function devMock(widgetMath) {
   return {
     name: 'iris-dev-mock',
     configureServer(server) {
@@ -550,7 +550,7 @@ export function devMock() {
         }
         if (path === '/api/browser/close') { mockBrowser.open = false; return send({ ok: true }); }
         if(path==='/api/widgets'){globalThis.__irisQaWidgets ||= new Map();const id=String(globalThis.__irisQaWidgets.size);globalThis.__irisQaWidgets.set(id,body.html);return send({url:'/api/widget-document?id='+id});}
-        if(path==='/api/widget-document'){res.setHeader('Content-Type','text/html; charset=utf-8');res.setHeader('Content-Security-Policy',WIDGET_CSP);res.end(widgetDocument(globalThis.__irisQaWidgets?.get(q.get('id'))||''));return;}
+        if(path==='/api/widget-document'){res.setHeader('Content-Type','text/html; charset=utf-8');res.setHeader('Content-Security-Policy',WIDGET_CSP);res.end(widgetDocument(globalThis.__irisQaWidgets?.get(q.get('id'))||'',widgetMath));return;}
         if (path === '/api/search/settings') return send(publicSearch(searchConfig));
         if (path === '/api/search/settings/save') { searchConfig=normalizeSearch(body.config,searchConfig);return send(publicSearch(searchConfig)); }
         if (path === '/api/search/wiki') {

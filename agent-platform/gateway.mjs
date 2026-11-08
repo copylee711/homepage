@@ -94,6 +94,10 @@ async function runner(path, user, payload, signal) {
 // The console is a Vite SPA built into web/dist. Serve hashed assets with long
 // cache; everything else falls back to index.html (client-side app, no routing).
 const distRoot = new URL('./web/dist/', import.meta.url);
+const widgetMath = readFile(new URL('widget-math.js', distRoot), 'utf8').catch(error => {
+  if (error.code !== 'ENOENT') console.error('Widget math asset unavailable', error.message);
+  return '';
+});
 const mimeByExt = {
   '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
   '.svg': 'image/svg+xml', '.json': 'application/json', '.woff2': 'font/woff2', '.woff': 'font/woff',
@@ -332,7 +336,7 @@ export const server = createServer(async (req, res) => {
       }
       if (url.pathname === '/api/widget-document' && req.method === 'GET') {
         const item=widgets.get(url.searchParams.get('id'));if(!item||item.user!==auth.user.id||item.expires<Date.now())fail(404,'组件已过期，请重新运行');
-        res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':WIDGET_CSP,'X-Frame-Options':'SAMEORIGIN'});return res.end(widgetDocument(item.html));
+        res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':WIDGET_CSP,'X-Frame-Options':'SAMEORIGIN'});return res.end(widgetDocument(item.html, await widgetMath));
       }
       if (url.pathname === '/api/image' && req.method === 'GET') {
         const response=await runner('/image',auth.user.id,{url:url.searchParams.get('url'),path:url.searchParams.get('path')},AbortSignal.timeout(45000));

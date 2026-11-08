@@ -75,6 +75,45 @@ function collectMeta(xml: string) {
   return metas;
 }
 
+function expandTableBorders(xml: string) {
+  const doc = parseXml(xml);
+  const children = (node: Element, name: string) =>
+    Array.from(node.children).filter(child => child.namespaceURI === W_NS && child.localName === name);
+  const child = (node: Element, name: string) => children(node, name)[0];
+  const element = (name: string) => doc.createElementNS(W_NS, 'w:' + name);
+  for (const table of Array.from(doc.getElementsByTagNameNS(W_NS, 'tbl'))) {
+    const props = child(table, 'tblPr');
+    const borders = props && child(props, 'tblBorders');
+    if (!borders) continue;
+    const rows = children(table, 'tr');
+    rows.forEach((row, rowIndex) => {
+      const cells = children(row, 'tc');
+      cells.forEach((cell, cellIndex) => {
+        const edges = [
+          ['top', rowIndex === 0 ? 'top' : 'insideH'],
+          ['bottom', rowIndex === rows.length - 1 ? 'bottom' : 'insideH'],
+          ['left', cellIndex === 0 ? 'left' : 'insideV'],
+          ['right', cellIndex === cells.length - 1 ? 'right' : 'insideV'],
+        ];
+        const cellProps = child(cell, 'tcPr') || cell.insertBefore(element('tcPr'), cell.firstChild);
+        const cellBorders = child(cellProps, 'tcBorders') || cellProps.appendChild(element('tcBorders'));
+        for (const [side, source] of edges) {
+          const alias = side === 'left' ? 'start' : side === 'right' ? 'end' : side;
+          if (child(cellBorders, side) || child(cellBorders, alias)) continue;
+          const border = child(borders, source) || (side === source ? child(borders, alias) : undefined);
+          if (!border) continue;
+          const edge = element(side);
+          for (const attr of Array.from(border.attributes)) edge.setAttributeNS(attr.namespaceURI, attr.name, attr.value);
+          cellBorders.appendChild(edge);
+        }
+      });
+    });
+    // docx-preview otherwise applies every outer edge to every cell.
+    borders.remove();
+  }
+  return new XMLSerializer().serializeToString(doc);
+}
+
 export async function renderDocx(buffer: ArrayBuffer, host: HTMLElement): Promise<OfficeRenderResult> {
   const zip = await JSZip.loadAsync(buffer);
   const part = zip.file('word/document.xml');
@@ -82,7 +121,7 @@ export async function renderDocx(buffer: ArrayBuffer, host: HTMLElement): Promis
   const original = await part.async('string');
   const metas = collectMeta(original);
   const { xml } = markParagraphs(original);
-  zip.file('word/document.xml', xml);
+  zip.file('word/document.xml', expandTableBorders(xml));
   const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
 
   const { renderAsync } = await import('docx-preview');
@@ -118,6 +157,7 @@ export async function renderDocx(buffer: ArrayBuffer, host: HTMLElement): Promis
 
   const pages = Array.from(host.querySelectorAll('section.iris-docx'));
   const elements = new Map<string, OfficeElementInfo>();
+  const renderedTables = new Map<number, Set<HTMLTableElement>>();
   const marks = host.querySelectorAll(`span[id^="${MARKER}"]`);
   for (const mark of Array.from(marks)) {
     const paragraph = mark.closest('p');
@@ -125,6 +165,11 @@ export async function renderDocx(buffer: ArrayBuffer, host: HTMLElement): Promis
     const index = Number(mark.id.slice(MARKER.length)) - 1;
     const meta = metas[index];
     if (!meta) continue;
+    const table = paragraph.closest('table');
+    if (table && meta.table) {
+      if (!renderedTables.has(meta.table)) renderedTables.set(meta.table, new Set());
+      renderedTables.get(meta.table)!.add(table);
+    }
     const page = (() => {
       const section = paragraph.closest('section.iris-docx');
       const at = section ? pages.indexOf(section) : -1;
@@ -149,6 +194,24 @@ export async function renderDocx(buffer: ArrayBuffer, host: HTMLElement): Promis
       value: text,
       edit: { kind: 'docx', paragraph: index + 1 },
     });
+  }
+
+  for (const [index, tables] of renderedTables) {
+    const id = 'docx-table-' + index;
+    const label = '表格 ' + index + '（整表）';
+    const rows = [...tables].flatMap(table => Array.from(table.rows));
+    const text = tidy(rows.map(row => Array.from(row.cells, cell => tidy(cell.textContent)).join(' ｜ ')).join('\n'));
+    elements.set(id, { id, label, text, kind: '表格', detail: rows.length + ' 行 · 可引用整表样式' });
+    for (const table of tables) {
+      const button = host.ownerDocument.createElement('button');
+      button.type = 'button';
+      button.className = 'op-table-select';
+      button.dataset.irisEl = id;
+      button.textContent = '选中整表';
+      button.setAttribute('aria-label', '选中表格 ' + index);
+      button.setAttribute('aria-pressed', 'false');
+      table.before(button);
+    }
   }
 
   const notes: string[] = [];

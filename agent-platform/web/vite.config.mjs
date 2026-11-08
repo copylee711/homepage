@@ -1,5 +1,12 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+
+const katexDist = dirname(createRequire(import.meta.url).resolve('katex'));
+const widgetMath = () => ['katex.min.js', 'contrib/auto-render.min.js']
+  .map(path => readFileSync(join(katexDist, path), 'utf8')).join('\n');
 
 // Builds the Iris console into web/dist/, served by gateway.mjs in production.
 // The dev server runs the API mock so the UI previews without the backend.
@@ -9,12 +16,18 @@ import vue from '@vitejs/plugin-vue';
 async function loadDevMock() {
   const specifier = new URL('./dev/mock-plugin.mjs', import.meta.url).href + '?t=' + Date.now();
   const { devMock } = await import(specifier);
-  return devMock();
+  return devMock(widgetMath());
 }
 
 export default defineConfig(async ({ command }) => ({
   root: '.',
-  plugins: [vue(), ...(command === 'serve' ? [await loadDevMock()] : [])],
+  plugins: [vue(), {
+    name: 'iris-widget-math',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'widget-math.js', source: widgetMath() });
+    },
+  }, ...(command === 'serve' ? [await loadDevMock()] : [])],
   build: {
     outDir: 'dist',
     emptyOutDir: true,

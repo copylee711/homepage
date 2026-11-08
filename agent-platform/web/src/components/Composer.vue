@@ -211,7 +211,9 @@ const localSessionStats = computed(() => {
 const workspaceRefs = computed(() => session.workspaceRefs || []);
 const textQuotes = computed(() => session.textQuotes || []);
 
-const canSend = computed(() => !session.stopping && !session.busyElsewhere && session.canExecute && (text.value.trim().length > 0 || workspaceRefs.value.length > 0 || textQuotes.value.length > 0));
+const steering = ref(false);
+const hasDraft = computed(() => text.value.trim().length > 0 || workspaceRefs.value.length > 0 || textQuotes.value.length > 0);
+const canSend = computed(() => !steering.value && !session.stopping && !session.busyElsewhere && session.canExecute && hasDraft.value);
 const placeholder = computed(() => {
   if (!session.canExecute) return '此账户尚未获得 Iris 执行权限';
   if (session.busyElsewhere) return '另一个会话正在生成回复，完成或停止后可继续发送…';
@@ -296,13 +298,25 @@ async function submit() {
   if (!session.busyHere && text.value.trim().startsWith('/') && !text.value.trim().startsWith('/skill:') && await runSlash()) return;
   const value = text.value;
   if (session.busyHere) {
-    try { await session.steer(value); text.value = ''; await nextTick(); autosize(); }
+    const thread = session.chatId;
+    steering.value = true;
+    try {
+      await session.steer(value);
+      if (session.chatId === thread && text.value === value) text.value = '';
+      await nextTick(); autosize();
+    }
     catch(e: any) { ui.toast(e.message || '补充指令失败', { tone: 'error' }); }
+    finally { steering.value = false; }
     return;
   }
   text.value = '';
   await nextTick(); autosize();
-  await session.send(value);
+  const sending = session.send(value);
+  const thread = session.chatId;
+  if (await sending === false && session.chatId === thread && !text.value) {
+    text.value = value;
+    await nextTick(); autosize();
+  }
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -994,7 +1008,7 @@ watch(() => session.draftText, (val) => {
         >
           <span class="stop-square" aria-hidden="true"></span>
         </button>
-        <button v-if="!session.busyHere || text.trim()" type="submit" class="send" :disabled="!canSend" :aria-label="session.busyHere ? '补充指令' : '发送任务'" :title="session.busyHere ? '补充指令' : '发送任务'"><Icon name="arrow-up" :size="17" /></button>
+        <button v-if="!session.busyHere || hasDraft" type="submit" class="send" :disabled="!canSend" :aria-label="session.busyHere ? '补充指令' : '发送任务'" :title="session.busyHere ? '补充指令' : '发送任务'"><Icon name="arrow-up" :size="17" /></button>
       </div>
     </form>
     </div>

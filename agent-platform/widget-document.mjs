@@ -10,7 +10,11 @@ function unwrapDocument(html) {
     .replace(/<\/?body\b[^>]*>/gi, '');
 }
 
-export function widgetDocument(html) {
+export function widgetDocument(html, mathScript = '') {
+  const math = mathScript && /[$]|\\[([]/.test(html) ? '<script>' + mathScript + '\n' +
+    'renderMathInElement(document.body,{output:"mathml",trust:false,throwOnError:true,errorCallback:function(){},' +
+    'delimiters:[{left:"$$",right:"$$",display:true},{left:"\\\\[",right:"\\\\]",display:true},' +
+    '{left:"\\\\(",right:"\\\\)",display:false},{left:"$",right:"$",display:false}]});</script>' : '';
   // Follow the host theme (passed as ?theme=dark|light and live postMessage),
   // auto-adapt legacy/hardcoded light colors in dark mode, and report rendered
   // height so the parent container fits seamlessly without inner scrollbars.
@@ -130,6 +134,6 @@ export function widgetDocument(html) {
     '}' +
     'body{margin:0;padding:6px 2px;box-sizing:border-box;background:transparent;color:var(--widget-fg)}*,*::before,*::after{box-sizing:border-box}svg,canvas,img{max-width:100%;height:auto}button,input,select{font:inherit;color:inherit}input[type=range]{width:100%;accent-color:var(--widget-accent)}button{cursor:pointer}h1,h2,h3,h4{line-height:1.3;color:var(--widget-fg)}pre{white-space:pre-wrap}' +
     '@media(max-width:560px){body{padding:4px 0}}';
-  return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>'+style+'</style>'+theme+'</head><body>'+unwrapDocument(html)+sizing+'</body></html>';
+  return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>'+style+'</style>'+theme+'</head><body>'+unwrapDocument(html)+math+sizing+'</body></html>';
 }
 export const WIDGET_CSP="sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";

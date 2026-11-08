@@ -78,6 +78,26 @@ export interface TextQuote {
   anchor?: string;
 }
 
+function promptWithReferences(text: string, refs: WorkspaceRef[], quotes: TextQuote[]) {
+  const sections: string[] = [];
+  const files = refs.filter(ref => !ref.inline);
+  if (files.length) sections.push('【工作区引用文件】\n' + files.map(ref => '- `/workspace/' + ref.path + '`').join('\n'));
+  if (quotes.length) {
+    const lines = quotes.flatMap(q => {
+      const file = q.path && '/workspace/' + q.path.replace(/^\/workspace\/?/, '').replace(/^\/+/, '');
+      const anchor = q.anchor || q.source;
+      return [
+        ...(file ? ['文件：`' + file + '`' + (anchor ? ' · ' + anchor : '')] : []),
+        ...q.text.split('\n'), '',
+      ];
+    });
+    lines.pop();
+    sections.push('【引用内容】\n' + lines.map(line => '> ' + line).join('\n'));
+  }
+  if (text) sections.push(text);
+  return sections.join('\n\n');
+}
+
 function uuid() {
   return (crypto as any).randomUUID ? crypto.randomUUID()
     : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); });
@@ -161,9 +181,20 @@ export const useSession = defineStore('session', {
       finally { item.saving = false; }
     },
     async steer(message: string) {
-      const thread = this.liveThread || this.chatId;
-      await post('/api/steer', { thread, message });
-      if (this.live) this.live.status = '补充指令已发送，模型将在下一个处理点接收';
+      const thread = this.liveThread;
+      const live = this.live;
+      const messages = this.liveMessages;
+      const refs = [...this.workspaceRefs];
+      const quotes = [...this.textQuotes];
+      if (refs.some(ref => ref.inline)) throw new Error('运行中可补充文字、文档引用和工作区路径。请在本轮结束后发送粘贴的图片。');
+      const content = promptWithReferences(message.trim(), refs, quotes);
+      await post('/api/steer', { thread, message: content });
+      messages.push({ role: 'user', timestamp: Date.now(), content, refs, quotes, _rawPrompt: message.trim(), _fresh: true });
+      if (this.chatId === thread) {
+        this.workspaceRefs = this.workspaceRefs.filter(ref => !refs.includes(ref));
+        this.textQuotes = this.textQuotes.filter(quote => !quotes.includes(quote));
+      }
+      if (live && this.live === live) live.status = '补充指令已发送，模型将在下一个处理点接收';
       useUi().toast('已补充指令', { tone: 'success' });
     },
     async resolveApproval(id: string, allow: boolean) {
@@ -405,6 +436,8 @@ export const useSession = defineStore('session', {
             const index = messages.findLastIndex(item => item.role === 'user' && item.timestamp === event.message.timestamp);
             if (index >= 0) messages.splice(index + 1);
             else messages.push(event.message);
+          } else if (event.type === 'message_start' && event.message?.role === 'user') {
+            if (!messages.some(item => item.role === 'user' && item.timestamp === event.message.timestamp)) messages.push(event.message);
           }
           if (event.type === 'chat_title' && event.thread === thread) {
             const chat = this.chats.find(c => c.id === thread);
@@ -443,30 +476,10 @@ export const useSession = defineStore('session', {
       const thread = this.chatId!;
       this.snapshots.delete(thread);
 
-      const sections: string[] = [];
-      const workspaceRefs = attachedRefs.filter(r => !r.inline);
-      const inlineImages = attachedRefs.filter(r => r.inline);
-      if (workspaceRefs.length > 0) {
-        sections.push('【工作区引用文件】\n' + workspaceRefs.map(r => `- \`/workspace/${r.path}\``).join('\n'));
-      }
-      if (attachedQuotes.length > 0) {
-        sections.push('【引用内容】\n' + attachedQuotes.map(q => {
-          const body = q.text.split('\n').map(l => '> ' + l).join('\n');
-          if (!q.path) return body;
-          const file = '/workspace/' + String(q.path).replace(/^\/workspace\/?/, '').replace(/^\/+/, '');
-          const anchor = q.anchor || q.source || '';
-          return `> 文件：\`${file}\`${anchor ? ' · ' + anchor : ''}\n${body}`;
-        }).join('\n\n'));
-      }
       const imageOnly = !rawText && !attachedQuotes.length && attachedRefs.length > 0
         && attachedRefs.every(r => r.type === 'image' || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(r.name || ''));
-      if (rawText) {
-        sections.push(rawText);
-      } else if (!imageOnly) {
-        sections.push('请根据以上引用内容进行分析并回答。');
-      }
-
-      const message = opts.replay ? rawText : sections.join('\n\n');
+      const message = opts.replay ? rawText : promptWithReferences(
+        rawText || (imageOnly ? '' : '请根据以上引用内容进行分析并回答。'), attachedRefs, attachedQuotes);
       if (!opts.replay) { this.workspaceRefs = []; this.textQuotes = []; }
 
       // Show the chat in the sidebar as soon as the first turn starts, instead
@@ -523,6 +536,7 @@ export const useSession = defineStore('session', {
       const live = reactive(reactiveLive());
       this.live = live;
       let received = false;
+      let rejected = false;
       try {
         const result = await streamPrompt({
           thread, message, images: images.length ? images : undefined, thinking: useUi().thinkingLevel, projectId: this.currentProjectId,
@@ -538,7 +552,14 @@ export const useSession = defineStore('session', {
         } else if (error.name === 'AbortError') {
           live.error = '与服务器的流式连接中断，请刷新对话后重试。';
         } else {
-          if (!received) { streamMessages.pop(); }
+          if (!received) {
+            rejected = true;
+            streamMessages.pop();
+            if (!opts.replay && this.chatId === thread) {
+              this.workspaceRefs.unshift(...attachedRefs);
+              this.textQuotes.unshift(...attachedQuotes);
+            }
+          }
           live.error = error.message || '任务启动失败，请重试。';
         }
       } finally {
@@ -559,6 +580,7 @@ export const useSession = defineStore('session', {
         await this.refreshIdentity();
         if (this.canExecute) { try { await this.loadChats(); } catch {} }
       }
+      return !rejected;
     },
     async stop() {
       if (!this.busy || this.stopping) return;
