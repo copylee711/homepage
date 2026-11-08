@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue';
 import Icon from './Icon.vue';
+import BrandMark from './BrandMark.vue';
 import SlimScrollRail from './SlimScrollRail.vue';
 import DropMenu from './DropMenu.vue';
 import type { MenuItem } from './DropMenu.vue';
@@ -223,7 +224,7 @@ watch(avatarUrl, () => { avatarError.value = false; });
   <aside class="sidebar" aria-label="对话导航">
     <div class="sidebar-head">
       <a class="brand" href="/" aria-label="Iris 首页" @click.prevent="session.startNew()">
-        <span class="brand-mark"><Icon name="iris" :size="21" /></span>
+        <span class="brand-mark"><BrandMark :size="22" /></span>
         <span class="brand-name">Iris</span>
       </a>
       <button class="icon-button" aria-label="收起导航" title="收起导航" @click="ui.mobileDrawer ? (ui.mobileDrawer = null) : ui.setSidebarOpen(false)"><Icon name="panel-left" /></button>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import Icon from './Icon.vue';
+import BrandMark from './BrandMark.vue';
 import Message from './Message.vue';
 import BlockList from './BlockList.vue';
 import UserQuestion from './UserQuestion.vue';
@@ -265,7 +266,7 @@ onMounted(() => {
         <div v-if="compactIndex === display.length" class="context-compact-note" role="status">{{ compactLabel }}</div>
         <!-- live streaming assistant -->
         <article v-if="live" class="message message-assistant">
-          <div class="message-avatar"><Icon name="iris" :size="18" /></div>
+          <div class="message-avatar"><BrandMark :size="18" /></div>
           <div class="message-inner">
             <div class="message-meta"><strong class="message-author">Iris</strong></div>
             <div class="message-content"><BlockList :blocks="live.blocks" :streaming="true" /></div>

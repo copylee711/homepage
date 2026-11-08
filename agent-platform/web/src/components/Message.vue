@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import Icon from './Icon.vue';
+import BrandMark from './BrandMark.vue';
 import MarkdownView from './MarkdownView.vue';
 import BlockList from './BlockList.vue';
 import { formatClock, textContent, normalizeBlocks } from '../services/format';
@@ -302,7 +303,7 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
       <span>引用</span>
     </button>
 
-    <div v-if="!isUser" class="message-avatar"><Icon name="iris" :size="18" /></div>
+    <div v-if="!isUser" class="message-avatar"><BrandMark :size="18" /></div>
     <div class="message-inner">
       <div v-if="!isUser" class="message-meta">
         <strong class="message-author">Iris</strong>

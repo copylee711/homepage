@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue';
-import Icon from './Icon.vue';
+import BrandMark from './BrandMark.vue';
 import { useSession } from '../stores/session';
 import { loadGreeting } from '../services/greeting';
 const session = useSession();
@@ -11,7 +11,7 @@ onMounted(async () => { if (session.canExecute) greeting.value = await loadGreet
 
 <template>
   <section class="welcome" :class="{ 'welcome-permission': permission }">
-    <span class="welcome-mark"><Icon name="iris" :size="34" /></span>
+    <span class="welcome-mark"><BrandMark :size="48" /></span>
     <h2 v-if="!permission">{{ greeting }}</h2>
     <template v-else>
       <h2>尚未开通执行权限</h2>
