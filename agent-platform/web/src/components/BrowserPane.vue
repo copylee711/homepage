@@ -152,6 +152,7 @@ async function pump(gen: number) {
       while (running && gen === generation) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (!visible || document.hidden) { streamAbort?.abort(); break; }
         buffer += decoder.decode(value, { stream: true });
         let index;
         while ((index = buffer.indexOf('\n')) >= 0) {
