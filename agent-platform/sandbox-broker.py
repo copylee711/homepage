@@ -943,6 +943,8 @@ class Handler(BaseHTTPRequestHandler):
     # .iris/preview-agent.json, the reader's selection lands in
     # .iris/preview-user.json, and this stream reports when either one changes.
     def preview(self, user, value):
+        if self.path == '/preview/notices':
+            return self.preview_notices(user)
         path = value.get('path')
         if not isinstance(path, str) or not path or len(path) > 1024 or any(c in path for c in '\x00\r\n'):
             return self.reply(422, {'error': '工作区路径无效'})
@@ -956,8 +958,6 @@ class Handler(BaseHTTPRequestHandler):
             return self.preview_feedback(user, path, value)
         if self.path == '/preview/edit':
             return self.preview_edit(user, path, value)
-        if self.path == '/preview/notices':
-            return self.preview_notices(user)
         if self.path == '/preview/restore':
             return self.preview_restore(user, path)
         return self.reply(404, {'error': '接口不存在'})
@@ -1079,8 +1079,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             result = subprocess.run(
                 ['docker', 'run', '--rm', '--network', 'none', '--user', '1000:1000',
+                 '--entrypoint', '/usr/bin/python3',
                  '-e', 'HOME=/tmp', '-v', f'{root}:/workspace:rw', '-v', f'{script}:/opt/office-edit.py:ro',
-                 IMAGE, '/usr/bin/python3', '-I', '/opt/office-edit.py'],
+                 IMAGE, '-I', '/opt/office-edit.py'],
                 input=json.dumps(payload, ensure_ascii=False).encode(), capture_output=True, timeout=90)
         except (subprocess.TimeoutExpired, OSError) as error:
             return self.reply(503, {'error': '写入超时：%s' % str(error)[:120]})

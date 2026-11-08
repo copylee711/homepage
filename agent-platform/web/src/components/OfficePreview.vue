@@ -229,6 +229,14 @@ function onPointerUp(event: PointerEvent) {
   queueFeedback();
 }
 
+function onDoubleClick(event: MouseEvent) {
+  event.preventDefault();
+  const node = nodeFrom(event.target);
+  if (!node) return;
+  selectNode(node, false, false);
+  if (editable.value) startEdit();
+}
+
 function onClick(event: MouseEvent) {
   event.preventDefault();
   if (dragged) { dragged = false; return; }
@@ -746,6 +754,7 @@ onBeforeUnmount(() => {
         class="op-host"
         :class="'is-' + format"
         @click="onClick"
+        @dblclick="onDoubleClick"
         @pointerdown="onPointerDown"
         @pointerup="onPointerUp"
         @pointermove="onPointerMove"
