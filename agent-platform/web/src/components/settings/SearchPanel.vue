@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, onBeforeUnmount } from 'vue';
 import { get, post } from '../../services/api';
 import { useUi } from '../../stores/ui';
+import SourceWikiPanel from './SourceWikiPanel.vue';
 import SelectMenu from '../SelectMenu.vue';
 const ui=useUi();
 const category=ref('web'),showAll=ref(false);
@@ -10,8 +11,9 @@ const preferred=computed({get:()=>category.value==='image'?(config.value.imageEn
 const config=ref<any>({enabled:true,engine:'auto',language:'zh-CN',count:5,sources:[]});
 const loading=ref(true),loaded=ref(false),saving=ref(false),error=ref(''),query=ref(''),testing=ref(false),results=ref<any>(null),editing=ref<any>(null),bodyText=ref(''),showKey=ref(false);
 const savedConfig=ref('');
-const dirty=computed(()=>!!editing.value || (loaded.value && JSON.stringify(config.value)!==savedConfig.value));
-async function leave(){return !dirty.value || await ui.confirm({title:'放弃未保存的搜索设置？',message:'来源配置与输入的密钥尚未保存。',confirmText:'放弃修改',cancelText:'继续编辑',danger:true});}
+const wikiEditing=ref(false);
+const dirty=computed(()=>wikiEditing.value || !!editing.value || (loaded.value && JSON.stringify(config.value)!==savedConfig.value));
+async function leave(){return !dirty.value || await ui.confirm({title:'放弃未保存的搜索设置？',message:'搜索设置或目录中还有未保存的修改。',confirmText:'放弃修改',cancelText:'继续编辑',danger:true});}
 function beforeUnload(e:BeforeUnloadEvent){if(dirty.value){e.preventDefault();e.returnValue='';}}
 const engines=computed(()=>[{value:'auto',label:'按下方顺序自动回退'},...config.value.sources.filter((s:any)=>(s.category||'web')===category.value).map((s:any)=>({value:s.id,label:s.name}))]);
 async function changeCategory(id:string){if(editing.value&&!await ui.confirm({title:'放弃正在编辑的来源？',message:'来源编辑尚未应用，其他已应用的设置会保留。',confirmText:'放弃编辑',cancelText:'继续编辑'}))return;category.value=id;results.value=null;editing.value=null;showAll.value=false;}
@@ -32,6 +34,7 @@ async function remove(source:any){if(!await ui.confirm({title:'移除搜索来�
 <template v-else-if="loaded">
 <h3>联网搜索</h3><p class="question-hint">无需 Pi 搜索插件。来源失败、限流或未配置密钥时按顺序回退。API Key 只保存在服务端，不会提供给 Agent；配置仅对当前账户生效。</p>
 <div class="setting-row"><label for="search-enabled">允许 Agent 联网搜索</label><input id="search-enabled" v-model="config.enabled" type="checkbox" :disabled="saving" /></div>
+<SourceWikiPanel @editing="wikiEditing=$event" />
 <div class="seg" role="group" aria-label="搜索类型"><button v-for="[id,name] in [['web','网页搜索'],['image','图片搜索']]" :key="id" type="button" :class="{'is-on':category===id}" :aria-pressed="category===id" @click="changeCategory(id)">{{name}}</button></div>
 <div class="setting-row"><span>首选来源</span><SelectMenu v-model="preferred" :options="engines" aria-label="首选搜索来源" :disabled="saving" /></div>
 <div class="setting-row"><span>结果语言</span><div class="seg"><button v-for="[id,name] in [['zh-CN','中文'],['en-US','English']]" :key="id" type="button" :class="{'is-on':config.language===id}" :aria-pressed="config.language===id" @click="config.language=id">{{name}}</button></div></div>

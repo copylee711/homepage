@@ -21,6 +21,7 @@ import { prepareSessionCwd } from './session-cwd.mjs';
 import { usageSummary, sessionUsageStats } from './usage.mjs';
 import { ChatStore, normalizeProjectId, paginateChats, safeFilename, sanitizePermission } from './conversations.mjs';
 import { createZip } from './zip.mjs';
+import { SourceWiki, discoveredSource, WIKI_TOPICS } from './source-wiki.mjs';
 import { SearchSettings, publicSearch } from './search.mjs';
 import { ToolApprovals, UserQuestions } from './tool-approvals.mjs';
 import { SessionSnapshots, projectSession } from './session-snapshot.mjs';
@@ -31,6 +32,7 @@ import { listWorkspace, previewWorkspace, downloadWorkspace, uploadWorkspace, ma
 const secret = required('RUNNER_SECRET');
 const sessions = new Map();
 const searchSettings = new SearchSettings();
+const sourceWiki = new SourceWiki();
 const memories = new MemoryStore();
 const features = new FeatureStore();
 const deleting = new Set();
@@ -151,6 +153,19 @@ async function sourcePageImages(lease, web, count, timeout) {
   return { engine: 'source-page', images: candidates, results: candidates,
     notice: '这些是网页中的候选图。核对图片与主题的相关性，附原网页链接。授权情况未知。' };
 }
+async function maintainSourceWiki(user, turn) {
+  const snapshot = await sourceWiki.get(user);
+  if (!snapshot.auto || (turn.snapshot && turn.snapshot.revision !== snapshot.revision)) return;
+  const proposals = [];
+  for (const [address, visit] of turn.checks) {
+    if (!visit.ok || proposals.length >= 2) continue;
+    const source = discoveredSource(visit.topic, new URL(address));
+    if (source && !snapshot.sources.some(item => item.topic === source.topic && item.url === source.url))
+      proposals.push(source);
+  }
+  await sourceWiki.maintain(user, proposals, new Map([...turn.checks].map(([url, visit]) => [url, visit.ok])), snapshot.revision);
+}
+
 class Pi {
   constructor(user, thread) {
     this.runtimeToken = randomUUID(); this.user = user; this.thread = thread; this.key = user + ':' + thread; this.pending = new Map(); this.busy = false; this.buffer = '';
@@ -214,7 +229,11 @@ class Pi {
           if(wire.type === 'message_update') { delete wire.assistantMessageEvent.partial; delete wire.assistantMessageEvent.message; }
           this.publish(wire);
         }
-        if (event.type === 'agent_settled') this.finish();
+        if (event.type === 'agent_settled') {
+          const turn = this.wikiTurn;
+          this.finish();
+          if (!event.aborted && turn?.checks.size) void maintainSourceWiki(this.user, turn).catch(() => {});
+        }
       }
     });
     this.proc.on('error', () => this.stop());
@@ -267,6 +286,7 @@ class Pi {
     invalidateWorkspace(this.user);
     clearInterval(this.deadline); this.watchdog = null; clearInterval(this.storageCheck); clearInterval(this.renewWatch);
     this.busy = false;
+    this.wikiTurn = null;
     this.fanout?.end();
   }
   command(type, fields = {}, timeout = 120000) {
@@ -292,7 +312,7 @@ class Pi {
     if (permission?.execution && EXECUTION_MODES.includes(permission.execution)) {
       this.execution = permission.execution;
     }
-    this.busy = true; this.webSession = new WebSession(); this.stopping = false; this.lastRenew = Date.now();
+    this.busy = true; this.webSession = new WebSession(); this.wikiTurn = { checks: new Map() }; this.stopping = false; this.lastRenew = Date.now();
     this.turnNote = null;
     // Goal mode keeps continuing across settle points until the goal reports done.
     this.goal = goal ? { continues: 0, max: 20 } : null;
@@ -513,6 +533,12 @@ export const server = createServer(async (req, res) => {
       if (req.url === '/runtime/search') {
         const input = await body(req), config = await searchSettings.get(pi.user);
         if (!config.enabled) fail(403, '联网搜索已在设置中关闭');
+        if (input.category === 'image' && ['mathematics', 'physics', 'biology'].includes(input.subject)) {
+          const wiki = await sourceWiki.get(pi.user);
+          input.sites = [...new Set(wiki.sources.filter(source =>
+            source.topic === input.subject && source.enabled && (source.failures || 0) < 3)
+            .map(source => new URL(source.url).hostname))].slice(0, 3);
+        }
         return json(res, 200, await pi.webSession.run(input.category === 'image' ? 'image' : 'search', (input.sites?.length ? JSON.stringify([input.query, input.sites]) : input.query),() => searchWeb(pi.lease, config, input)));
       }
       if (req.url === '/runtime/view-image') {
@@ -522,14 +548,43 @@ export const server = createServer(async (req, res) => {
           fail(415, '模型查看仅支持 PNG、JPEG、GIF 和 WebP 图片');
         return json(res, 200, image);
       }
-      if(req.url==='/runtime/fetch'){const input=await body(req);return json(res,200,await pi.webSession.run('fetch',input.url,()=>sandboxTool(pi.lease,{op:'web-fetch',url:input.url},35000)));}
+      if (req.url === '/runtime/wiki') {
+        const { topic } = await body(req);
+        if (!WIKI_TOPICS.includes(topic)) fail(422, '来源类别无效');
+        const turn = pi.wikiTurn;
+        const snapshot = turn ? await (turn.loaded ||= sourceWiki.get(pi.user)) : await sourceWiki.get(pi.user);
+        if (turn) { turn.snapshot = snapshot; turn.topic = topic; }
+        return json(res, 200, { sources: snapshot.sources
+          .filter(source => source.topic === topic && source.enabled && (source.failures || 0) < 3)
+          .slice(0, 12).map(({ title, url }) => ({ title, url })) });
+      }
+      if (req.url === '/runtime/fetch') {
+        const input = await body(req);
+        const turn = pi.wikiTurn;
+        const topic = turn?.topic;
+        return json(res, 200, await pi.webSession.run('fetch', input.url, async () => {
+          const url = new URL(input.url); url.hash = '';
+          const record = ok => {
+            if (turn && url.protocol === 'https:' && turn.checks.get(url.href)?.ok !== true)
+              turn.checks.set(url.href, { ok, topic });
+          };
+          try {
+            const result = await sandboxTool(pi.lease, { op: 'web-fetch', url: input.url }, 35000);
+            record(result.status === 200 && !!result.text?.trim());
+            return result;
+          } catch (error) {
+            record(false);
+            throw error;
+          }
+        }));
+      }
       fail(404, '接口不存在');
     }
     if (!equal(req.headers['x-runner-secret'], secret)) fail(401, '服务认证失败');
     if (req.method !== 'POST') fail(405, '请求方法不支持');
     // Prompts carry inline base64 images, so they need the same room the
     // gateway allows (up to 12 MiB per image) instead of the 64 KiB default.
-    const input = await body(req, req.url === '/files/upload' ? 21 * 1024 * 1024 : req.url === '/prompt' ? 20 * 1024 * 1024 : req.url === '/features/save' ? 256 * 1024 : req.url === '/search/settings/save' ? 512 * 1024 : 65536);
+    const input = await body(req, req.url === '/files/upload' ? 21 * 1024 * 1024 : req.url === '/prompt' ? 20 * 1024 * 1024 : req.url === '/features/save' ? 256 * 1024 : ['/search/settings/save', '/search/wiki/save'].includes(req.url) ? 512 * 1024 : 65536);
     if (!/^[a-f0-9]{64}$/.test(input.user || '')) fail(422, '用户标识无效');
     if (req.url === '/image') {
       if(input.path){const value=await downloadWorkspace(input.user,input.path);const data=Buffer.from(value.data,'base64');const mime=data.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))?'image/png':data[0]===255&&data[1]===216?'image/jpeg':data.subarray(0,3).toString()==='GIF'?'image/gif':data.subarray(0,4).toString()==='RIFF'&&data.subarray(8,12).toString()==='WEBP'?'image/webp':'';if(!mime||data.length>5*1024*1024)fail(415,'图片格式不支持或超过 5 MiB');return json(res,200,{data:value.data,mime});}
@@ -618,6 +673,8 @@ export const server = createServer(async (req, res) => {
       const config = await activeProvider().catch(() => undefined);
       return json(res, 200, { label: modelLabel(config?.model || model.split('/').pop()) });
     }
+    if (req.url === '/search/wiki') return json(res, 200, await sourceWiki.get(input.user));
+    if (req.url === '/search/wiki/save') return json(res, 200, await sourceWiki.save(input.user, input.config || {}));
     if (req.url === '/search/settings') return json(res, 200, publicSearch(await searchSettings.get(input.user)));
     if (req.url === '/search/settings/save') return json(res, 200, await searchSettings.save(input.user, input.config));
     if (req.url === '/search/test') {

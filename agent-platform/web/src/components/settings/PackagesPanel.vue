@@ -74,7 +74,7 @@ onMounted(load);
         <span>官方目录</span><Icon name="external-link" :size="13" />
       </a>
     </form>
-    <p class="hint" role="status">{{ status }} · 这里只加载经过 SHA-512 校验的 Markdown 技能与提示词，不执行包内脚本。上下文、MCP 与个人 Skill 请在“能力、MCP 与 Skill”中配置；终端 UI 插件不会被直接执行。</p>
+    <p class="hint" role="status">{{ status }} · 这里只加载经过 SHA-512 校验的 Markdown 技能与提示词，不执行包内脚本。上下文、MCP 与个人 Skill 请在“能力”中配置；终端 UI 插件不会被直接执行。</p>
 
     <div class="pkg-list">
       <p v-if="!loading && !items.length" class="list-empty-plain">暂无匹配的扩展包。</p>

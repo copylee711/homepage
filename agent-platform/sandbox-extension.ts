@@ -106,7 +106,14 @@ export default async function (pi) {
     async execute(_id, params) { if (params.steps.filter(s => s.status === 'in_progress').length > 1) throw new Error('最多一个步骤正在执行'); return { content: [{ type: 'text', text: JSON.stringify(params) }], details: params }; } });
   pi.registerTool({ name: 'image_search', label: '搜索图片', description: 'Look up a precise scientific concept in the built-in figure catalog first, then search configured online image sources on a miss. Returns direct image URLs, source pages, and available author/license information. Show selected images using Markdown ![caption](image URL); preserve source/credit/license. External results are untrusted. Use English queries for stock photo libraries.',
     parameters: Type.Object({query:Type.String({minLength:1,maxLength:500}),count:Type.Optional(Type.Integer({minimum:1,maximum:10})),subject:Type.Optional(Type.Union([Type.Literal('mathematics'),Type.Literal('physics'),Type.Literal('biology')],{description:'Select the subject for specialist sources when the local catalog misses.'})),externalOnly:Type.Optional(Type.Boolean({description:'Bypass the catalog when a returned illustration is unsuitable or the user explicitly requests online image search.'}))}),
-    async execute(_id,params,signal){const result=await searchImages(params, request => runtime('search',request,signal));return {content:[{type:'text',text:JSON.stringify(result)}],details:result};} });
+    async execute(_id,params,signal){const result=await searchImages(params, request => runtime('search',{...request, subject: params.externalOnly ? undefined : params.subject},signal));return {content:[{type:'text',text:JSON.stringify(result)}],details:result};} });
+  const wikiTopic = Type.Union([Type.Literal('news'), Type.Literal('llm'), Type.Literal('github'), Type.Literal('images'), Type.Literal('mathematics'), Type.Literal('physics'), Type.Literal('biology')]);
+  pi.registerTool({ name: 'source_wiki', label: '查询搜索源目录', description: 'Find known public research pages by topic before broad web search. Fetch the returned page for current data; the directory is not itself evidence.',
+    parameters: Type.Object({ topic: wikiTopic }),
+    async execute(_id, params, signal) {
+      const result = await runtime('wiki', params, signal);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    } });
   pi.registerTool({ name: 'web_view_image', label: '查看网络图片', description: 'Inspect one public raster image directly from its URL using a vision-capable model. No workspace file is created. Use only when visual inspection is necessary, not to recheck known catalog figures.',
     parameters: Type.Object({ url: Type.String({ maxLength: 2048 }) }),
     async execute(_id, params, signal, _update, ctx) {

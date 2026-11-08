@@ -25,7 +25,7 @@ watch(avatarUrl, () => { avatarError.value = false; });
 const navItems = computed(() => {
   const items: { id: SettingsTab; icon: string; label: string; show: boolean }[] = [
     { id: 'general', icon: 'settings', label: '通用', show: true },
-    { id: 'capabilities', icon: 'package', label: '能力、MCP 与 Skill', show: session.canExecute },
+    { id: 'capabilities', icon: 'package', label: '能力', show: session.canExecute },
     { id: 'memory', icon: 'edit', label: '人设与记忆', show: session.canExecute },
     { id: 'search', icon: 'search', label: '联网搜索', show: session.canExecute },
     { id: 'providers', icon: 'sparkle', label: '模型与供应商', show: session.isAdmin },

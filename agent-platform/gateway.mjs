@@ -319,6 +319,10 @@ export const server = createServer(async (req, res) => {
         const value=await response.json();if(!['image/png','image/jpeg','image/gif','image/webp','image/svg+xml','image/vnd.microsoft.icon'].includes(value.mime))fail(415,'图片格式不支持');
         res.writeHead(200,{'Content-Type':value.mime,'Cache-Control':'private, max-age=300','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; sandbox"});return res.end(Buffer.from(value.data,'base64'));
       }
+      if (url.pathname === '/api/search/wiki' && req.method === 'GET') {
+        const response = await runner('/search/wiki', auth.user.id, {});
+        return json(res, 200, await response.json());
+      }
       if (url.pathname === '/api/search/settings' && req.method === 'GET') {
         const response = await runner('/search/settings', auth.user.id, {}); return json(res, 200, await response.json());
       }
@@ -382,13 +386,17 @@ export const server = createServer(async (req, res) => {
         });
         return json(res, 200, await response.json());
       }
-      const input = await body(req, url.pathname === '/api/prompt' ? 15 * 1024 * 1024 : url.pathname === '/api/features/save' ? 256 * 1024 : (url.pathname === '/api/search/settings/save' || url.pathname === '/api/terminal/write') ? 512 * 1024 : 65536);
+      const input = await body(req, url.pathname === '/api/prompt' ? 15 * 1024 * 1024 : url.pathname === '/api/features/save' ? 256 * 1024 : (url.pathname === '/api/search/settings/save' || url.pathname === '/api/search/wiki/save' || url.pathname === '/api/terminal/write') ? 512 * 1024 : 65536);
       if (['/api/features/save','/api/features/mcp/test','/api/context/compact'].includes(url.pathname)) { const response = await runner(url.pathname.replace('/api',''), auth.user.id, {config:input.config,id:input.id,thread:input.thread,instructions:input.instructions}, AbortSignal.timeout(190000));return json(res,200,await response.json()); }
       if (url.pathname === '/api/memory/update') {
         const response = await runner('/memory/update', auth.user.id, { project: input.project, scope: input.scope, action: input.action, content: input.content, revision: input.revision }); return json(res, 200, await response.json());
       }
       if (['/api/background/stop', '/api/background/clear-history'].includes(url.pathname)) {
         const response = await runner(url.pathname.slice(4), auth.user.id, { id: input.id, all: input.all === true }); return json(res, 200, await response.json());
+      }
+      if (url.pathname === '/api/search/wiki/save') {
+        const response = await runner('/search/wiki/save', auth.user.id, { config: input.config });
+        return json(res, response.status, await response.json());
       }
       if (['/api/questions/answer', '/api/steer', '/api/search/settings/save', '/api/search/test'].includes(url.pathname)) {
           const response = await runner(url.pathname.replace('/api', ''), auth.user.id, { thread: input.thread, id: input.id, answer: input.answer, message: input.message, config: input.config, query: input.query, category:input.category,source:input.source }, AbortSignal.timeout(55000));
