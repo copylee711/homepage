@@ -41,6 +41,8 @@ let running = false;
 let generation = 0;
 let url = '';
 let editing = false;
+let visible = true;
+let observer: IntersectionObserver | null = null;
 let image: HTMLImageElement | null = null;
 let pendingClick: number | null = null;
 let wheelTimer: number | null = null;
@@ -84,6 +86,12 @@ function applyFrame(frame: any) {
 
 async function pump(gen: number) {
   while (running && gen === generation) {
+    // A hidden pane or a background tab costs nothing: no polling means the
+    // bridge stops capturing and the container drops to its idle cadence.
+    if (!visible || document.hidden) {
+      await wait(900);
+      continue;
+    }
     try {
       const result = await post('/api/browser/frame', { after: seq, wait: 6 });
       if (!running || gen !== generation) return;
@@ -313,12 +321,18 @@ function onDocumentDown(event: PointerEvent) {
 
 onMounted(() => {
   document.addEventListener('pointerdown', onDocumentDown, true);
+  if (stage.value) {
+    observer = new IntersectionObserver(entries => { visible = entries[0]?.isIntersecting === true; }, { threshold: 0 });
+    observer.observe(stage.value);
+  }
   void open();
 });
 
 onBeforeUnmount(() => {
   running = false;
   generation += 1;
+  observer?.disconnect();
+  observer = null;
   document.removeEventListener('pointerdown', onDocumentDown, true);
   if (pendingClick != null) clearTimeout(pendingClick);
   if (wheelTimer != null) clearTimeout(wheelTimer);

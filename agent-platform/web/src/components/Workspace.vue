@@ -870,7 +870,7 @@ onMounted(() => {
 
       <!-- Live Browser Pane: a real Chromium page, streamed as frames -->
       <section v-show="isBrowserActive" class="ws-browser-pane">
-        <BrowserPane v-if="browserEverOpened" ref="browserRef" />
+        <BrowserPane v-if="browserEverOpened || isBrowserActive" ref="browserRef" />
       </section>
 
       <!-- File Viewer / Editor Pane -->

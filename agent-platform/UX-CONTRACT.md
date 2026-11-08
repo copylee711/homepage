@@ -137,6 +137,11 @@ Escape closes idle dialogs and focus returns to their trigger.
   gutters keep the welcome content centered when overflow changes.
 - The terminal executes one bounded command per request (15 seconds); it is not an
   interactive persistent shell. Agent/toolchain tasks must be idle before terminal or Git writes.
+- The live browser runs a real Chromium inside a disposable, read-only sandbox container
+  and streams JPEG frames to the pane; clicks, wheel, keys and pasted text are forwarded
+  to that page. Only http and https addresses are accepted, the page reaches the network
+  solely through the same egress proxy as tools, and the browser holds no mount of the
+  workspace. Frames stop when the pane closes and the container is reclaimed when idle.
 
 ## Streaming and conversation navigation
 
