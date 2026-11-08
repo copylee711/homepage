@@ -102,3 +102,21 @@ test('known visual topics ground a turn without a tool call and respect text-onl
   assert.equal(figureContext('第二类曲线积分，不要配图'), '');
   assert.equal(figureContext('Explain a Gaussian mixture'), '');
 });
+
+test('coordinate comparison gets both curated images and a local wiki topic', async () => {
+  const { figureContext, wikiTopicForPrompt } = await import('../figure-catalog.mjs');
+  const prompt = '讲讲球面坐标与柱面坐标';
+  assert.equal(wikiTopicForPrompt(prompt), 'mathematics');
+  assert.match(figureContext(prompt), /Spherical_Coordinates/);
+  assert.match(figureContext(prompt), /Cylindrical_Coordinates/);
+  assert.equal(wikiTopicForPrompt('修改贪吃蛇的布局'), undefined);
+});
+
+test('internal preview capability links allow only the preview route', async () => {
+  const { safePreviewHref } = await import('../web/src/services/markdown-url.mjs');
+  const prefix = '/preview/' + 'x'.repeat(43) + '/';
+  assert.equal(safePreviewHref(prefix + 'index.html?v=2'), prefix + 'index.html?v=2');
+  assert.equal(safePreviewHref(prefix + '../../api/me'), null);
+  assert.equal(safePreviewHref('/api/me'), null);
+  assert.equal(safePreviewHref('//example.org' + prefix), null);
+});

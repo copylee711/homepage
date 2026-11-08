@@ -20,3 +20,10 @@ export function safeHref(raw) {
   if (url.protocol === 'mailto:' && /[?&](?:body|cc|bcc)=/i.test(value)) return null;
   return url.href;
 }
+
+export function safePreviewHref(raw) {
+  if (typeof raw !== 'string' || !/^\/preview\/[A-Za-z0-9_-]{43}\/(?:[^\s\\#?]*)(?:[?#][^\s\\]*)?$/.test(raw)) return null;
+  const url = new URL(raw, 'https://iris.invalid');
+  const root = raw.slice(0, 53);
+  return url.pathname.startsWith(root) ? url.pathname + url.search + url.hash : null;
+}

@@ -262,9 +262,18 @@ class Pi {
   publish(event) {
     if (!this.fanout || !event) return;
     if (event.type === 'gateway_error') this.recordNote('error', event.error);
+    let imageAllowance = event.type === 'tool_execution_end' && !event.isError &&
+      ['read', 'web_view_image'].includes(event.toolName) ? Math.min(160 * 1024, this.previewBudget || 0) : 0;
     const line = this.mask(JSON.stringify(event, (_key, value) =>
-      value?.type === 'image' && typeof value.data === 'string'
-        ? { type: 'text', text: '[图片已交给模型]' } : value)) + '\n';
+      {
+      if (value?.type !== 'image' || typeof value.data !== 'string') return value;
+      if (value.data.length <= imageAllowance && ['image/png','image/jpeg','image/gif','image/webp','image/bmp'].includes(value.mimeType)) {
+        imageAllowance -= value.data.length;
+        this.previewBudget -= value.data.length;
+        return value;
+      }
+      return { type: 'text', text: '[图片已交给模型]' };
+    })) + '\n';
     this.fanout.publish(line);
     this.persist(line);
   }
@@ -312,7 +321,7 @@ class Pi {
     if (permission?.execution && EXECUTION_MODES.includes(permission.execution)) {
       this.execution = permission.execution;
     }
-    this.busy = true; this.webSession = new WebSession(); this.wikiTurn = { checks: new Map() }; this.stopping = false; this.lastRenew = Date.now();
+    this.busy = true; this.previewBudget = 512 * 1024; this.webSession = new WebSession(); this.wikiTurn = { checks: new Map() }; this.stopping = false; this.lastRenew = Date.now();
     this.turnNote = null;
     // Goal mode keeps continuing across settle points until the goal reports done.
     this.goal = goal ? { continues: 0, max: 20 } : null;

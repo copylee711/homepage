@@ -15,6 +15,12 @@ const scale = ref(1);
 
 function zoomIn() { scale.value = Math.min(scale.value * 1.25, 4); }
 function zoomOut() { scale.value = Math.max(scale.value / 1.25, 0.25); }
+function zoomOnWheel(event: WheelEvent) {
+  if (!event.ctrlKey || !event.deltaY) return;
+  event.preventDefault();
+  if (event.deltaY < 0) zoomIn();
+  else zoomOut();
+}
 function resetZoom() { scale.value = 1; }
 
 function download() {
@@ -37,7 +43,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey, true));
 
 <template>
   <teleport to="body">
-    <div class="iris-lightbox-backdrop" role="dialog" aria-modal="true" :aria-label="item.name || '图片预览'" @click.self="emit('close')">
+    <div class="iris-lightbox-backdrop" role="dialog" aria-modal="true" @wheel="zoomOnWheel" :aria-label="item.name || '图片预览'" @click.self="emit('close')">
       <header class="iris-lightbox-bar" @click.stop>
         <div class="iris-lightbox-meta">
           <span class="iris-lightbox-name">{{ item.name || '图片预览' }}</span>
@@ -45,13 +51,13 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey, true));
         </div>
         <div class="iris-lightbox-actions">
           <button type="button" class="lightbox-btn" title="缩小" aria-label="缩小" @click="zoomOut">
-            <Icon name="zoom-out" :size="16" />
+            <Icon name="minus" :size="16" />
           </button>
           <button type="button" class="lightbox-btn" title="实际尺寸 (100%)" aria-label="重置缩放" @click="resetZoom">
             <span class="lightbox-zoom-text">{{ Math.round(scale * 100) }}%</span>
           </button>
           <button type="button" class="lightbox-btn" title="放大" aria-label="放大" @click="zoomIn">
-            <Icon name="zoom-in" :size="16" />
+            <Icon name="plus" :size="16" />
           </button>
           <button type="button" class="lightbox-btn" title="下载图片" aria-label="下载图片" @click="download">
             <Icon name="download" :size="16" />

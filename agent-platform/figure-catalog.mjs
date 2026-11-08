@@ -48,6 +48,34 @@ const figures = [
     ],
     "url": "https://upload.wikimedia.org/wikipedia/commons/d/da/Cell_membrane_detailed_diagram_en.svg",
     "sourceUrl": "https://commons.wikimedia.org/wiki/File:Cell_membrane_detailed_diagram_en.svg"
+  },
+  {
+    "title": "球面坐标",
+    "description": "图中角符号沿用原图，讲解中应说明方位角和从正 z 轴量起的极角。",
+    "author": "Inductiveload",
+    "license": "Public domain",
+    "aliases": [
+      "球面坐标",
+      "球坐标",
+      "spherical coordinates",
+      "spherical coordinate"
+    ],
+    "url": "https://upload.wikimedia.org/wikipedia/commons/5/51/Spherical_Coordinates_%28Colatitude%2C_Longitude%29.svg",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Spherical_Coordinates_%28Colatitude%2C_Longitude%29.svg"
+  },
+  {
+    "title": "柱面坐标",
+    "description": "展示离 z 轴的径向距离、方位角和高度。",
+    "author": "Inductiveload",
+    "license": "Public domain",
+    "aliases": [
+      "柱面坐标",
+      "柱坐标",
+      "cylindrical coordinates",
+      "cylindrical coordinate"
+    ],
+    "url": "https://upload.wikimedia.org/wikipedia/commons/b/b7/Cylindrical_Coordinates.svg",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Cylindrical_Coordinates.svg"
   }
 ];
 
@@ -84,12 +112,23 @@ function matchFigures(text, count) {
     .map(({ figure }) => figure);
 }
 
+export function wikiTopicForPrompt(prompt) {
+  if (typeof prompt !== 'string') return undefined;
+  if (/(?:github.{0,15}(?:热门|热榜|趋势|榜单|trending)|trending.{0,15}github)/i.test(prompt)) return 'github';
+  if (/(?:大模型|LLM|模型).{0,12}(?:榜单|排名|排行榜)|LLM leaderboard/i.test(prompt)) return 'llm';
+  if (/今日(?:新闻|热点)|新闻(?:头条|汇总)|(?:latest|today.s) news/i.test(prompt)) return 'news';
+  if (/球面坐标|柱面坐标|曲线积分|概率分布|(?:spherical|cylindrical) coordinates?/i.test(prompt)) return 'mathematics';
+  if (/高斯(?:定理|定律)|电磁学|Gauss.s law/i.test(prompt)) return 'physics';
+  if (/细胞膜|流动镶嵌模型|fluid mosaic model/i.test(prompt)) return 'biology';
+  return undefined;
+}
+
 export function figureContext(prompt) {
   if (typeof prompt !== 'string' || /(?:纯文字|只用文字|不要配图|不需要配图|text[- ]only|no (?:images|pictures|figures|visuals))/i.test(prompt)) return '';
-  const results = matchFigures(prompt, 1);
+  const results = matchFigures(prompt, 2);
   if (!results.length) return '';
-  return '\nA curated teaching figure matches the latest user prompt: ' + JSON.stringify(results[0]) +
-    '. If the task is a concept explanation and this figure explains it, embed it directly in Markdown beside the relevant paragraph, with its source link and credit. No lookup or preview is needed. Respect the user’s requested format.';
+  return '\nCurated teaching figures match the latest user prompt: ' + JSON.stringify(results) +
+    '. If the task is a concept explanation embed the matching figures directly in Markdown beside the relevant paragraph, with its source link and credit. No lookup or preview is needed. Respect the user’s requested format.';
 }
 
 export async function searchImages(params, externalSearch) {

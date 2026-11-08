@@ -10,7 +10,7 @@ import { useWorkspace } from '../stores/workspace';
 import { useSession } from '../stores/session';
 import { useUi } from '../stores/ui';
 import { workspaceImageUrl } from '../services/markdown-image.mjs';
-import { toolImagePath } from '../services/tool-images.mjs';
+import { toolImagePath, toolRemoteImage } from '../services/tool-images.mjs';
 
 const props = defineProps<{ block?: any; tools?: any[] }>();
 const ui = useUi();
@@ -337,13 +337,15 @@ function durationOf(block: any) {
 
 function imageName(block: any) {
   const args = parseArgs(block.args);
-  return String(args.path || args.file_path || '').split(/[\\/]/).pop() || '读取的图片';
+  return String(args.path || args.file_path || args.url || '').split(/[\\/]/).pop() || '读取的图片';
 }
 
 // Image payloads never reach the browser, so a read-image row shows the file
 // from the workspace instead of an inline copy.
 function imageUrlFor(block: any): string | undefined {
   if (block?.imageUrl) return block.imageUrl;
+  const remote = toolRemoteImage(block);
+  if (remote) return '/api/image?url=' + encodeURIComponent(remote);
   const path = toolImagePath(block);
   if (!path) return undefined;
   return workspaceImageUrl(path, useSession().currentProjectId || 'default');

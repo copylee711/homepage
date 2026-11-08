@@ -14,6 +14,8 @@ export const ICONS: Record<string, string[]> = {
     'M12 3v18',
   ],
   save: ['M5 4h11l3 3v13H5z', 'M8 4v5h7V4', 'M8 20v-6h8v6'],
+  minus: ['M5 12h14'],
+  'zoom-in': ['M12 5v14', 'M5 12h14'],
   plus: ['M12 5v14', 'M5 12h14'],
   package: ['M12 3l9 5v9l-9 5-9-5V8l9-5z', 'M3 8l9 5 9-5', 'M12 13v9', 'M7.5 5.5l9 5v4'],
   code: ['M8 7l-5 5 5 5', 'M16 7l5 5-5 5', 'M14 4l-4 16'],

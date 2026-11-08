@@ -3,10 +3,10 @@
 import { splitInlineMath, extractDisplayMath, renderMathInto } from './math.js';
 import { highlightInto } from './highlight.js';
 import { widget } from './widgets.js';
-import { isWsFilePath, safeHref } from './markdown-url.mjs';
+import { isWsFilePath, safeHref, safePreviewHref } from './markdown-url.mjs';
 import { createMarkdownImage, imageUrl as markdownImageUrl } from './markdown-image.mjs';
 
-export { isWsFilePath, safeHref };
+export { isWsFilePath, safeHref, safePreviewHref };
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*([A-Za-z0-9_+#.-]*)[^`~]*$/;
 const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*)$/;
@@ -80,7 +80,8 @@ function node(doc, tag, className, text) {
   return element;
 }
 function link(doc, href, label, className = '') {
-  if (isWsFilePath(href)) {
+  const preview = safePreviewHref(href);
+  if (!preview && isWsFilePath(href)) {
     const cleanPath = href.trim();
     const anchor = node(doc, 'a', (className ? className + ' ' : '') + 'md-ws-link', label);
     anchor.setAttribute('href', '#');
@@ -88,7 +89,7 @@ function link(doc, href, label, className = '') {
     anchor.setAttribute('title', `点击在工作区中定位并查看此文件：${cleanPath}`);
     return anchor;
   }
-  const safe = safeHref(href);
+  const safe = preview || safeHref(href);
   if (!safe) return node(doc, 'span', 'md-blocked-link', label);
   const anchor = node(doc, 'a', className || null, label);
   anchor.setAttribute('href', safe);
@@ -575,7 +576,7 @@ export function renderInline(value, parent, doc = globalThis.document, depth = 0
           }
           index = nextIndex;
           continue;
-        } else if (isDeliverableExt(found.href) || isDeliverableExt(found.label)) {
+        } else if (!safePreviewHref(found.href) && (isDeliverableExt(found.href) || isDeliverableExt(found.label))) {
           flush();
           parent.append(deliverableCard(doc, found.href, found.label));
           index = found.end;
