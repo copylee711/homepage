@@ -4,6 +4,9 @@
 !src/
 !src/styles/
 !src/styles/tokens.css
+!openwiki/
+!openwiki/iris-figures/
+!openwiki/iris-figures/**
 agent-platform/.env
 agent-platform/*.local
 agent-platform/secrets/
