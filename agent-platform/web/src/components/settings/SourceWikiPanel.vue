@@ -47,8 +47,21 @@ async function save() {
     editing.value = false;
     emit('editing', false);
     notice.value = '搜索源目录已保存';
-  } catch (e: any) { error.value = e.message; }
+    return true;
+  } catch (e: any) { error.value = e.message; return false; }
   finally { busy.value = false; }
+}
+
+async function changeSemantic(event: Event) {
+  if (!directory.value) return;
+  const previous = directory.value.semantic === true;
+  directory.value.semantic = (event.target as HTMLInputElement).checked;
+  if (editing.value) return;
+  if (directory.value.semantic && !directory.value.semanticAvailable) {
+    startEdit();
+    return;
+  }
+  if (!(await save())) directory.value.semantic = previous;
 }
 </script>
 
@@ -74,9 +87,9 @@ async function save() {
       <p class="question-hint">利用任务已访问的来源。连续三次访问失败会标记待核查，并从 Agent 的推荐中暂时移除。</p>
       <div class="setting-row">
         <label for="wiki-semantic">发送消息时检索相似来源</label>
-        <input id="wiki-semantic" v-model="directory.semantic" type="checkbox" :disabled="!editing || busy" />
+        <input id="wiki-semantic" :checked="directory.semantic" type="checkbox" :disabled="busy" @change="changeSemantic" />
       </div>
-      <p class="question-hint">{{ directory.semanticAvailable ? '开启后，会将本轮消息的前 1800 字符和已启用的来源目录交给配置的向量服务。超时会回退到主题匹配。' : '尚未配置向量服务。点击编辑目录填写端点和模型。' }}</p>
+      <p class="question-hint">{{ directory.semanticAvailable ? '开启后，会将本轮消息的前 1800 字符和已启用的来源目录交给配置的向量服务。超时会回退到主题匹配。' : '尚未配置向量服务。请填写端点和模型，保存后生效。' }}</p>
       <div v-if="editing && directory.embedding" class="source-wiki-embedding">
         <label>Embeddings 端点 <input v-model.trim="directory.embedding.url" type="url" placeholder="https://服务地址/v1/embeddings" :disabled="busy" /></label>
         <label>模型 ID <input v-model.trim="directory.embedding.model" placeholder="text-embedding-3-small" :disabled="busy" /></label>
@@ -100,7 +113,7 @@ async function save() {
       <div v-if="editing" class="approval-actions">
         <button type="button" class="btn btn-quiet" :disabled="busy || directory.sources.length >= 80" @click="add">添加来源</button>
         <button type="button" class="btn btn-quiet" :disabled="busy" @click="load">取消编辑并重新读取</button>
-        <button type="button" class="btn btn-solid" :disabled="busy" @click="save">{{ busy ? '保存中…' : '保存目录' }}</button>
+        <button type="button" class="btn btn-solid" :disabled="busy || (directory.semantic && !directory.semanticAvailable && (!directory.embedding?.url || !directory.embedding?.model))" @click="save">{{ busy ? '保存中…' : '保存目录' }}</button>
       </div>
       <p v-if="notice" class="question-hint" role="status">{{ notice }}</p>
     </template>

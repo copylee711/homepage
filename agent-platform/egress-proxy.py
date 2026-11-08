@@ -16,12 +16,15 @@ spec = importlib.util.spec_from_file_location('web_access', Path(__file__).with_
 web = importlib.util.module_from_spec(spec); spec.loader.exec_module(web)
 slots = threading.BoundedSemaphore(32)
 MAX_TRANSFER = 1024 * 1024 * 1024
-GOOGLE_DOMAINS = ('google.com', 'gstatic.com', 'googleapis.com', 'googleusercontent.com')
+DOH_DOMAINS = (
+    'google.com', 'gstatic.com', 'googleapis.com', 'googleusercontent.com',
+    'wikipedia.org', 'wikimedia.org',
+)
 dns_cache = {}
 dns_lock = threading.Lock()
 
 
-def resolve_google(hostname):
+def resolve_via_doh(hostname):
     name = hostname.rstrip('.').lower()
     with dns_lock:
         cached = dns_cache.get(name)
@@ -55,9 +58,9 @@ def resolve_google(hostname):
 def resolve_target(raw):
     hostname = (urlsplit(raw).hostname or '').rstrip('.').lower()
     use_doh = os.environ.get('EGRESS_UPSTREAM_PROXY') and any(
-        hostname == domain or hostname.endswith('.' + domain) for domain in GOOGLE_DOMAINS
+        hostname == domain or hostname.endswith('.' + domain) for domain in DOH_DOMAINS
     )
-    return web.resolve_url(raw, lookup=resolve_google if use_doh else None)
+    return web.resolve_url(raw, lookup=resolve_via_doh if use_doh else None)
 
 def connect(address, port):
     upstream = os.environ.get('EGRESS_UPSTREAM_PROXY', '')
