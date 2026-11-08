@@ -931,8 +931,16 @@ export const server = createServer(async (req, res) => {
     }
     if (req.url === '/browser/input') {
       const kind = String(input.kind || '');
-      if (!['click', 'dblclick', 'move', 'wheel', 'text', 'key'].includes(kind)) fail(422, '浏览器输入类型无效');
+      if (!['mouse', 'click', 'dblclick', 'move', 'wheel', 'text', 'key'].includes(kind)) fail(422, '浏览器输入类型无效');
       const payload = { kind };
+      if (kind === 'mouse') {
+        const action = String(input.action || '');
+        if (!['down', 'up', 'move'].includes(action)) fail(422, '鼠标动作无效');
+        payload.action = action;
+        payload.button = ['right', 'middle'].includes(input.button) ? input.button : 'left';
+        payload.clickCount = Math.max(1, Math.min(Number(input.clickCount) || 1, 3));
+      }
+      if (kind === 'key' && ['down', 'up', 'press'].includes(input.action)) payload.action = input.action;
       for (const key of ['x', 'y', 'dx', 'dy']) if (Number.isFinite(Number(input[key]))) payload[key] = Math.round(Number(input[key]));
       if (kind === 'text') {
         if (typeof input.text !== 'string' || !input.text || input.text.length > 20000) fail(422, '输入内容无效');
