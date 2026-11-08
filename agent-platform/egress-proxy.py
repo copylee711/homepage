@@ -1,6 +1,7 @@
 """Credential-free HTTP(S) proxy on the isolated tools network only."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
+import ipaddress
 from pathlib import Path
 import socket
 import selectors
@@ -16,16 +17,12 @@ spec = importlib.util.spec_from_file_location('web_access', Path(__file__).with_
 web = importlib.util.module_from_spec(spec); spec.loader.exec_module(web)
 slots = threading.BoundedSemaphore(32)
 MAX_TRANSFER = 1024 * 1024 * 1024
-DOH_DOMAINS = (
-    'google.com', 'gstatic.com', 'googleapis.com', 'googleusercontent.com',
-    'wikipedia.org', 'wikimedia.org',
-)
 dns_cache = {}
 dns_lock = threading.Lock()
 
 
 def resolve_via_doh(hostname):
-    name = hostname.rstrip('.').lower()
+    name = hostname.rstrip('.').encode('idna').decode('ascii').lower()
     with dns_lock:
         cached = dns_cache.get(name)
         if cached and cached[0] > time.monotonic():
@@ -57,9 +54,16 @@ def resolve_via_doh(hostname):
 
 def resolve_target(raw):
     hostname = (urlsplit(raw).hostname or '').rstrip('.').lower()
-    use_doh = os.environ.get('EGRESS_UPSTREAM_PROXY') and any(
-        hostname == domain or hostname.endswith('.' + domain) for domain in DOH_DOMAINS
-    )
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        address = None
+    if address is not None:
+        return web.resolve_url(raw, lookup=lambda _: [str(address)] if address.version == 4 else [])
+    if '.' not in hostname or hostname.endswith(('.local', '.localhost', '.internal', '.home.arpa')):
+        raise ValueError('Only public DNS names are supported')
+    # Resolve where proxied connections exit, without using the host's DNS answers.
+    use_doh = bool(os.environ.get('EGRESS_UPSTREAM_PROXY'))
     return web.resolve_url(raw, lookup=resolve_via_doh if use_doh else None)
 
 def connect(address, port):
