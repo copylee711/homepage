@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import { sandbox } from './sandbox-client.mjs';
 import { fail } from './shared.mjs';
 
 export const WIKI_TOPICS = ['news', 'llm', 'github', 'images', 'mathematics', 'physics', 'biology'];
@@ -113,33 +114,48 @@ export class SourceWiki {
       const suppressed = new Set(current.suppressed || []);
       for (const source of current.sources) if (!retained.has(key(source))) suppressed.add(key(source));
       for (const id of retained) suppressed.delete(id);
-      return { ...current, auto: input.auto === true, semantic: input.semantic === true, sources, suppressed: [...suppressed].slice(-320) };
+      let embedding = current.embedding;
+      if (input.embedding) {
+        const { url, model, apiKey } = input.embedding;
+        if (!url && !model) embedding = undefined;
+        else {
+          let endpoint;
+          try { endpoint = new URL(url); } catch { fail(422, '请输入完整的 HTTPS Embeddings 端点'); }
+          if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || endpoint.port ||
+              endpoint.hash || endpoint.href.length > 1000 || typeof model !== 'string' || !model.trim() ||
+              model.length > 180 || (apiKey && (typeof apiKey !== 'string' || !/^[!-~]{1,512}$/.test(apiKey))))
+            fail(422, '向量端点、模型或密钥格式无效');
+          embedding = { url: endpoint.href, model: model.trim(), apiKey: apiKey ||
+            (endpoint.href === embedding?.url ? embedding.apiKey : '') };
+        }
+      }
+      return { ...current, embedding, auto: input.auto === true, semantic: input.semantic === true, sources, suppressed: [...suppressed].slice(-320) };
     });
   }
-  get semanticAvailable() {
-    return Boolean(process.env.WIKI_EMBEDDING_URL && process.env.WIKI_EMBEDDING_MODEL && process.env.WIKI_EMBEDDING_KEY);
+  embeddingConfig(snapshot) {
+    return snapshot.embedding || { url: process.env.WIKI_EMBEDDING_URL, model: process.env.WIKI_EMBEDDING_MODEL,
+      apiKey: process.env.WIKI_EMBEDDING_KEY };
+  }
+
+  publicConfig(snapshot) {
+    const { embedding, ...rest } = snapshot;
+    const effective = this.embeddingConfig(snapshot);
+    return { ...rest, semanticAvailable: !!(effective.url && effective.model),
+      embedding: { url: embedding?.url || '', model: embedding?.model || '', hasKey: !!embedding?.apiKey } };
   }
 
   async semanticMatch(user, snapshot, prompt) {
-    if (!this.semanticAvailable || !snapshot.semantic || typeof prompt !== 'string' || !prompt.trim()) return [];
-    const endpoint = new URL(process.env.WIKI_EMBEDDING_URL);
-    if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password) return [];
-    const model = process.env.WIKI_EMBEDDING_MODEL;
+    const { url, model, apiKey } = this.embeddingConfig(snapshot);
+    if (!url || !model || !snapshot.semantic || typeof prompt !== 'string' || !prompt.trim()) return [];
     const sources = snapshot.sources.filter(source => source.enabled && (source.failures || 0) < 3);
     if (!sources.length) return [];
     const descriptions = sources.map(source => `${topicDescription[source.topic]} | ${source.title} | ${source.url}`);
-    const fingerprint = JSON.stringify([endpoint.href, model, descriptions]);
+    const fingerprint = createHash('sha256').update(JSON.stringify([url, model, apiKey, descriptions])).digest('hex');
     const cached = this.vectors.get(user);
     const index = cached?.fingerprint === fingerprint ? cached.vectors : null;
     const query = prompt.trim().slice(0, 1800);
     const input = index ? [query] : [query, ...descriptions];
-    const response = await fetch(endpoint, {
-      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(1200),
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + process.env.WIKI_EMBEDDING_KEY },
-      body: JSON.stringify({ model, input, encoding_format: 'float' }),
-    });
-    if (!response.ok) return [];
-    const result = await response.json();
+    const result = await sandbox('/wiki/embedding', user, undefined, null, { url, model, apiKey, input }, 1350);
     if (!Array.isArray(result.data) || result.data.length !== input.length) return [];
     const vectors = input.map((_, i) => unitVector(result.data.find(item => item.index === i)?.embedding));
     const [queryVector, ...built] = vectors;

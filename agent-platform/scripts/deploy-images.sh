@@ -85,6 +85,8 @@ if [ "$GATEWAY_WEB" = prebuilt ]; then
   mkdir -p "$ctx/agent-platform/web"
   cp gateway.mjs shared.mjs widget-document.mjs cloud-turns.mjs turn-stream.mjs prompt-input.mjs \
     "$ctx/agent-platform/"
+  mkdir -p "$ctx/agent-platform/gateway-deps"
+  cp gateway-deps/package*.json "$ctx/agent-platform/gateway-deps/"
   cp -R web/dist "$ctx/agent-platform/web/dist"
   build gateway "$APP/Dockerfile.gateway.prebuilt" "$ctx"
 else

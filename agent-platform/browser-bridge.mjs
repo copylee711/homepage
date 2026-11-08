@@ -28,11 +28,12 @@ let context = null;
 let page = null;
 let cdp = null;
 let pressedButtons = 0;
-let viewport = { width: 1280, height: 800 };
+let viewport = { width: Number(process.env.IRIS_BROWSER_WIDTH) || 1280, height: Number(process.env.IRIS_BROWSER_HEIGHT) || 800 };
 let seq = 0;
 let lastHash = '';
 let closed = false;
 let navigating = false;
+let attemptedUrl = '';
 let cachedTitle = '';
 let ready = null;
 const history = { stack: [], index: -1 };
@@ -69,7 +70,7 @@ function cleanUrl(raw) {
 }
 
 function pageUrl() {
-  try { return page ? page.url() : ''; } catch { return ''; }
+  try { const url = page?.url() || ''; return url.startsWith('chrome-error:') ? attemptedUrl : url; } catch { return ''; }
 }
 
 async function pageTitle() {
@@ -157,7 +158,10 @@ async function navigate(url, waitUntil = 'domcontentloaded') {
   const target = cleanUrl(url);
   if (!page || page.isClosed()) throw new Error('浏览器页面已关闭');
   navigating = true;
-  const response = await page.goto(target, { waitUntil, timeout: 30000 });
+  attemptedUrl = target;
+  let response;
+  try { response = await page.goto(target, { waitUntil, timeout: 30000 }); }
+  finally { navigating = false; }
   trackNavigation(pageUrl(), 'goto');
   navigating = false;
   return { url: pageUrl(), title: await pageTitle(), status: response ? response.status() : 0 };

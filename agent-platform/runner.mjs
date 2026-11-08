@@ -686,8 +686,8 @@ export const server = createServer(async (req, res) => {
       const config = await activeProvider().catch(() => undefined);
       return json(res, 200, { label: modelLabel(config?.model || model.split('/').pop()) });
     }
-    if (req.url === '/search/wiki') return json(res, 200, { ...await sourceWiki.get(input.user), semanticAvailable: sourceWiki.semanticAvailable });
-    if (req.url === '/search/wiki/save') return json(res, 200, { ...await sourceWiki.save(input.user, input.config || {}), semanticAvailable: sourceWiki.semanticAvailable });
+    if (req.url === '/search/wiki') return json(res, 200, sourceWiki.publicConfig(await sourceWiki.get(input.user)));
+    if (req.url === '/search/wiki/save') return json(res, 200, sourceWiki.publicConfig(await sourceWiki.save(input.user, input.config || {})));
     if (req.url === '/search/settings') return json(res, 200, publicSearch(await searchSettings.get(input.user)));
     if (req.url === '/search/settings/save') return json(res, 200, await searchSettings.save(input.user, input.config));
     if (req.url === '/search/test') {

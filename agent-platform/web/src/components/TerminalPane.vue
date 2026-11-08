@@ -27,6 +27,7 @@ let pendingTimer: number | null = null;
 let writes: Promise<unknown> = Promise.resolve();
 let resizeTimer: number | null = null;
 let streamAbort: AbortController | null = null;
+let terminalSocket: WebSocket | null = null;
 let visibilityObserver: IntersectionObserver | null = null;
 let visible = true;
 let fontSize = 12.5;
@@ -85,7 +86,9 @@ function flush() {
     if (end < pending.length && /[\uD800-\uDBFF]/.test(pending[end - 1])) end--;
     const chunk = pending.slice(0, end);
     pending = pending.slice(end);
-    await post('/api/terminal/write', { data: toBase64(encoder.encode(chunk)) });
+    const payload = { data: toBase64(encoder.encode(chunk)) };
+    if (terminalSocket?.readyState === WebSocket.OPEN) terminalSocket.send(JSON.stringify(payload));
+    else await post('/api/terminal/write', payload);
   }).catch(error => {
     if (generation === gen) useUi().toast(error?.message || '终端输入未送达', { tone: 'error' });
   }).finally(() => {
@@ -103,6 +106,7 @@ function sendResize() {
 function queue(data: string) {
   pending += data;
   if (pending.length >= 4096) flush();
+  else if (terminalSocket?.readyState === WebSocket.OPEN) flush();
   else if (pendingTimer == null) pendingTimer = window.setTimeout(flush, 8);
 }
 
@@ -113,12 +117,52 @@ function scheduleResize() {
 
 // Output arrives on one long-lived response instead of a poll per chunk, so a
 // keystroke's echo comes back as soon as the shell writes it.
+function applyTerminalChunk(chunk: any) {
+  if (chunk.type === 'data') {
+    if (typeof chunk.base === 'number' && chunk.base > after) after = chunk.base;
+    if (chunk.data && term) term.write(fromBase64(chunk.data));
+    if (typeof chunk.cursor === 'number') after = chunk.cursor;
+  } else if (chunk.type === 'closed') {
+    phase.value = 'closed';
+    detail.value = '终端已结束';
+    return true;
+  } else if (chunk.type === 'input-error') {
+    useUi().toast(chunk.error || '终端输入未送达', { tone: 'error' });
+  }
+  return false;
+}
+
+function connectTerminalSocket() {
+  const url = new URL('/api/terminal/socket', location.href);
+  url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.searchParams.set('after', String(after));
+  return new Promise<boolean>(resolve => {
+    const socket = new WebSocket(url);
+    terminalSocket = socket;
+    let opened = false;
+    const timeout = window.setTimeout(() => socket.close(), 2500);
+    socket.onopen = () => { opened = true; clearTimeout(timeout); };
+    socket.onmessage = event => {
+      if (terminalSocket !== socket || !visible || document.hidden) { socket.close(); return; }
+      try { if (applyTerminalChunk(JSON.parse(event.data))) socket.close(); } catch {}
+    };
+    socket.onclose = () => {
+      clearTimeout(timeout);
+      if (terminalSocket === socket) terminalSocket = null;
+      resolve(opened);
+    };
+  });
+}
+
 async function pump(gen: number) {
   while (running && gen === generation) {
     if (!visible || document.hidden) {
       await wait(500);
       continue;
     }
+    const socketOpened = await connectTerminalSocket();
+    if (!running || gen !== generation || phase.value === 'closed') return;
+    if (socketOpened || !visible || document.hidden) { await wait(120); continue; }
     let response: Response;
     try {
       streamAbort = new AbortController();
@@ -157,15 +201,7 @@ async function pump(gen: number) {
           if (!line.trim()) continue;
           let chunk;
           try { chunk = JSON.parse(line); } catch { continue; }
-          if (chunk.type === 'data') {
-            if (typeof chunk.base === 'number' && chunk.base > after) after = chunk.base;
-            if (chunk.data && term) term.write(fromBase64(chunk.data));
-            if (typeof chunk.cursor === 'number') after = chunk.cursor;
-          } else if (chunk.type === 'closed') {
-            phase.value = 'closed';
-            detail.value = '终端已结束';
-            return;
-          }
+          if (applyTerminalChunk(chunk)) return;
         }
       }
     } catch {
@@ -207,6 +243,7 @@ async function reconnect() {
   running = false;
   generation += 1;
   streamAbort?.abort();
+  terminalSocket?.close();
   await wait(30);
   await open();
 }
@@ -290,6 +327,7 @@ onBeforeUnmount(() => {
   running = false;
   generation += 1;
   streamAbort?.abort();
+  terminalSocket?.close();
   if (pendingTimer != null) clearTimeout(pendingTimer);
   if (resizeTimer != null) clearTimeout(resizeTimer);
   observer?.disconnect();

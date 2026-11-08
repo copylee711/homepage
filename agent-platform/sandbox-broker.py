@@ -385,6 +385,7 @@ class Browser:
             '--env', 'HOME=/tmp',
             '--env', 'HTTP_PROXY=http://192.168.85.2:3128', '--env', 'HTTPS_PROXY=http://192.168.85.2:3128',
             '--env', 'IRIS_BROWSER_PROGRAM=' + program,
+            '--env', f'IRIS_BROWSER_WIDTH={self.width}', '--env', f'IRIS_BROWSER_HEIGHT={self.height}',
             '--log-driver', 'none', '--entrypoint', 'node', IMAGE,
             '-e', 'const f=require("fs");f.writeFileSync("/tmp/bridge.mjs",Buffer.from(process.env.IRIS_BROWSER_PROGRAM,"base64"));import("/tmp/bridge.mjs")')
         if created.returncode:
@@ -581,6 +582,8 @@ class Handler(BaseHTTPRequestHandler):
             user = value.get("user", "")
             if not USER.fullmatch(user):
                 return self.reply(422, {"error": "用户无效"})
+            if self.path == '/wiki/embedding':
+                return self.embedding(value)
             if self.path == '/files/download':
                 return self.download(user, value)
             if self.path == '/background/stop-user':
@@ -627,6 +630,32 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(400, {"error": str(error)[:500]})
         except Exception:
             self.reply(503, {"error": "沙箱服务不可用"})
+
+    def embedding(self, value):
+        url, model, inputs = value.get('url'), value.get('model'), value.get('input')
+        api_key = value.get('apiKey') or ''
+        if (not isinstance(url, str) or not url.startswith('https://') or
+                not isinstance(model, str) or not 1 <= len(model) <= 180 or
+                not isinstance(inputs, list) or not 1 <= len(inputs) <= 81 or
+                any(not isinstance(text, str) or not 1 <= len(text) <= 1800 for text in inputs) or
+                not isinstance(api_key, str) or not re.fullmatch(r'[!-~]{0,512}', api_key)):
+            return self.reply(422, {'error': '向量请求无效'})
+        if not web_slots.acquire(blocking=False):
+            return self.reply(503, {'error': '联网服务繁忙'})
+        try:
+            headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+            if api_key:
+                headers['Authorization'] = 'Bearer ' + api_key
+            result = web_access.fetch_public(url, raw_html=True, request={'headers': headers,
+                'body': json.dumps({'model': model, 'input': inputs, 'encoding_format': 'float'}).encode()},
+                max_bytes=8 * 1024 * 1024, timeout=1.2)
+            if result['status'] != 200 or result['truncated']:
+                raise ValueError('向量服务响应无效')
+            return self.reply(200, {'data': json.loads(result['text']).get('data')})
+        except (OSError, ValueError, TypeError, AttributeError):
+            return self.reply(502, {'error': '向量服务暂时不可用'})
+        finally:
+            web_slots.release()
 
     def download(self, user, value):
         path = value.get('path')

@@ -1,5 +1,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 let admin = true, granted = false;
@@ -8,6 +10,13 @@ const runner = createServer(async (req, res) => {
   let raw = ''; for await (const chunk of req) raw += chunk;
   lastRunner = { path: req.url, value: JSON.parse(raw) };
   if (req.url === '/prompt') lastPrompt = lastRunner.value;
+  if (req.url === '/browser/stream' || req.url === '/terminal/stream') {
+    res.writeHead(200, {'content-type':'application/x-ndjson'});
+    res.write(JSON.stringify({ type:'ping', after:lastRunner.value.after }) + '\n');
+    const timer=setTimeout(() => res.end(), 2000);
+    res.on('close',()=>clearTimeout(timer));
+    return;
+  }
   if (req.url === '/files/download') {
     const size = 40 * 1024 * 1024;
     const range = lastRunner.value.range;
@@ -186,4 +195,25 @@ test('workspace PDF streams past 15 MiB and accepts byte ranges in its same-orig
   assert.equal(preview.headers.get('x-frame-options'), 'SAMEORIGIN');
   assert.equal(preview.headers.get('content-range'), 'bytes 0-7/41943040');
   assert.equal(await preview.text(), '%PDF-1.7');
+});
+
+test('authenticated WebSockets relay browser and terminal input with stream cursors', async () => {
+  const { WebSocket } = createRequire(new URL('../gateway-deps/package.json', import.meta.url))('ws');
+  for (const [kind, payload, route] of [
+    ['browser', {events:[{kind:'mouse',action:'down',x:15,y:20},{kind:'mouse',action:'up',x:15,y:20}]}, '/browser/input'],
+    ['terminal', {data:'YQ=='}, '/terminal/write'],
+  ]) {
+    const url=base.replace('http:','ws:')+'/api/'+kind+'/socket?after=12';
+    const denied=new WebSocket(url,{origin:'http://evil.test',headers:{cookie:'copylee_ai='+'t'.repeat(64)}});
+    await assert.rejects(once(denied,'open'));
+    const socket=new WebSocket(url,{origin:'http://127.0.0.1',headers:{cookie:'copylee_ai='+'t'.repeat(64)}});
+    try {
+      const message=once(socket,'message');
+      assert.deepEqual(JSON.parse((await message)[0]),{type:'ping',after:12});
+      socket.send(JSON.stringify(payload));
+      for(let i=0;i<100 && lastRunner.path!==route;i++) await new Promise(resolve=>setTimeout(resolve,10));
+      assert.equal(lastRunner.path,route);
+      assert.equal(lastRunner.value.user,createHash('sha256').update('user-1').digest('hex'));
+    } finally { const closed=once(socket,'close'); socket.close(); await closed; }
+  }
 });

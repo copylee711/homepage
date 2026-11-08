@@ -8,11 +8,56 @@ import threading
 import time
 import os
 import http.client
+import json
+import ssl
+from urllib.parse import urlencode, urlsplit
 
 spec = importlib.util.spec_from_file_location('web_access', Path(__file__).with_name('web-access.py'))
 web = importlib.util.module_from_spec(spec); spec.loader.exec_module(web)
 slots = threading.BoundedSemaphore(32)
 MAX_TRANSFER = 1024 * 1024 * 1024
+GOOGLE_DOMAINS = ('google.com', 'gstatic.com', 'googleapis.com', 'googleusercontent.com')
+dns_cache = {}
+dns_lock = threading.Lock()
+
+
+def resolve_google(hostname):
+    name = hostname.rstrip('.').lower()
+    with dns_lock:
+        cached = dns_cache.get(name)
+        if cached and cached[0] > time.monotonic():
+            return cached[1]
+    host, port = os.environ['EGRESS_UPSTREAM_PROXY'].rsplit(':', 1)
+    connection = http.client.HTTPConnection(host, int(port), timeout=4)
+    try:
+        connection.set_tunnel('1.1.1.1', 443)
+        connection.connect()
+        connection.sock = ssl.create_default_context().wrap_socket(connection.sock, server_hostname='cloudflare-dns.com')
+        connection.request('GET', '/dns-query?' + urlencode({'name': name, 'type': 'A'}),
+                           headers={'Host': 'cloudflare-dns.com', 'Accept': 'application/dns-json'})
+        response = connection.getresponse()
+        if response.status != 200:
+            raise ValueError('DNS resolver unavailable')
+        result = json.loads(response.read(65536))
+    finally:
+        connection.close()
+    answers = [record for record in result.get('Answer', []) if record.get('type') == 1]
+    addresses = [record['data'] for record in answers]
+    if addresses:
+        ttl = max(1, min(300, *(record['TTL'] for record in answers)))
+        with dns_lock:
+            if len(dns_cache) >= 256:
+                dns_cache.pop(next(iter(dns_cache)))
+            dns_cache[name] = (time.monotonic() + ttl, addresses)
+    return addresses
+
+
+def resolve_target(raw):
+    hostname = (urlsplit(raw).hostname or '').rstrip('.').lower()
+    use_doh = os.environ.get('EGRESS_UPSTREAM_PROXY') and any(
+        hostname == domain or hostname.endswith('.' + domain) for domain in GOOGLE_DOMAINS
+    )
+    return web.resolve_url(raw, lookup=resolve_google if use_doh else None)
 
 def connect(address, port):
     upstream = os.environ.get('EGRESS_UPSTREAM_PROXY', '')
@@ -39,7 +84,7 @@ class Handler(BaseHTTPRequestHandler):
         remote = None
         try:
             if '/' in self.path or '@' in self.path or not self.path.endswith(':443'): return self.error(403)
-            _, port, address = web.resolve_url('https://' + self.path)
+            _, port, address = resolve_target('https://' + self.path)
             remote = connect(address, port)
             self.send_response(200, 'Connection Established'); self.end_headers(); self.wfile.flush()
             self.close_connection = True
@@ -67,7 +112,7 @@ class Handler(BaseHTTPRequestHandler):
         if not slots.acquire(blocking=False): return self.error(429)
         remote = None
         try:
-            url, port, address = web.resolve_url(self.path)
+            url, port, address = resolve_target(self.path)
             if url.scheme != 'http': return self.error(403)
             if self.headers.get('Transfer-Encoding'): return self.error(411)
             length = int(self.headers.get('Content-Length', '0'))

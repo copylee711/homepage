@@ -35,3 +35,19 @@ test('public defaults, account isolation, stale drafts and bounded automatic mai
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('embedding credentials stay private and do not follow a changed endpoint', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'iris-wiki-embedding-'));
+  const wiki = new SourceWiki(root);
+  const user = 'a'.repeat(64);
+  try {
+    const base = await wiki.get(user);
+    const embedding = {url:'https://example.org/v1/embeddings',model:'embed',apiKey:'private-key'};
+    const saved = await wiki.save(user, { ...base, semantic: true, embedding });
+    assert.equal(wiki.publicConfig(saved).embedding.hasKey, true);
+    assert.ok(!JSON.stringify(wiki.publicConfig(saved)).includes('private-key'));
+    const next = await wiki.save(user, { ...saved, embedding: {...embedding,url:'https://example.net/v1/embeddings',apiKey:''} });
+    assert.equal(next.embedding.apiKey, '');
+    await assert.rejects(wiki.save(user,{...next,embedding:{...embedding,url:'http://127.0.0.1'}}),{status:422});
+  } finally { await rm(root,{recursive:true,force:true}); }
+});

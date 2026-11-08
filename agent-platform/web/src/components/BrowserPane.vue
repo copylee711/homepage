@@ -19,7 +19,6 @@ const ui = useUi();
 const stage = ref<HTMLElement | null>(null);
 const canvas = ref<HTMLCanvasElement | null>(null);
 const addressEl = ref<HTMLInputElement | null>(null);
-const cursor = ref<{ x: number; y: number; visible: boolean }>({ x: 0, y: 0, visible: false });
 
 const phase = ref<'connecting' | 'open' | 'closed' | 'error'>('connecting');
 const detail = ref('');
@@ -47,6 +46,8 @@ let seq = 0;
 let running = false;
 let generation = 0;
 let url = '';
+const atHome = ref(true);
+const homeAddress = ref('');
 let editing = false;
 let visible = true;
 let decoding = false;
@@ -63,6 +64,7 @@ let wheelTimer: number | null = null;
 let wheelDelta = { x: 0, y: 0 };
 let resizeTimer: number | null = null;
 let streamAbort: AbortController | null = null;
+let browserSocket: WebSocket | null = null;
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -79,10 +81,9 @@ function draw() {
 
 function applyFrame(frame: any) {
   if (!frame || !frame.data) return;
-  frameW.value = Number(frame.width) || frameW.value;
-  frameH.value = Number(frame.height) || frameH.value;
   if (typeof frame.url === 'string') {
     url = frame.url;
+    atHome.value = frame.url === 'about:blank';
     if (!editing) address.value = frame.url === 'about:blank' ? '' : frame.url;
   }
   if (typeof frame.title === 'string') pageTitle.value = frame.title;
@@ -95,6 +96,8 @@ function applyFrame(frame: any) {
   const mime = typeof frame.mime === 'string' && /^image\/(jpeg|png)$/.test(frame.mime) ? frame.mime : 'image/jpeg';
   const next = new Image();
   next.onload = () => {
+    frameW.value = Number(frame.width) || frameW.value;
+    frameH.value = Number(frame.height) || frameH.value;
     image = next;
     draw();
     decoding = false;
@@ -104,6 +107,10 @@ function applyFrame(frame: any) {
 }
 
 function handleStreamEvent(event: any) {
+  if (event?.type === 'input-error') {
+    ui.toast(event.error || '浏览器输入未送达', { tone: 'error' });
+    return;
+  }
   if (event?.type === 'frame') {
     const frame = event.frame;
     if (frame && Number(frame.seq) > seq) {
@@ -118,12 +125,37 @@ function handleStreamEvent(event: any) {
   }
 }
 
+async function connectSocket() {
+  const url = new URL('/api/browser/socket', location.href);
+  url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.searchParams.set('after', String(seq));
+  return new Promise<boolean>(resolve => {
+    const socket = new WebSocket(url);
+    browserSocket = socket;
+    let opened = false;
+    const timeout = window.setTimeout(() => socket.close(), 2500);
+    socket.onopen = () => { opened = true; clearTimeout(timeout); };
+    socket.onmessage = event => {
+      if (browserSocket !== socket || !visible || document.hidden) { socket.close(); return; }
+      try { handleStreamEvent(JSON.parse(event.data)); } catch {}
+    };
+    socket.onclose = () => {
+      clearTimeout(timeout);
+      if (browserSocket === socket) browserSocket = null;
+      resolve(opened);
+    };
+  });
+}
+
 async function pump(gen: number) {
   while (running && gen === generation) {
     if (!visible || document.hidden) {
       await wait(600);
       continue;
     }
+    const socketOpened = await connectSocket();
+    if (!running || gen !== generation || phase.value === 'closed') return;
+    if (socketOpened || !visible || document.hidden) { await wait(120); continue; }
     let response: Response;
     try {
       streamAbort = new AbortController();
@@ -193,6 +225,7 @@ async function open(): Promise<boolean> {
   const gen = ++generation;
   pendingInputs = [];
   activePointer = null;
+  atHome.value = true;
   phase.value = 'connecting';
   detail.value = '';
   hasFrame.value = false;
@@ -217,6 +250,7 @@ async function reconnect() {
   running = false;
   generation += 1;
   streamAbort?.abort();
+  browserSocket?.close();
   await wait(30);
   await open();
 }
@@ -243,7 +277,8 @@ async function flushInput() {
   try {
     while (running && generation === gen && pendingInputs.length) {
       const events = pendingInputs.splice(0, 16);
-      await post('/api/browser/input', { events });
+      if (browserSocket?.readyState === WebSocket.OPEN) browserSocket.send(JSON.stringify({ events }));
+      else await post('/api/browser/input', { events });
     }
   } catch (error: any) {
     if (generation === gen) {
@@ -263,12 +298,19 @@ function navigate(action: 'goto' | 'back' | 'forward' | 'reload') {
     editing = false;
     addressEl.value?.blur();
     focusRemoteKeyboard();
-    phase.value = phase.value === 'closed' ? phase.value : phase.value;
+    detail.value = '';
+    loading.value = true;
     void post('/api/browser/navigate', { action, url: value })
-      .catch(error => { detail.value = error?.message || ''; });
+      .catch(error => { detail.value = error?.message || '网页连接失败'; })
+      .finally(() => { loading.value = false; });
     return;
   }
   void post('/api/browser/navigate', { action }).catch(() => {});
+}
+
+function goTo(value: string) {
+  address.value = value;
+  navigate('goto');
 }
 
 function changeSize(item: { key: string; width: number; height: number }) {
@@ -290,19 +332,8 @@ function point(event: MouseEvent | PointerEvent | WheelEvent) {
   const x = ((event.clientX - rect.left) / Math.max(1, rect.width)) * frameW.value;
   const y = ((event.clientY - rect.top) / Math.max(1, rect.height)) * frameH.value;
   return {
-    x: Math.max(0, Math.min(frameW.value, Math.round(x))),
-    y: Math.max(0, Math.min(frameH.value, Math.round(y))),
-  };
-}
-
-function moveCursor(event: PointerEvent | MouseEvent) {
-  const target = canvas.value;
-  if (!target) return;
-  const rect = target.getBoundingClientRect();
-  cursor.value = {
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top,
-    visible: event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom,
+    x: Math.max(0, Math.min(frameW.value - 1, Math.round(x))),
+    y: Math.max(0, Math.min(frameH.value - 1, Math.round(y))),
   };
 }
 
@@ -324,7 +355,6 @@ function onPointerDown(event: PointerEvent) {
 }
 
 function onPointerMove(event: PointerEvent) {
-  moveCursor(event);
   const now = Date.now();
   if (!event.isPrimary || (activePointer !== null && activePointer !== event.pointerId)) return;
   if (activePointer === null && now - lastMoveSent < 45) return;
@@ -489,6 +519,7 @@ onBeforeUnmount(() => {
   running = false;
   generation += 1;
   streamAbort?.abort();
+  browserSocket?.close();
   observer?.disconnect();
   observer = null;
   document.removeEventListener('pointerdown', onDocumentDown, true);
@@ -567,6 +598,7 @@ defineExpose({ reload: reconnect });
       </div>
     </div>
 
+    <div v-if="detail && phase === 'open'" class="browser-navigation-error" role="status">{{ detail }}</div>
     <div v-if="loading" class="browser-progress" aria-hidden="true"></div>
 
     <div
@@ -586,20 +618,22 @@ defineExpose({ reload: reconnect });
           @pointerdown="onPointerDown"
           @pointermove="onPointerMove"
           @pointerup="onPointerUp"
-          @pointerleave="cursor.visible = false"
           @pointercancel="onPointerUp"
           @wheel="onWheel"
           @lostpointercapture="onPointerUp"
           @contextmenu.prevent
         ></canvas>
-        <span
-          v-if="cursor.visible && hasFrame"
-          class="browser-cursor"
-          :style="{ left: cursor.x + 'px', top: cursor.y + 'px' }"
-          aria-hidden="true"
-        >
-          <svg viewBox="0 0 16 16" width="16" height="16"><path d="M2 2l5.4 12 1.7-4.9 4.9-1.7z" fill="#fff" stroke="#111" stroke-width="1.1" stroke-linejoin="round"/></svg>
-        </span>
+        <div v-if="atHome && hasFrame && phase === 'open'" class="browser-home" @pointerdown.stop @keydown.stop>
+          <Icon name="globe" :size="30" />
+          <strong>Iris 浏览器</strong>
+          <form class="browser-home-form" @submit.prevent="goTo(homeAddress)">
+            <input v-model.trim="homeAddress" aria-label="输入网址" placeholder="输入网址" autocomplete="off" />
+            <button type="submit" class="btn btn-solid" :disabled="!homeAddress || loading">打开</button>
+          </form>
+          <div class="browser-home-links">
+            <button v-for="site in [['Google', 'https://www.google.com/'], ['GitHub', 'https://github.com/'], ['维基百科', 'https://zh.wikipedia.org/']]" :key="site[0]" type="button" class="btn btn-quiet" :disabled="loading" @click="goTo(site[1])">{{ site[0] }}</button>
+          </div>
+        </div>
         <div v-if="!hasFrame || phase !== 'open'" class="browser-overlay" role="status">
           <template v-if="phase === 'connecting' || phase === 'open'"><span class="spinner"></span> 正在启动浏览器…</template>
           <template v-else>
@@ -638,10 +672,13 @@ defineExpose({ reload: reconnect });
 .browser-stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 8px; overflow: hidden; outline: none; }
 .browser-canvas-wrap { position: relative; flex: 1; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
 .browser-canvas { max-width: 100%; max-height: 100%; width: auto; height: auto; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 8px 24px rgba(0,0,0,.08); touch-action: none; user-select: none; -webkit-user-drag: none; }
-@media (pointer: fine) { .browser-canvas { cursor: none; } }
 .browser-keyboard-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-.browser-cursor { position: absolute; width: 16px; height: 16px; margin: -1px 0 0 -1px; pointer-events: none; filter: drop-shadow(0 1px 1px rgba(0,0,0,.35)); }
 .browser-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 10px; border-radius: 8px; background: color-mix(in srgb, var(--surface-2) 88%, transparent); color: var(--muted); font-size: 12.5px; }
+.browser-home { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 14px; background: var(--surface-2); }
+.browser-home-form { display: flex; width: min(90%, 420px); gap: 8px; }
+.browser-home-form input { min-width: 0; flex: 1; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+.browser-home-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.browser-navigation-error { padding: 5px 12px; font-size: 12px; overflow-wrap: anywhere; }
 .browser-note { max-width: 70%; text-align: center; }
 .browser-hint { flex: none; margin: 0; color: var(--faint); font-size: 10.5px; }
 </style>

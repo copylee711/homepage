@@ -4,7 +4,7 @@ import { get, post } from '../../services/api';
 import SelectMenu from '../SelectMenu.vue';
 
 type Source = { topic: string; title: string; url: string; origin: string; enabled: boolean; failures?: number; retry?: boolean };
-type Directory = { revision: number; auto: boolean; semantic?: boolean; semanticAvailable?: boolean; sources: Source[] };
+type Directory = { revision: number; auto: boolean; semantic?: boolean; semanticAvailable?: boolean; embedding?: { url: string; model: string; apiKey?: string; hasKey?: boolean }; sources: Source[] };
 const topics = [
   { value: 'news', label: '新闻' }, { value: 'llm', label: '模型榜单' },
   { value: 'github', label: 'GitHub 趋势' }, { value: 'images', label: '通用图库' },
@@ -28,6 +28,7 @@ async function load() {
 }
 
 function startEdit() {
+  if (directory.value) directory.value.embedding ||= { url: '', model: '' };
   editing.value = true;
   notice.value = '';
   emit('editing', true);
@@ -73,9 +74,15 @@ async function save() {
       <p class="question-hint">利用任务已访问的来源。连续三次访问失败会标记待核查，并从 Agent 的推荐中暂时移除。</p>
       <div class="setting-row">
         <label for="wiki-semantic">发送消息时检索相似来源</label>
-        <input id="wiki-semantic" v-model="directory.semantic" type="checkbox" :disabled="!editing || busy || !directory.semanticAvailable" />
+        <input id="wiki-semantic" v-model="directory.semantic" type="checkbox" :disabled="!editing || busy" />
       </div>
-      <p class="question-hint">{{ directory.semanticAvailable ? '开启后，会将本轮消息的前 1800 字符和已启用的来源目录交给配置的向量服务。超时会回退到主题匹配。' : '服务器尚未配置向量服务，当前使用主题匹配。' }}</p>
+      <p class="question-hint">{{ directory.semanticAvailable ? '开启后，会将本轮消息的前 1800 字符和已启用的来源目录交给配置的向量服务。超时会回退到主题匹配。' : '尚未配置向量服务。点击编辑目录填写端点和模型。' }}</p>
+      <div v-if="editing && directory.embedding" class="source-wiki-embedding">
+        <label>Embeddings 端点 <input v-model.trim="directory.embedding.url" type="url" placeholder="https://服务地址/v1/embeddings" :disabled="busy" /></label>
+        <label>模型 ID <input v-model.trim="directory.embedding.model" placeholder="text-embedding-3-small" :disabled="busy" /></label>
+        <label>API 密钥 <input v-model="directory.embedding.apiKey" type="password" autocomplete="new-password" :placeholder="directory.embedding.hasKey ? '已保存，留空沿用' : '服务需要鉴权时填写'" :disabled="busy" /></label>
+      </div>
+      <p v-else-if="directory.embedding?.model" class="question-hint">当前向量模型 {{ directory.embedding.model }}</p>
       <p v-if="!rows.length" class="question-hint">此主题暂无来源。</p>
       <div v-for="(source, i) in rows" :key="i" class="source-wiki-row">
         <template v-if="editing">
@@ -108,4 +115,6 @@ async function save() {
 .source-wiki-row small { color: var(--muted); }
 .source-wiki-row input:not([type='checkbox']) { flex: 1 1 150px; }
 .source-wiki .approval-actions { flex-wrap: wrap; }
+.source-wiki-embedding { display: grid; gap: 8px; margin-block: 12px; }
+.source-wiki-embedding label { display: grid; gap: 4px; }
 </style>

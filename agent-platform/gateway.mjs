@@ -1,4 +1,5 @@
 import { promptInput } from './prompt-input.mjs';
+import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
 import { Readable } from 'node:stream';
 import { createHmac, createHash, randomBytes } from 'node:crypto';
@@ -67,10 +68,10 @@ function writeAccess(req, auth) {
 }
 // Frame streams stay open for minutes, so they use their own request without
 // the ordinary runner timeout; the caller cancels it when the pane closes.
-async function runnerStream(path, user, payload) {
+async function runnerStream(path, user, payload, signal) {
   const response = await fetch(runnerURL + path, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Runner-Secret': runnerSecret },
-    body: JSON.stringify({ ...payload, user: createHash('sha256').update(user).digest('hex') }), redirect: 'error',
+    body: JSON.stringify({ ...payload, user: createHash('sha256').update(user).digest('hex') }), redirect: 'error', signal,
   });
   if (!response.ok && !(path === '/files/download' && response.status === 416)) {
     const value = await response.json().catch(() => ({}));
@@ -563,5 +564,98 @@ export const server = createServer(async (req, res) => {
     if (error.status === 401 && !req.url.startsWith('/api/')) return redirect(res, '/auth/login');
     json(res, error.status || 503, { error: error.status ? error.message : '服务暂时不可用，请稍后重试' });
   }
+});
+const { WebSocketServer } = createRequire(new URL('./gateway-deps/package.json', import.meta.url))('ws');
+const browserWebSocket = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024, perMessageDeflate: false });
+server.on('upgrade', async (req, socket, head) => {
+  const drop = () => socket.destroy();
+  socket.on('error', drop);
+  try {
+    const url = new URL(req.url, publicURL);
+    const transport = url.pathname === '/api/browser/socket' ? 'browser' : url.pathname === '/api/terminal/socket' ? 'terminal' : null;
+    if (!transport || req.headers.origin !== publicURL) return drop();
+    const auth = await identity(req);
+    if (!auth.can_execute || socket.destroyed) return drop();
+    browserWebSocket.handleUpgrade(req, socket, head, ws => {
+      socket.off('error', drop);
+      const user = auth.user.id;
+      const controller = new AbortController();
+      const close = () => {
+        controller.abort();
+        clearInterval(heartbeat);
+      };
+      const heartbeat = setInterval(async () => {
+        try {
+          if (!(await identity(req)).can_execute) ws.close(1008, 'permission revoked');
+        } catch { ws.close(1008, 'permission revoked'); }
+      }, 10000);
+      ws.on('error', close);
+      ws.on('close', close);
+      const queue = [];
+      let writing = false;
+      const isMove = event => event?.kind === 'mouse' && event.action === 'move';
+      const flush = async () => {
+        if (writing) return;
+        writing = true;
+        try {
+          while (queue.length && !controller.signal.aborted) {
+            const payload = transport === 'browser' ? { events: queue.splice(0, 16) } : queue.shift();
+            try {
+              const result = await runner(transport === 'browser' ? '/browser/input' : '/terminal/write', user, payload,
+                AbortSignal.any([controller.signal, AbortSignal.timeout(35000)]));
+              const value = await result.json();
+              if (value.ok === false) fail(409, '输入未送达');
+            } catch (error) {
+              if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'input-error', error: error.status ? error.message : '输入未送达' }));
+            }
+          }
+        } finally { writing = false; }
+      };
+      ws.on('message', (data, binary) => {
+        if (binary) return ws.close(1007, 'invalid input');
+        let payload;
+        try { payload = JSON.parse(data); } catch { return ws.close(1007, 'invalid input'); }
+        if (!payload || typeof payload !== 'object') return ws.close(1007, 'invalid input');
+        if (transport === 'browser') {
+          if (!Array.isArray(payload.events) || !payload.events.length || payload.events.length > 16 ||
+              payload.events.some(event => !event || typeof event !== 'object')) return ws.close(1007, 'invalid input batch');
+          for (const event of payload.events) {
+            if (isMove(event) && isMove(queue.at(-1))) queue.pop();
+            queue.push(event);
+          }
+        } else {
+          if (typeof payload.data !== 'string' || payload.data.length > 175000) return ws.close(1007, 'invalid terminal input');
+          queue.push({ data: payload.data, cols: payload.cols, rows: payload.rows });
+        }
+        if (queue.length > 64) return ws.close(1008, 'input queue limit');
+        void flush();
+      });
+      void (async () => {
+        try {
+          const upstream = await runnerStream('/' + transport + '/stream', user, { after: Math.max(0, Number(url.searchParams.get('after')) || 0) }, controller.signal);
+          const decoder = new TextDecoder();
+          let buffer = '';
+          for await (const chunk of upstream.body) {
+            buffer += decoder.decode(chunk, { stream: true });
+            let index;
+            while ((index = buffer.indexOf('\n')) >= 0) {
+              const line = buffer.slice(0, index);
+              buffer = buffer.slice(index + 1);
+              if (ws.readyState !== 1) return;
+              if (transport === 'terminal' && ws.bufferedAmount > 2 * 1024 * 1024) { ws.close(1013, 'slow reader'); return; }
+              if (line && (transport === 'terminal' || ws.bufferedAmount < 512 * 1024 || !line.startsWith('{"type": "frame"') && !line.startsWith('{"type":"frame"'))) ws.send(line);
+            }
+            if (buffer.length > 4 * 1024 * 1024) throw new Error('oversized frame');
+          }
+          ws.close(1012, 'stream rotation');
+        } catch (error) {
+          if (!controller.signal.aborted && ws.readyState === 1) {
+            if (error.status === 409 || error.status === 404) ws.send('{"type":"closed"}');
+            ws.close(1012, 'stream closed');
+          }
+        }
+      })();
+    });
+  } catch { drop(); }
 });
 if (process.env.NODE_ENV !== 'test') server.listen(Number(process.env.PORT || 8080), '0.0.0.0');
