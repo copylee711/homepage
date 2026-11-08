@@ -3,7 +3,38 @@ import { randomUUID, createHash } from 'node:crypto';
 import { sandbox } from './sandbox-client.mjs';
 import { fail } from './shared.mjs';
 
-export const WIKI_TOPICS = ['news', 'llm', 'github', 'images', 'mathematics', 'physics', 'biology'];
+export const WIKI_TOPICS = ['news', 'llm', 'github', 'images', 'mathematics', 'physics', 'biology', 'docs'];
+const MAX_SOURCES = 120;
+const documentation = [
+  ['Python', 'https://docs.python.org/3/', /\bpython(?:3)?\b/i],
+  ['JavaScript / Web API (MDN)', 'https://developer.mozilla.org/en-US/docs/Web', /\b(?:javascript|ecmascript|web api|css|html|mdn)\b/i],
+  ['TypeScript', 'https://www.typescriptlang.org/docs/', /\b(?:typescript|tsconfig)\b/i],
+  ['Node.js', 'https://nodejs.org/docs/latest/api/', /\bnode(?:\.js|js)\b/i],
+  ['npm', 'https://docs.npmjs.com/', /\bnpm\b/i],
+  ['pnpm', 'https://pnpm.io/', /\bpnpm\b/i],
+  ['Go', 'https://go.dev/doc/', /\b(?:golang|go\s+1\.\d+|go\.mod)\b|Go\s*(?:语言|版本|文档|标准库)/i],
+  ['Rust', 'https://doc.rust-lang.org/', /\b(?:rust|cargo|rustc)\b/i],
+  ['Java', 'https://docs.oracle.com/en/java/', /\b(?:java|jdk)\b/i],
+  ['Kotlin', 'https://kotlinlang.org/docs/home.html', /\bkotlin\b/i],
+  ['C# / .NET', 'https://learn.microsoft.com/en-us/dotnet/', /\bc#|\.net\b|\bdotnet\b/i],
+  ['Swift', 'https://www.swift.org/documentation/', /\bswift\b/i],
+  ['PHP', 'https://www.php.net/manual/en/', /\bphp\b/i],
+  ['Ruby', 'https://www.ruby-lang.org/en/documentation/', /\bruby\b/i],
+  ['C / C++ standards (WG14 / WG21)', 'https://www.open-std.org/', /\bc\+\+|\bc(?:11|17|23)\b|\bc语言/i],
+  ['React', 'https://react.dev/reference/react', /\breact\b/i],
+  ['Vue', 'https://vuejs.org/guide/', /\bvue(?:\.js|js)?(?:[23])?\b/i],
+  ['Next.js', 'https://nextjs.org/docs', /\bnext(?:\.js|js)\b/i],
+  ['Vite', 'https://vite.dev/guide/', /\bvite\b/i],
+  ['FastAPI', 'https://fastapi.tiangolo.com/', /\bfastapi\b/i],
+  ['Django', 'https://docs.djangoproject.com/', /\bdjango\b/i],
+  ['PostgreSQL', 'https://www.postgresql.org/docs/', /\b(?:postgresql|postgres|psql)\b/i],
+  ['Docker', 'https://docs.docker.com/', /\bdocker\b/i],
+  ['Kubernetes', 'https://kubernetes.io/docs/', /\b(?:kubernetes|k8s|kubectl)\b/i],
+  ['GitHub Actions', 'https://docs.github.com/en/actions', /\bgithub actions\b|\.github\/workflows\b/i],
+  ['AWS', 'https://docs.aws.amazon.com/', /\baws\b|amazon web services/i],
+  ['Cloudflare', 'https://developers.cloudflare.com/', /\bcloudflare\b/i],
+  ['OpenAI API', 'https://platform.openai.com/docs/', /\bopenai\b/i],
+];
 const topicDescription = {
   news: '时事新闻 今日热点 world news current events',
   llm: '大模型榜单 LLM AI benchmark model rankings',
@@ -38,7 +69,21 @@ const builtins = [
   ['biology', 'EMBL-EBI', 'https://www.ebi.ac.uk/'],
   ['biology', 'Wikimedia 生物图解', 'https://commons.wikimedia.org/wiki/Category:Biological_diagrams'],
   ['biology', 'RCSB PDB', 'https://www.rcsb.org/'],
+  ...documentation.map(([title, url]) => ['docs', title, url]),
 ].map(([topic, title, url]) => ({ topic, title, url, enabled: true, origin: 'builtin' }));
+
+export function documentationSources(snapshot, query) {
+  const available = snapshot.sources.filter(source =>
+    source.topic === 'docs' && source.enabled && (source.failures || 0) < 3);
+  if (typeof query !== 'string' || !query.trim()) return available;
+  const text = query.trim().slice(0, 1800);
+  const normalized = text.toLowerCase();
+  const matchedUrls = new Set(documentation.filter(([, , pattern]) => pattern.test(text)).map(([, url]) => url));
+  return available.filter(source => {
+    const host = new URL(source.url).hostname;
+    return matchedUrls.has(source.url) || normalized === source.title.toLowerCase() || normalized.includes(host);
+  });
+}
 
 export function wikiSource(value) {
   let url;
@@ -79,7 +124,7 @@ export class SourceWiki {
       const known = new Set(saved.knownBuiltins || []);
       const existing = new Set(saved.sources.map(key));
       const additions = builtins.filter(source => !known.has(key(source)) && !existing.has(key(source)));
-      return { ...saved, knownBuiltins: builtins.map(key), sources: [...saved.sources, ...additions].slice(0, 80) };
+      return { ...saved, knownBuiltins: builtins.map(key), sources: [...saved.sources, ...additions].slice(0, MAX_SOURCES) };
     }
     catch (error) { if (error.code === 'ENOENT') return initial(); throw error; }
   }
@@ -103,7 +148,7 @@ export class SourceWiki {
   save(user, input) {
     return this.update(user, current => {
       if (input.revision !== current.revision) fail(409, '目录已更新，请重新载入后再保存');
-      if (!Array.isArray(input.sources) || input.sources.length > 80) fail(422, '目录最多 80 条来源');
+      if (!Array.isArray(input.sources) || input.sources.length > MAX_SOURCES) fail(422, '目录最多 120 条来源');
       const sources = input.sources.map(value => {
         const source = wikiSource(value);
         const old = current.sources.find(item => key(item) === key(source));
@@ -147,7 +192,7 @@ export class SourceWiki {
   async semanticMatch(user, snapshot, prompt) {
     const { url, model, apiKey } = this.embeddingConfig(snapshot);
     if (!url || !model || !snapshot.semantic || typeof prompt !== 'string' || !prompt.trim()) return [];
-    const sources = snapshot.sources.filter(source => source.enabled && (source.failures || 0) < 3);
+    const sources = snapshot.sources.filter(source => source.topic !== 'docs' && source.enabled && (source.failures || 0) < 3);
     if (!sources.length) return [];
     const descriptions = sources.map(source => `${topicDescription[source.topic]} | ${source.title} | ${source.url}`);
     const fingerprint = createHash('sha256').update(JSON.stringify([url, model, apiKey, descriptions])).digest('hex');
@@ -185,7 +230,7 @@ export class SourceWiki {
         return { ...source, failures };
       });
       for (const source of proposals) {
-        if (sources.length >= 80 || current.suppressed?.includes(key(source)) || sources.some(item => key(item) === key(source))) continue;
+        if (sources.length >= MAX_SOURCES || current.suppressed?.includes(key(source)) || sources.some(item => key(item) === key(source))) continue;
         sources.push({ ...source, origin: 'agent', addedAt: new Date().toISOString() });
         changed = true;
       }

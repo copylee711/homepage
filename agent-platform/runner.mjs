@@ -22,7 +22,7 @@ import { prepareSessionCwd } from './session-cwd.mjs';
 import { usageSummary, sessionUsageStats } from './usage.mjs';
 import { ChatStore, normalizeProjectId, paginateChats, safeFilename, sanitizePermission } from './conversations.mjs';
 import { createZip } from './zip.mjs';
-import { SourceWiki, discoveredSource, WIKI_TOPICS } from './source-wiki.mjs';
+import { SourceWiki, discoveredSource, documentationSources, WIKI_TOPICS } from './source-wiki.mjs';
 import { SearchSettings, publicSearch } from './search.mjs';
 import { ToolApprovals, UserQuestions } from './tool-approvals.mjs';
 import { SessionSnapshots, projectSession } from './session-snapshot.mjs';
@@ -589,17 +589,23 @@ export const server = createServer(async (req, res) => {
         return json(res, 200, image);
       }
       if (req.url === '/runtime/wiki') {
-        const { topic, prompt } = await body(req);
+        const { topic, prompt, query } = await body(req);
         if (topic != null && !WIKI_TOPICS.includes(topic)) fail(422, '来源类别无效');
         const turn = pi.wikiTurn;
         const snapshot = turn ? await (turn.loaded ||= sourceWiki.get(pi.user)) : await sourceWiki.get(pi.user);
+        const docs = topic === 'docs' || (!topic && typeof prompt === 'string' && prompt.trim())
+          ? documentationSources(snapshot, topic === 'docs' ? query : pi.mask(prompt)) : [];
+        if (topic === 'docs' || docs.length) {
+          if (turn) { turn.snapshot = snapshot; turn.topic = 'docs'; }
+          return json(res, 200, { topic: 'docs', sources: docs.slice(0, 12).map(({ title, url }) => ({ title, url })) });
+        }
         const semantic = typeof prompt === 'string'
           ? await sourceWiki.semanticMatch(pi.user, snapshot, pi.mask(prompt)).catch(() => []) : [];
         const matchedTopic = topic || semantic[0]?.topic;
         if (turn && matchedTopic) { turn.snapshot = snapshot; turn.topic = matchedTopic; }
         const sources = semantic.length ? semantic : snapshot.sources.filter(source =>
           source.topic === topic && source.enabled && (source.failures || 0) < 3);
-        return json(res, 200, { sources: sources.slice(0, 12).map(({ title, url }) => ({ title, url })) });
+        return json(res, 200, { topic: matchedTopic, sources: sources.slice(0, 12).map(({ title, url }) => ({ title, url })) });
       }
       if (req.url === '/runtime/fetch') {
         const input = await body(req);

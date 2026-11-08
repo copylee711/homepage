@@ -59,6 +59,7 @@ const topics = [
   { value: 'mathematics', label: '数学' },
   { value: 'physics', label: '物理' },
   { value: 'biology', label: '生物' },
+  { value: 'docs', label: '开发文档' },
 ];
 
 const expanded = ref(true);
@@ -515,7 +516,7 @@ async function saveDirectoryDraft() {
             <button
               type="button"
               class="btn btn-quiet btn-sm"
-              :disabled="busy || directory.sources.length >= 80"
+              :disabled="busy || directory.sources.length >= 120"
               @click="openSourceDialog()"
             >
               添加来源
@@ -731,7 +732,7 @@ async function saveDirectoryDraft() {
           <div class="dialog-heading">
             <div>
               <h2>编辑搜索源目录</h2>
-              <p>按主题批量修改名称、网址与启停状态（上限 80 条，当前共 {{ directoryDraft.length }} 条）。</p>
+              <p>按主题批量修改名称、网址与启停状态（上限 120 条，当前共 {{ directoryDraft.length }} 条）。</p>
             </div>
             <button type="button" class="icon-button" aria-label="关闭" @click="closeAllDialogs">
               <Icon name="x" />

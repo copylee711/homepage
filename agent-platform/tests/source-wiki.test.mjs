@@ -1,9 +1,30 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SourceWiki, discoveredSource } from '../source-wiki.mjs';
+import { SourceWiki, discoveredSource, documentationSources } from '../source-wiki.mjs';
+
+test('existing accounts gain the official docs catalog and resolve relevant technologies without embeddings', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'iris-wiki-docs-'));
+  const wiki = new SourceWiki(root);
+  const user = 'c'.repeat(64);
+  try {
+    const base = await wiki.get(user);
+    const legacy = { ...base, sources: base.sources.filter(source => source.topic !== 'docs'),
+      knownBuiltins: base.knownBuiltins.filter(key => !key.startsWith('docs:')) };
+    await writeFile(wiki.file(user), JSON.stringify(legacy));
+    const snapshot = await wiki.get(user);
+    assert.equal(snapshot.sources.filter(source => source.topic === 'docs').length, 28);
+    assert.deepEqual(documentationSources(snapshot, 'Next.js 16 和 React 19 迁移').map(source => source.title), ['React', 'Next.js']);
+    assert.deepEqual(documentationSources(snapshot, 'go to the store'), []);
+    const edited = await wiki.save(user, { ...snapshot, sources: snapshot.sources.map(source =>
+      source.title === 'Python' ? { ...source, enabled: false } : source) });
+    assert.deepEqual(documentationSources(edited, 'Python 3.14 文档'), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('public defaults, account isolation, stale drafts and bounded automatic maintenance', async () => {
   const root = await mkdtemp(join(tmpdir(), 'iris-source-wiki-'));
