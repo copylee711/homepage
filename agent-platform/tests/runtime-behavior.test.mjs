@@ -84,3 +84,14 @@ test('curated image search matches bilingual concepts locally and preserves conf
     ['Gaussian mixture models', 'image'], ['高斯定律', 'image'],
   ]);
 });
+
+test('OpenWiki sources are selected only for a matching subject and skipped for curated hits', async () => {
+  const { searchImages, subjectSites } = await import('../figure-catalog.mjs');
+  assert.deepEqual(subjectSites('../biology'), []);
+  assert.ok(subjectSites('physics').includes('hyperphysics.phy-astr.gsu.edu'));
+  const request = await searchImages({ query: 'RLC resonance', subject: 'physics' }, value => value);
+  assert.equal(request.query, 'RLC resonance');
+  assert.deepEqual(request.sites, subjectSites('physics'));
+  const hit = await searchImages({ query: '高斯定律', subject: 'physics' }, () => assert.fail('unexpected external search'));
+  assert.equal(hit.engine, 'iris-figure-catalog');
+});

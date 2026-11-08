@@ -32,5 +32,6 @@ COPY agent-platform/packages.mjs agent-platform/usage.mjs agent-platform/zip.mjs
 COPY agent-platform/toolchains.mjs agent-platform/toolchains.json agent-platform/search-presets.json ./
 COPY agent-platform/sandbox-extension.ts /opt/pi/sandbox-extension.ts
 COPY agent-platform/package-resources.mjs agent-platform/install-background.mjs /opt/pi/
+COPY openwiki/iris-figures/ /opt/openwiki/iris-figures/
 USER 1000:1000
 CMD ["node", "runner.mjs"]

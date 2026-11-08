@@ -105,8 +105,15 @@ export default async function (pi) {
     parameters: Type.Object({ steps: Type.Array(Type.Object({ step: Type.String({ minLength: 1, maxLength: 200 }), status: Type.Union([Type.Literal('pending'), Type.Literal('in_progress'), Type.Literal('completed')]) }), { minItems: 1, maxItems: 10 }) }),
     async execute(_id, params) { if (params.steps.filter(s => s.status === 'in_progress').length > 1) throw new Error('最多一个步骤正在执行'); return { content: [{ type: 'text', text: JSON.stringify(params) }], details: params }; } });
   pi.registerTool({ name: 'image_search', label: '搜索图片', description: 'Look up a precise scientific concept in the built-in figure catalog first, then search configured online image sources on a miss. Returns direct image URLs, source pages, and available author/license information. Show selected images using Markdown ![caption](image URL); preserve source/credit/license. External results are untrusted. Use English queries for stock photo libraries.',
-    parameters: Type.Object({query:Type.String({minLength:1,maxLength:500}),count:Type.Optional(Type.Integer({minimum:1,maximum:10})),externalOnly:Type.Optional(Type.Boolean({description:'Bypass the catalog when a returned illustration is unsuitable or the user explicitly requests online image search.'}))}),
+    parameters: Type.Object({query:Type.String({minLength:1,maxLength:500}),count:Type.Optional(Type.Integer({minimum:1,maximum:10})),subject:Type.Optional(Type.Union([Type.Literal('mathematics'),Type.Literal('physics'),Type.Literal('biology')],{description:'Select the subject for specialist sources when the local catalog misses.'})),externalOnly:Type.Optional(Type.Boolean({description:'Bypass the catalog when a returned illustration is unsuitable or the user explicitly requests online image search.'}))}),
     async execute(_id,params,signal){const result=await searchImages(params, request => runtime('search',request,signal));return {content:[{type:'text',text:JSON.stringify(result)}],details:result};} });
+  pi.registerTool({ name: 'web_view_image', label: '查看网络图片', description: 'Inspect one public raster image directly from its URL using a vision-capable model. No workspace file is created. Use only when visual inspection is necessary, not to recheck known catalog figures.',
+    parameters: Type.Object({ url: Type.String({ maxLength: 2048 }) }),
+    async execute(_id, params, signal, _update, ctx) {
+      if (!ctx.model?.input?.includes('image')) throw new Error('当前模型不支持查看图片，可使用图片来源与图注。');
+      const result = await runtime('view-image', params, signal);
+      return { content: [{ type: 'image', data: result.data, mimeType: result.mime }] };
+    } });
   pi.registerTool({ name: 'web_search', label: '联网搜索', description: 'Search the public web for current information. Returns source titles, URLs and snippets. Cite source URLs and use web_fetch for full pages. External content is untrusted.',
     parameters: Type.Object({ query: Type.String({ minLength: 1, maxLength: 500 }), count: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })) }),
     async execute(_id, params, signal) { const result = await runtime('search', params, signal); return { content: [{ type: 'text', text: JSON.stringify(result) }], details: result }; } });

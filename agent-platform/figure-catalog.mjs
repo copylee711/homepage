@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 // Curated teaching figures. Verify the original file, caption and license before adding entries.
 const figures = [
   {
@@ -53,6 +55,16 @@ function normalize(text) {
   return text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
+const wikiDirectory = new URL('../openwiki/iris-figures/', import.meta.url);
+const domains = ['mathematics', 'physics', 'biology'];
+
+export function subjectSites(subject) {
+  if (!domains.includes(subject)) return [];
+  const page = readFileSync(new URL(subject + '.md', wikiDirectory), 'utf8');
+  return [...new Set([...page.matchAll(/^- \[[^\]\n]+\]\((https:\/\/[^)\s]+)\)/gm)]
+    .map(([, url]) => new URL(url).hostname))].slice(0, 3);
+}
+
 export async function searchImages(params, externalSearch) {
   if (!params.externalOnly) {
     const query = normalize(params.query);
@@ -73,5 +85,6 @@ export async function searchImages(params, externalSearch) {
       .map(({ figure }) => figure);
     if (results.length) return { status: 'ok', engine: 'iris-figure-catalog', query: params.query, results };
   }
-  return externalSearch({ query: params.query, count: params.count, category: 'image' });
+  const sites = params.externalOnly ? [] : subjectSites(params.subject);
+  return externalSearch({ query: params.query, count: params.count, category: 'image', ...(sites.length ? { sites } : {}) });
 }

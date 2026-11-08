@@ -99,6 +99,25 @@ async function searchWeb(lease, config, input) {
   const request = { op: 'web-search', ...config, query: input.query, count };
   // A source that answers with zero matches returns {status:'empty'} instead of throwing,
   // so WebSession can tell "nothing found" apart from a broken source.
+  const sites = image && Array.isArray(input.sites)
+    ? input.sites.slice(0, 3).filter(site => typeof site === 'string' && /^[a-z0-9.-]+$/i.test(site))
+    : [];
+  if (sites.length) {
+    try {
+      const scope = sites.map(site => 'site:' + site).join(' OR ');
+      const specialized = await sandboxTool(lease, {
+        ...request, query: input.query + ' (' + scope + ')', category: 'web', engine: config.engine, count: 3,
+      }, 6500);
+      const matches = (specialized.results || []).filter(item => {
+        try {
+          const host = new URL(item.url).hostname;
+          return sites.some(site => host === site || host.endsWith('.' + site));
+        } catch { return false; }
+      });
+      const figures = await sourcePageImages(lease, { results: matches }, count, 6500);
+      if (figures) return figures;
+    } catch { /* The configured image search is the fallback. */ }
+  }
   let result, error;
   try {
     result = await sandboxTool(lease, { ...request, category: image ? 'image' : 'web', engine: image ? config.imageEngine : config.engine }, 45000);
@@ -111,8 +130,12 @@ async function searchWeb(lease, config, input) {
   let web;
   try { web = await sandboxTool(lease, { ...request, category: 'web', engine: config.engine, count: 3 }, 20000); }
   catch { return giveUp(); }
+  return await sourcePageImages(lease, web, count, 20000) ?? giveUp();
+}
+
+async function sourcePageImages(lease, web, count, timeout) {
   const pages = await Promise.allSettled((web.results || []).slice(0, 3).map(item =>
-    sandboxTool(lease, { op: 'web-fetch', url: item.url }, 20000)));
+    sandboxTool(lease, { op: 'web-fetch', url: item.url }, timeout)));
   const images = new Map();
   for (const page of pages) {
     if (page.status !== 'fulfilled') continue;
@@ -121,10 +144,10 @@ async function searchWeb(lease, config, input) {
       images.set(item.url, { ...item, title: item.alt || '原网页插图', provider: 'source-page' });
     }
   }
-  if (!images.size) return giveUp();
+  if (!images.size) return null;
   const candidates = [...images.values()].sort((a, b) => Number(b.type === 'figure') - Number(a.type === 'figure')).slice(0, count);
   while (candidates.length && JSON.stringify(candidates).length > 6800) candidates.pop();
-  if (!candidates.length) return giveUp();
+  if (!candidates.length) return null;
   return { engine: 'source-page', images: candidates, results: candidates,
     notice: '这些是网页中的候选图。核对图片与主题的相关性，附原网页链接。授权情况未知。' };
 }
@@ -490,7 +513,14 @@ export const server = createServer(async (req, res) => {
       if (req.url === '/runtime/search') {
         const input = await body(req), config = await searchSettings.get(pi.user);
         if (!config.enabled) fail(403, '联网搜索已在设置中关闭');
-        return json(res, 200, await pi.webSession.run(input.category === 'image' ? 'image' : 'search', input.query,() => searchWeb(pi.lease, config, input)));
+        return json(res, 200, await pi.webSession.run(input.category === 'image' ? 'image' : 'search', (input.sites?.length ? JSON.stringify([input.query, input.sites]) : input.query),() => searchWeb(pi.lease, config, input)));
+      }
+      if (req.url === '/runtime/view-image') {
+        const { url } = await body(req);
+        const image = await sandboxTool(pi.lease, { op: 'image-fetch', url }, 20000);
+        if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(image.mime))
+          fail(415, '模型查看仅支持 PNG、JPEG、GIF 和 WebP 图片');
+        return json(res, 200, image);
       }
       if(req.url==='/runtime/fetch'){const input=await body(req);return json(res,200,await pi.webSession.run('fetch',input.url,()=>sandboxTool(pi.lease,{op:'web-fetch',url:input.url},35000)));}
       fail(404, '接口不存在');
