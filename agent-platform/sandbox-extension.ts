@@ -200,7 +200,7 @@ export default async function (pi) {
     '\n\n[PLAN MODE] The user enabled plan mode. Work read-only: explore with read, list_directory, search_files, web_search and web_fetch; ask_user for genuine ambiguities. Do not attempt write, edit, bash or background tools; they are blocked. Produce a concrete implementation plan: record the steps with update_plan (all pending), then reply with the approach, the files to change, risks and how you will verify. End by telling the user to click 执行计划 to start. Do not start executing.\n');
   };
   pi.on('agent_before_settle', async event => {
-    if (event.outcome !== 'completed' || !event.context?.canContinue) return;
+    if (event.outcome !== 'completed' || !event.context) return;
     const messages = event.context.contextMessages || [];
     const current = messages.slice(messages.findLastIndex((m: any) => m.role === 'user') + 1);
     const last = messages.findLast((m: any) => m.role === 'assistant');
@@ -221,6 +221,7 @@ export default async function (pi) {
     const beforeReview = review >= 0 ? current.slice(0, review).findLast((m: any) => m.role === 'assistant') : undefined;
     if (beforeReview && /\[(GOAL_DONE|NEED_USER)\]/.test(textOf(beforeReview.content))) return;
     if (/\[(GOAL_DONE|NEED_USER)\]/.test(text)) return;
+    if (!event.context.canContinue) return;
     const next = await runtime('goal/continue').catch(() => ({ continue: false }));
     if (!next.continue) return;
     return { continue: true, entries: [{ type: 'custom_message', customType: 'iris-goal', display: false,
