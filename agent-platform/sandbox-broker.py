@@ -646,7 +646,7 @@ class Handler(BaseHTTPRequestHandler):
             headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
             if api_key:
                 headers['Authorization'] = 'Bearer ' + api_key
-            result = web_access.fetch_public(url, raw_html=True, request={'headers': headers,
+            result = web_access.fetch_public(url, raw_html=True, use_proxy=False, request={'headers': headers,
                 'body': json.dumps({'model': model, 'input': inputs, 'encoding_format': 'float'}).encode()},
                 max_bytes=8 * 1024 * 1024, timeout=3)
             if result['status'] != 200 or result['truncated']:
