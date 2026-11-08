@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import Icon from './Icon.vue';
-import { get, post } from '../services/api';
+import { get } from '../services/api';
 import { useSession } from '../stores/session';
 import { useUi } from '../stores/ui';
 
@@ -34,7 +34,7 @@ const ui = useUi();
 const root = ref<HTMLElement | null>(null);
 const remote = ref<any>(null);
 const loading = ref(false);
-const compacting = ref(false);
+const compacting = computed(() => !!session.chatId && session.compactions[session.chatId]?.state === 'running');
 
 function calcPos(el?: HTMLElement | null) {
   const r = props.anchor.getBoundingClientRect();
@@ -66,10 +66,12 @@ function onKey(e: KeyboardEvent) {
 }
 
 async function fetchStats() {
-  if (!session.chatId) return;
+  const thread = session.chatId;
+  if (!thread) return;
   loading.value = true;
   try {
-    const res = await get('/api/context/stats?chat=' + encodeURIComponent(session.chatId));
+    const res = await get('/api/context/stats?chat=' + encodeURIComponent(thread));
+    if (session.chatId !== thread) return;
     remote.value = res;
     emit('updated', res);
   } catch {
@@ -84,7 +86,7 @@ const merged = computed(() => {
   const loc = props.localStats;
   const rem = remote.value;
   const cw = rem?.contextUsage?.contextWindow || loc.contextWindow || 128000;
-  const ctxTokens = Math.max(loc.contextTokens, rem?.contextUsage?.tokens || 0);
+  const ctxTokens = loc.contextTokens;
   const pct = Math.min(100, Number(((ctxTokens / cw) * 100).toFixed(1)));
   const autoCompactAt = rem?.contextUsage?.autoCompactThreshold || Math.round(cw * 0.85);
   const untilCompact = Math.max(0, autoCompactAt - ctxTokens);
@@ -113,7 +115,7 @@ const merged = computed(() => {
     ? Number(((cacheRead / promptTotal) * 100).toFixed(1))
     : (Number(rem?.cacheHitRate) || 0);
 
-  const bd = rem?.contextUsage?.breakdown;
+  const bd = rem?.contextUsage?.tokens === ctxTokens ? rem?.contextUsage?.breakdown : null;
   const segCache = bd ? (bd.cacheRead || 0) : Math.round(ctxTokens * (cacheRead / Math.max(1, total)));
   const segInput = bd ? ((bd.input || 0) + (bd.cacheWrite || 0)) : Math.max(0, ctxTokens - segCache - Math.min(ctxTokens, output));
   const segOutput = Math.max(0, ctxTokens - segCache - segInput);
@@ -164,26 +166,9 @@ function fmtCost(c: number): string {
   return '$' + v.toFixed(3);
 }
 
-async function compactSession() {
-  if (!session.currentChat || session.busy || compacting.value) return;
-  compacting.value = true;
-  try {
-    const res = await post('/api/context/compact', { thread: session.currentChat.id });
-    await session.selectChat(session.currentChat.id);
-    await fetchStats();
-    if (res.skipped) {
-      ui.toast(res.reason || '当前上下文较短，暂不需要压缩', { tone: 'info' });
-    } else {
-      const before = res.tokensBefore ? fmtTok(res.tokensBefore) : '';
-      const after = res.estimatedTokensAfter ? fmtTok(res.estimatedTokensAfter) : '';
-      ui.toast(before && after ? `上下文已压缩 (${before} → ${after})` : '上下文已压缩', { tone: 'success' });
-    }
-  } catch (e: any) {
-    ui.toast(e.message || '压缩失败', { tone: 'error' });
-  } finally {
-    compacting.value = false;
-  }
-}
+watch(() => session.chatId && session.compactions[session.chatId]?.state, (state) => {
+  if (state === 'done') void fetchStats();
+});
 
 function openFullUsage() {
   emit('close');
@@ -244,7 +229,7 @@ onBeforeUnmount(() => {
             class="cu-compact-btn"
             :disabled="!session.currentChat || session.busy || compacting || merged.ctxTokens === 0"
             title="调用模型将较早的对话整理为精简摘要，释放上下文窗口空间"
-            @click="compactSession"
+            @click="session.compactContext()"
           >
             <span v-if="compacting" class="spinner spinner-xs"></span>
             <span>{{ compacting ? '压缩中…' : '压缩上下文' }}</span>

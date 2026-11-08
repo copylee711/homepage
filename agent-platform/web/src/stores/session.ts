@@ -117,6 +117,7 @@ export const useSession = defineStore('session', {
     controller: null as AbortController | null,
     snapshots: new Map<string, any>(),
     pendingChatIds: [] as string[],
+    compactions: {} as Record<string, { at: number; state: 'running' | 'done' | 'skipped' | 'error'; before?: number; after?: number; message?: string }>,
   }),
   getters: {
     canExecute: (s) => !!s.auth?.can_execute,
@@ -366,6 +367,20 @@ export const useSession = defineStore('session', {
         if (this.chatId !== id) return;
         this.chatError = error.message || '无法读取对话。';
       } finally { this.loadingChat = false; }
+    },
+    async compactContext() {
+      const thread = this.currentChat?.id;
+      if (!thread || this.busy || this.compactions[thread]?.state === 'running') return;
+      const at = Date.now();
+      this.compactions[thread] = { at, state: 'running' };
+      try {
+        const result = await post('/api/context/compact', { thread });
+        this.compactions[thread] = result.skipped
+          ? { at, state: 'skipped', message: result.reason }
+          : { at, state: 'done', before: result.tokensBefore, after: result.estimatedTokensAfter };
+      } catch (error: any) {
+        this.compactions[thread] = { at, state: 'error', message: error.message || '压缩失败' };
+      }
     },
     async resumeTurn(thread: string) {
       const controller = new AbortController();

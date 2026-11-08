@@ -88,6 +88,8 @@ export async function sessionUsageStats(user, thread, root = '/data/sessions') {
   let lastBreakdown = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
   let lastModelLimits = defaultLimits;
   let branchTextChars = 0;
+  let historyChars = 0;
+  const entryOffsets = new Map();
   let userTextChars = 0;
   let assistantTextChars = 0;
   let prevEntryTs = 0;
@@ -131,9 +133,12 @@ export async function sessionUsageStats(user, thread, root = '/data/sessions') {
     try { entry = JSON.parse(line); } catch { continue; }
     const entryTs = entry.timestamp ? Date.parse(entry.timestamp) : (entry.message?.timestamp ? Number(entry.message.timestamp) : 0);
 
+    if (entry.id) entryOffsets.set(entry.id, historyChars);
     if (entry.type === 'compaction') {
       compactions++;
-      branchTextChars = String(entry.summary || '').length;
+      const keptOffset = entryOffsets.get(entry.firstKeptEntryId);
+      const keptChars = keptOffset == null ? 0 : historyChars - keptOffset;
+      branchTextChars = String(entry.summary || '').length + keptChars;
       const after = Number(entry.tokensAfter || entry.estimatedTokensAfter) || Math.ceil(branchTextChars / 3.5);
       if (after > 0) {
         lastContextTokens = after;
@@ -148,6 +153,7 @@ export async function sessionUsageStats(user, thread, root = '/data/sessions') {
       const m = entry.message;
       const chars = contentChars(m.content);
       branchTextChars += chars;
+      historyChars += chars;
       if (Array.isArray(m.content)) {
         for (const p of m.content) if (p?.type === 'toolCall') toolCalls++;
       }

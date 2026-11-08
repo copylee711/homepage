@@ -60,15 +60,21 @@ watch(() => session.chatId, () => {
 });
 
 async function refreshContextStats() {
-  if (!session.canExecute || !session.chatId || !session.messages.length) return;
+  const thread = session.chatId;
+  if (!session.canExecute || !thread || !session.messages.length) return;
   try {
-    remoteContextStats.value = await get('/api/context/stats?chat=' + encodeURIComponent(session.chatId));
+    const stats = await get('/api/context/stats?chat=' + encodeURIComponent(thread));
+    if (session.chatId === thread) remoteContextStats.value = stats;
   } catch {}
 }
 
 watch(() => session.messages.length, () => {
   void refreshContextStats();
 }, { immediate: true });
+
+watch(() => session.chatId && session.compactions[session.chatId]?.state, (state) => {
+  if (state === 'done') void refreshContextStats();
+});
 
 const localSessionStats = computed(() => {
   const msgs = session.messages || [];
@@ -173,7 +179,12 @@ const localSessionStats = computed(() => {
   }
 
   const contextWindow = rem?.contextUsage?.contextWindow || 128000;
-  const contextTokens = Math.max(lastContextTokens, rem?.contextUsage?.tokens || 0);
+  const compact = session.chatId ? session.compactions[session.chatId] : undefined;
+  const latestAssistant = msgs.findLast(m => m?.role === 'assistant');
+  const recentEstimate = compact?.state === 'done' && Number(latestAssistant?.timestamp || 0) <= compact.at
+    ? compact.after : undefined;
+  const contextTokens = live?.usage?.lastContextTokens > 1 ? lastContextTokens
+    : recentEstimate ?? rem?.contextUsage?.tokens ?? lastContextTokens;
   const percent = Math.min(100, Number(((contextTokens / contextWindow) * 100).toFixed(1)));
   const avgTokensPerSec = totalGenMs > 0
     ? Number((timedOutTokens / (totalGenMs / 1000)).toFixed(1))

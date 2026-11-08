@@ -201,8 +201,25 @@ export default async function (pi) {
   };
   pi.on('agent_before_settle', async event => {
     if (event.outcome !== 'completed' || !event.context?.canContinue) return;
-    const last = [...(event.context.llmMessages || [])].reverse().find((m: any) => m.role === 'assistant');
+    const messages = event.context.contextMessages || [];
+    const current = messages.slice(messages.findLastIndex((m: any) => m.role === 'user') + 1);
+    const last = messages.findLast((m: any) => m.role === 'assistant');
     const text = textOf(Array.isArray(last?.content) ? last.content : [{ type: 'text', text: String(last?.content || '') }]);
+    const plan = current.findLast((m: any) => m.role === 'toolResult' && m.toolName === 'update_plan' && !m.isError);
+    if (text.trim() && plan && !current.some((m: any) => m.customType === 'iris-plan-review')) {
+      let steps: { status: string }[] = [];
+      try { steps = JSON.parse(textOf(plan.content)).steps || []; } catch {}
+      if (steps.some(step => step.status !== 'completed')) {
+        const policy = await runtime('policy').catch(() => null);
+        if (policy && policy.execution !== 'plan') {
+          return { continue: true, entries: [{ type: 'custom_message', customType: 'iris-plan-review', display: false,
+            content: '正文已经发送。请根据已交付正文与实际执行结果，仅调用 update_plan 一次核对当前计划。已核实的步骤标记 completed，未完成的保留 pending。不要重写正文，不要调用其他工具。' }] };
+        }
+      }
+    }
+    const review = current.findIndex((m: any) => m.customType === 'iris-plan-review');
+    const beforeReview = review >= 0 ? current.slice(0, review).findLast((m: any) => m.role === 'assistant') : undefined;
+    if (beforeReview && /\[(GOAL_DONE|NEED_USER)\]/.test(textOf(beforeReview.content))) return;
     if (/\[(GOAL_DONE|NEED_USER)\]/.test(text)) return;
     const next = await runtime('goal/continue').catch(() => ({ continue: false }));
     if (!next.continue) return;

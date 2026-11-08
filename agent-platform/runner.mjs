@@ -558,7 +558,7 @@ export const server = createServer(async (req, res) => {
       const pi = await instance(input.user, input.thread);
       pi.maintenance = true;
       try { const result = await pi.command('compact', { customInstructions: String(input.instructions || '').slice(0,2000) }, 180000); snapshots.forget(input.user, input.thread); return json(res, 200, { ok:true, tokensBefore:result.tokensBefore, estimatedTokensAfter:result.estimatedTokensAfter }); }
-      catch (error) { if (/Nothing to compact|session too small/i.test(error.message)) return json(res, 200, { ok:true, skipped:true, reason:'当前上下文较短，暂不需要压缩' }); throw error; }
+      catch (error) { if (/Nothing to compact|session too small|Already compacted/i.test(error.message)) return json(res, 200, { ok:true, skipped:true, reason:'当前上下文较短，暂不需要压缩' }); throw error; }
       finally { pi.maintenance = false; }
     }
     if (req.url === '/background/preview') {

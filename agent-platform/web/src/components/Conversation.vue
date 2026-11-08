@@ -21,6 +21,21 @@ const showJump = ref(false);
 // Build the display list: user/assistant messages, with toolResult messages
 // folded into a lookup so tool cards show their results.
 const display = computed(() => buildTranscript(session.messages, session.turnNotes));
+const compact = computed(() => session.chatId ? session.compactions[session.chatId] : undefined);
+const compactIndex = computed(() => {
+  const at = compact.value?.at;
+  return at ? display.value.filter((message: any) => Number(message.timestamp || 0) <= at).length : -1;
+});
+const compactLabel = computed(() => {
+  const item = compact.value;
+  if (!item) return '';
+  if (item.state === 'running') return '正在压缩上下文…';
+  if (item.state === 'skipped') return item.message || '当前上下文无需压缩';
+  if (item.state === 'error') return '上下文压缩失败 · ' + item.message;
+  return item.before && item.after != null
+    ? `上下文已压缩 · ${item.before.toLocaleString()} → 约 ${item.after.toLocaleString()} tokens`
+    : '上下文已压缩';
+});
 const userTurns = computed(() => display.value.flatMap((message:any,index:number) => message.role === 'user' ? [{index,label:String(message._rawPrompt || textContent(message.content) || '文件与引用消息').replace(/\s+/g,' ').slice(0,180)}] : []));
 const activeTurn = ref(-1), flashTurn = ref(-1);
 let flashTimer: ReturnType<typeof setTimeout> | undefined;
@@ -243,7 +258,11 @@ onMounted(() => {
       <WelcomeHero v-if="session.isEmpty && !session.loadingChat" />
       <div v-else class="messages">
         <div v-if="session.loadingChat" class="conversation-state"><span class="spinner"></span><span>正在读取对话…</span></div>
-        <Message v-for="(it, i) in display" :key="i" :message="it" :data-user-index="it.role==='user'?i:undefined" :class="{'is-jump-target':flashTurn===i}" />
+        <template v-for="(it, i) in display" :key="i">
+          <div v-if="compactIndex === i" class="context-compact-note" role="status">{{ compactLabel }}</div>
+          <Message :message="it" :data-user-index="it.role==='user'?i:undefined" :class="{'is-jump-target':flashTurn===i}" />
+        </template>
+        <div v-if="compactIndex === display.length" class="context-compact-note" role="status">{{ compactLabel }}</div>
         <!-- live streaming assistant -->
         <article v-if="live" class="message message-assistant">
           <div class="message-avatar"><Icon name="iris" :size="18" /></div>
@@ -315,6 +334,7 @@ onMounted(() => {
   .messages { gap: 22px; padding-top: calc(var(--header-h) + 8px); }
 }
 .conversation-state { padding: 40px 0; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: 12.5px; }
+.context-compact-note { margin: 12px 0; color: var(--muted); font-size: 13px; }
 .message-status { min-height: 18px; display: flex; align-items: center; gap: 8px; margin-top: 9px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .status-elapsed { white-space: nowrap; opacity: .8; }
 .message-status.is-error { color: var(--danger); }

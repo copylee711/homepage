@@ -108,6 +108,20 @@ test('usage totals come from session files and price unpriced calls from configu
   assert.equal(stats.cacheHitRate, 33.3);
 });
 
+test('compaction lowers context usage while keeping recent messages and historical token totals', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-compact-')), user = 'e'.repeat(64), thread = randomUUID();
+  await mkdir(join(root, user));
+  const records = [
+    { type: 'message', id: 'old', message: { role: 'user', content: 'x'.repeat(7000) } },
+    { type: 'message', id: 'kept', message: { role: 'assistant', content: 'x'.repeat(350), usage: { input: 2000, output: 100 } } },
+    { type: 'compaction', id: 'compact', firstKeptEntryId: 'kept', summary: 'x'.repeat(35) },
+  ];
+  await writeFile(join(root, user, thread + '.jsonl'), records.map(record => JSON.stringify(record)).join('\n'));
+  const stats = await sessionUsageStats(user, thread, root);
+  assert.equal(stats.contextUsage.tokens, 110);
+  assert.equal(stats.tokens.total, 2100);
+});
+
 test('widget document supports frameless transparent background, dark mode variables, and live theme sync', () => {
   const doc = widgetDocument('<div style="background:#ffffff;color:#111111">Widget</div>');
   assert.match(doc, /html\[data-theme=dark\]/);
