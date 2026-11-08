@@ -52,7 +52,8 @@ let visible = true;
 let decoding = false;
 let observer: IntersectionObserver | null = null;
 let image: HTMLImageElement | null = null;
-let pointerDown = false;
+let activePointer: number | null = null;
+let activeButton = 'left';
 let clickCount = 1;
 let lastClickAt = 0;
 let lastClickAt2 = { x: 0, y: 0 };
@@ -191,6 +192,7 @@ function sizeFor(key: string) {
 async function open(): Promise<boolean> {
   const gen = ++generation;
   pendingInputs = [];
+  activePointer = null;
   phase.value = 'connecting';
   detail.value = '';
   hasFrame.value = false;
@@ -305,7 +307,8 @@ function moveCursor(event: PointerEvent | MouseEvent) {
 }
 
 function onPointerDown(event: PointerEvent) {
-  if (event.button === 2) return;
+  if (!hasFrame.value || !event.isPrimary || activePointer !== null || event.button > 2) return;
+  event.preventDefault();
   focusRemoteKeyboard();
   try { (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); } catch {}
   const { x, y } = point(event);
@@ -314,34 +317,32 @@ function onPointerDown(event: PointerEvent) {
   clickCount = near ? Math.min(3, clickCount + 1) : 1;
   lastClickAt = now;
   lastClickAt2 = { x, y };
-  pointerDown = true;
-  sendInput({ kind: 'mouse', action: 'down', x, y, button: 'left', clickCount });
+  lastSentPoint = { x, y };
+  activePointer = event.pointerId;
+  activeButton = event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left';
+  sendInput({ kind: 'mouse', action: 'down', x, y, button: activeButton, clickCount });
 }
 
 function onPointerMove(event: PointerEvent) {
   moveCursor(event);
   const now = Date.now();
-  if (now - lastMoveSent < 45) return;
+  if (!event.isPrimary || (activePointer !== null && activePointer !== event.pointerId)) return;
+  if (activePointer === null && now - lastMoveSent < 45) return;
   const { x, y } = point(event);
-  if (!pointerDown && Math.abs(x - lastSentPoint.x) < 2 && Math.abs(y - lastSentPoint.y) < 2) return;
+  if (activePointer === null && Math.abs(x - lastSentPoint.x) < 2 && Math.abs(y - lastSentPoint.y) < 2) return;
   lastMoveSent = now;
   lastSentPoint = { x, y };
   sendInput({ kind: 'mouse', action: 'move', x, y });
 }
 
 function onPointerUp(event: PointerEvent) {
-  if (!pointerDown) return;
-  pointerDown = false;
-  const { x, y } = point(event);
-  sendInput({ kind: 'mouse', action: 'up', x, y, button: 'left', clickCount });
+  if (activePointer !== event.pointerId) return;
+  activePointer = null;
+  const { x, y } = event.type === 'pointerup' ? point(event) : lastSentPoint;
+  // The last movement must arrive while the remote button is still held.
+  sendInput({ kind: 'mouse', action: 'move', x, y });
+  sendInput({ kind: 'mouse', action: 'up', x, y, button: activeButton, clickCount });
   try { (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId); } catch {}
-}
-
-function onContextMenu(event: MouseEvent) {
-  event.preventDefault();
-  const { x, y } = point(event);
-  sendInput({ kind: 'mouse', action: 'down', x, y, button: 'right', clickCount: 1 });
-  sendInput({ kind: 'mouse', action: 'up', x, y, button: 'right', clickCount: 1 });
 }
 
 function onWheel(event: WheelEvent) {
@@ -588,7 +589,8 @@ defineExpose({ reload: reconnect });
           @pointerleave="cursor.visible = false"
           @pointercancel="onPointerUp"
           @wheel="onWheel"
-          @contextmenu="onContextMenu"
+          @lostpointercapture="onPointerUp"
+          @contextmenu.prevent
         ></canvas>
         <span
           v-if="cursor.visible && hasFrame"

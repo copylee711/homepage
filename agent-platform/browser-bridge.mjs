@@ -20,14 +20,14 @@ for (const candidate of ['playwright-core', '/usr/local/lib/node_modules/playwri
 const QUALITY = 62;
 const MAX_WIDTH = 1440;
 const MAX_HEIGHT = 1000;
-// Chromium keeps a few frames unacknowledged; acking about 60ms after arrival
-// caps the stream near 16 fps, which is smooth on a page and cheap on one CPU.
+// Pace screenshot acknowledgements without throttling input.
 const ACK_PACE_MS = 34;
 
 let browser = null;
 let context = null;
 let page = null;
 let cdp = null;
+let pressedButtons = 0;
 let viewport = { width: 1280, height: 800 };
 let seq = 0;
 let lastHash = '';
@@ -115,8 +115,8 @@ async function startScreencast() {
   cdp = session;
   session.on('Page.screencastFrame', async params => {
     const arrivedAt = Date.now();
-    const width = Number(params.metadata?.deviceWidth) || viewport.width;
-    const height = Number(params.metadata?.deviceHeight) || viewport.height;
+    // Screencast pixels can be downscaled. Input uses the page CSS viewport.
+    const { width, height } = page.viewportSize() || viewport;
     try { await emitFrame(params.data, width, height); } catch {}
     setTimeout(() => {
       if (closed || session !== cdp) return;
@@ -143,6 +143,7 @@ async function restartScreencast() {
 
 function attach(target) {
   page = target;
+  pressedButtons = 0;
   cachedTitle = '';
   target.on('framenavigated', frame => {
     if (frame === target.mainFrame()) { void pageTitle(); }
@@ -170,37 +171,52 @@ function keyName(raw) {
   return key;
 }
 
+const buttonBits = { left: 1, right: 2, middle: 4 };
+
+async function dispatchMouse(session, action, at, button = 'left', clickCount = 1) {
+  if (action === 'down') pressedButtons |= buttonBits[button];
+  if (action === 'up') pressedButtons &= ~buttonBits[button];
+  const moving = action === 'move';
+  const pressed = Object.keys(buttonBits).find(name => pressedButtons & buttonBits[name]);
+  await session.send('Input.dispatchMouseEvent', {
+    ...at,
+    type: moving ? 'mouseMoved' : action === 'down' ? 'mousePressed' : 'mouseReleased',
+    button: moving ? pressed || 'none' : button,
+    buttons: pressedButtons,
+    clickCount: moving ? 0 : clickCount,
+    pointerType: 'mouse',
+    ...(pressedButtons ? { force: 0.5 } : {}),
+  });
+}
+
 async function input(command) {
   const kind = String(command.kind || '');
-  const x = Math.max(0, Math.min(viewport.width, Math.round(Number(command.x) || 0)));
-  const y = Math.max(0, Math.min(viewport.height, Math.round(Number(command.y) || 0)));
+  const { width, height } = page.viewportSize() || viewport;
+  const at = {
+    x: Math.max(0, Math.min(width - 1, Math.round(Number(command.x) || 0))),
+    y: Math.max(0, Math.min(height - 1, Math.round(Number(command.y) || 0))),
+  };
   const button = ['right', 'middle'].includes(command.button) ? command.button : 'left';
-  if (kind === 'mouse') {
-    const action = String(command.action || '');
-    if (action === 'move') {
-      await page.mouse.move(x, y);
-      return {};
+  if (kind === 'mouse' || kind === 'click' || kind === 'dblclick' || kind === 'wheel') {
+    const session = cdp;
+    if (!session) throw new Error('浏览器正在切换页面，请稍后重试');
+    if (kind === 'mouse') {
+      const action = command.action;
+      if (!['down', 'up', 'move'].includes(action)) throw new Error('鼠标动作无效');
+      await dispatchMouse(session, action, at, button, Math.max(1, Math.min(3, Number(command.clickCount) || 1)));
+    } else if (kind === 'wheel') {
+      await session.send('Input.dispatchMouseEvent', {
+        type: 'mouseWheel', ...at, buttons: pressedButtons, pointerType: 'mouse',
+        deltaX: Math.max(-4000, Math.min(4000, Number(command.dx) || 0)),
+        deltaY: Math.max(-4000, Math.min(4000, Number(command.dy) || 0)),
+      });
+    } else {
+      const count = kind === 'dblclick' ? 2 : 1;
+      for (let i = 1; i <= count; i++) {
+        await dispatchMouse(session, 'down', at, button, i);
+        await dispatchMouse(session, 'up', at, button, i);
+      }
     }
-    if (action === 'down') {
-      await page.mouse.move(x, y);
-      await page.mouse.down({ button, clickCount: Math.max(1, Math.min(3, Number(command.clickCount) || 1)) });
-      return {};
-    }
-    if (action === 'up') {
-      await page.mouse.up({ button, clickCount: Math.max(1, Math.min(3, Number(command.clickCount) || 1)) });
-      return {};
-    }
-    throw new Error('鼠标动作无效');
-  }
-  if (kind === 'click' || kind === 'dblclick') {
-    await page.mouse.click(x, y, { button, clickCount: kind === 'dblclick' ? 2 : 1 });
-    return {};
-  }
-  if (kind === 'wheel') {
-    const dx = Math.max(-4000, Math.min(4000, Number(command.dx) || 0));
-    const dy = Math.max(-4000, Math.min(4000, Number(command.dy) || 0));
-    await page.mouse.move(x, y);
-    await page.mouse.wheel(dx, dy);
     return {};
   }
   if (kind === 'text') {
