@@ -15,6 +15,8 @@ jobs:
         working-directory: agent-platform/web
       - run: npm run build
         working-directory: agent-platform/web
+      - run: npm ci --no-audit --no-fund
+        working-directory: agent-platform/gateway-deps
       - run: node --test agent-platform/tests/*.test.mjs
       - run: docker compose --env-file .env.example config --quiet
         working-directory: agent-platform
