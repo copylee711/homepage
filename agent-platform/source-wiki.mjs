@@ -157,7 +157,11 @@ export class SourceWiki {
     const input = index ? [query] : [query, ...descriptions];
     const result = await sandbox('/wiki/embedding', user, undefined, null, { url, model, apiKey, input }, 3400);
     if (!Array.isArray(result.data) || result.data.length !== input.length) return [];
-    const vectors = input.map((_, i) => unitVector(result.data.find(item => item.index === i)?.embedding));
+    const byIndex = new Map(result.data.map(item => [item?.index, item?.embedding]));
+    // Some gateways concatenate ordered sub-batches whose indices restart at zero.
+    const batchSize = result.data.findIndex((item, i) => i > 0 && item?.index === 0);
+    const orderedBatches = batchSize > 0 && result.data.every((item, i) => item?.index === i % batchSize);
+    const vectors = input.map((_, i) => unitVector(orderedBatches ? result.data[i].embedding : byIndex.get(i)));
     const [queryVector, ...built] = vectors;
     const sourceVectors = index || built;
     if (!queryVector || sourceVectors.some(vector => vector?.length !== queryVector.length)) return [];
