@@ -983,6 +983,32 @@ export const server = createServer(async (req, res) => {
     if (req.url === '/browser/close') {
       return json(res, 200, await sandbox('/browser/close', input.user, undefined, null, {}, 20000));
     }
+    // Live office preview. The document never leaves the workspace: this stream
+    // reports when it changes and relays the agent's control file, so the pane
+    // follows the agent instead of polling for it.
+    if (req.url === '/office/watch') {
+      const path = typeof input.path === 'string' ? input.path.trim() : '';
+      if (!path || path.length > 1024) fail(422, '工作区路径无效');
+      const { response: upstream, abort } = await sandboxStream('/preview/watch', input.user, { path });
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store, no-transform', 'X-Accel-Buffering': 'no' });
+      const stream = Readable.fromWeb(upstream.body);
+      const stop = () => {
+        try { stream.destroy(); } catch {}
+        try { abort(); } catch {}
+      };
+      stream.on('error', stop);
+      res.on('close', stop);
+      stream.pipe(res);
+      return;
+    }
+    if (req.url === '/office/feedback') {
+      const path = typeof input.path === 'string' ? input.path.trim() : '';
+      if (!path || path.length > 1024) fail(422, '工作区路径无效');
+      const anchor = typeof input.anchor === 'string' ? input.anchor.slice(0, 300) : '';
+      const text = typeof input.text === 'string' ? input.text.slice(0, 4000) : '';
+      const kind = input.kind === 'quote' ? 'quote' : 'focus';
+      return json(res, 200, await sandbox('/preview/feedback', input.user, undefined, null, { path, anchor, text, kind }, 15000));
+    }
     if (req.url === '/chats') {
       const busy = new Set([...sessions.values()].filter(e => e.pi.user === input.user && (e.pi.busy || e.initializing)).map(e => e.pi.thread));
       await chats.autoArchive(input.user, busy).catch(() => {});

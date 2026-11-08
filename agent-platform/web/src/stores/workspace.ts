@@ -19,18 +19,20 @@ export interface OpenFileTab {
   saving: boolean;
   isImage?: boolean;
   imageUrl?: string;
-  // Media/PDF files stream straight from the inline download URL.
-  embed?: 'pdf' | 'video' | 'audio';
+  // Media/PDF files stream straight from the inline download URL; Office files
+  // are fetched and rendered in the pane so their elements can be quoted.
+  embed?: 'pdf' | 'video' | 'audio' | 'office';
   embedUrl?: string;
 }
 
 export function embedKind(name: string): WorkspaceTabEmbed | undefined {
   if (/\.pdf$/i.test(name)) return 'pdf';
+  if (/\.(docx|xlsx|xlsm|pptx|potx)$/i.test(name)) return 'office';
   if (/\.(mp4|webm|mov)$/i.test(name)) return 'video';
   if (/\.(mp3|wav|ogg|m4a|flac)$/i.test(name)) return 'audio';
   return undefined;
 }
-type WorkspaceTabEmbed = 'pdf' | 'video' | 'audio';
+type WorkspaceTabEmbed = 'pdf' | 'video' | 'audio' | 'office';
 
 export function isImageFile(name: string) {
   return /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(name || '');
@@ -188,7 +190,8 @@ export const useWorkspace = defineStore('workspace', {
         // No text preview for media: the viewer streams the file.
         tab.embed = embed;
         tab.embedUrl = `/api/files/download?path=${encodeURIComponent(path)}&inline=1&t=${Date.now()}`;
-        tab.binary = true; tab.text = ''; tab.draft = ''; tab.meta = embed === 'pdf' ? 'PDF' : embed === 'video' ? '视频' : '音频';
+        tab.binary = true; tab.text = ''; tab.draft = '';
+        tab.meta = embed === 'pdf' ? 'PDF' : embed === 'office' ? 'Office 文档' : embed === 'video' ? '视频' : '音频';
         tab.loading = false;
         return;
       }

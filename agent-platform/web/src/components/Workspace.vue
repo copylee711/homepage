@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, defineAsyncComponent } from 'vue';
 import Icon from './Icon.vue';
 import { fileToBase64 } from '../services/files';
 import MarkdownView from './MarkdownView.vue';
 import TerminalPane from './TerminalPane.vue';
 import BrowserPane from './BrowserPane.vue';
+// Office rendering pulls in a zip reader and the docx renderer; keep it out of
+// the console's first load and fetch it when a document is actually opened.
+const OfficePreview = defineAsyncComponent(() => import('./OfficePreview.vue'));
 import DropMenu, { type MenuItem } from './DropMenu.vue';
 import { useWorkspace, FILES_TAB, TERMINAL_TAB, BROWSER_TAB, type OpenFileTab } from '../stores/workspace';
 import { useUi } from '../stores/ui';
@@ -104,6 +107,13 @@ function toggleTerminal() {
   }
 }
 
+// Closing the tab unmounts the pane, which closes the shell / page session and
+// releases the sandbox container it held.
+function closeTerminalTab() {
+  if (isTerminalActive.value) ws.activeTab = ws.tabs[0]?.path || FILES_TAB;
+  terminalEverOpened.value = false;
+}
+
 // The live browser keeps running while its tab is hidden, exactly like the
 // shell: closing the tab would drop the page the user was working in.
 const browserEverOpened = ref(false);
@@ -124,10 +134,15 @@ function toggleBrowser() {
   }
 }
 
+function closeBrowserTab() {
+  if (isBrowserActive.value) ws.activeTab = ws.tabs[0]?.path || FILES_TAB;
+  browserEverOpened.value = false;
+}
+
 // Both panes can take the whole viewport: a real page and a real shell are
 // unreadable in a 600px column.
-const fullscreen = ref<'terminal' | 'browser' | null>(null);
-function togglePaneFullscreen(pane: 'terminal' | 'browser') {
+const fullscreen = ref<'terminal' | 'browser' | 'file' | null>(null);
+function togglePaneFullscreen(pane: 'terminal' | 'browser' | 'file') {
   fullscreen.value = fullscreen.value === pane ? null : pane;
   void nextTick(() => { if (pane === 'terminal') termRef.value?.fitPane(); });
 }
@@ -141,6 +156,12 @@ const activeFileTab = computed<OpenFileTab | null>(() => {
     return null;
   }
   return ws.tabs.find(t => t.path === ws.activeTab) || (isDual.value ? ws.tabs[0] || null : null);
+});
+
+// A page of A4 at a 380px column is unreadable; give a document a real pane the
+// first time it is opened, the same way the browser tab does.
+watch(() => activeFileTab.value?.embed, embed => {
+  if (embed === 'office' && !isMobileDrawer.value && ui.workspaceW < 720) ui.setWorkspaceW(720);
 });
 
 function extLang(name: string) {
@@ -632,7 +653,9 @@ onMounted(() => {
     <!-- Separate rows keep the full path clear of toolbar controls. -->
     <header class="workspace-head">
       <span class="workspace-title">工作区</span>
-      <div class="ws-crumb-wrap">
+      <!-- The breadcrumb belongs to the file browser; a terminal, the browser
+           and an open document already name their own location. -->
+      <div v-if="ws.activeTab === FILES_TAB" class="ws-crumb-wrap">
         <button
           v-if="ws.path"
           type="button"
@@ -721,8 +744,7 @@ onMounted(() => {
         <Icon name="folder" :size="13" />
         <span>{{ currentFolderLabel }}</span>
       </button>
-      <button
-        type="button"
+      <div
         role="tab"
         class="ws-tab ws-tab-terminal"
         :class="{ 'is-active': isTerminalActive }"
@@ -731,9 +753,11 @@ onMounted(() => {
       >
         <Icon name="terminal" :size="13" />
         <span>终端</span>
-      </button>
-      <button
-        type="button"
+        <button type="button" class="ws-tab-close" aria-label="关闭终端" title="关闭终端" @click.stop="closeTerminalTab">
+          <Icon name="x" :size="11" />
+        </button>
+      </div>
+      <div
         role="tab"
         class="ws-tab ws-tab-browser"
         :class="{ 'is-active': isBrowserActive }"
@@ -742,7 +766,10 @@ onMounted(() => {
       >
         <Icon name="globe" :size="13" />
         <span>浏览器</span>
-      </button>
+        <button type="button" class="ws-tab-close" aria-label="关闭浏览器" title="关闭浏览器" @click.stop="closeBrowserTab">
+          <Icon name="x" :size="11" />
+        </button>
+      </div>
       <div
         v-for="t in ws.tabs"
         :key="t.path"
@@ -910,11 +937,10 @@ onMounted(() => {
       </section>
 
       <!-- File Viewer / Editor Pane -->
-      <section v-if="!isTerminalActive && !isBrowserActive && (isDual || activeFileTab)" class="ws-viewer">
+      <section v-if="!isTerminalActive && !isBrowserActive && (isDual || activeFileTab)" class="ws-viewer" :class="{ 'is-fullscreen': fullscreen === 'file' }">
         <!-- In dual mode, file tabs sit across the top of the right column -->
         <div v-if="isDual && (ws.tabs.length || isTerminalActive)" class="ws-tabs ws-tabs-dual" role="tablist">
-          <button
-            type="button"
+          <div
             role="tab"
             class="ws-tab ws-tab-terminal"
             :class="{ 'is-active': isTerminalActive }"
@@ -923,7 +949,10 @@ onMounted(() => {
           >
             <Icon name="terminal" :size="13" />
             <span>终端</span>
-          </button>
+            <button type="button" class="ws-tab-close" aria-label="关闭终端" title="关闭终端" @click.stop="closeTerminalTab">
+              <Icon name="x" :size="11" />
+            </button>
+          </div>
           <div
             v-for="t in ws.tabs"
             :key="t.path"
@@ -1032,6 +1061,12 @@ onMounted(() => {
             <p v-if="csvRows.length >= 1000" class="preview-note">仅显示前 1000 行。</p>
           </div>
           <iframe v-else-if="activeFileTab.embed === 'pdf'" class="preview-frame" :src="activeFileTab.embedUrl" :title="activeFileTab.name"></iframe>
+          <OfficePreview
+            v-else-if="activeFileTab.embed === 'office'"
+            :tab="activeFileTab"
+            :fullscreen="fullscreen === 'file'"
+            @toggle-fullscreen="togglePaneFullscreen('file')"
+          />
           <div v-else-if="activeFileTab.embed === 'video'" class="preview-media"><video :src="activeFileTab.embedUrl" controls preload="metadata"></video></div>
           <div v-else-if="activeFileTab.embed === 'audio'" class="preview-media is-audio"><Icon name="file" :size="28" /><audio :src="activeFileTab.embedUrl" controls preload="metadata"></audio></div>
           <pre v-else-if="!activeFileTab.binary" class="preview-body"><code ref="codeRef"></code></pre>

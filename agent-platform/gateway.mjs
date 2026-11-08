@@ -461,9 +461,15 @@ export const server = createServer(async (req, res) => {
         return json(res, 200, await response.json());
       }
 
-      if (url.pathname === '/api/terminal/stream' || url.pathname === '/api/browser/stream') {
-        const streamPath = url.pathname === '/api/browser/stream' ? '/browser/stream' : '/terminal/stream';
-        const upstream = await runnerStream(streamPath, auth.user.id, { after: Math.max(0, Number(input.after) || 0) });
+      if (url.pathname === '/api/terminal/stream' || url.pathname === '/api/browser/stream' || url.pathname === '/api/office/watch') {
+        const streamPath = url.pathname === '/api/browser/stream' ? '/browser/stream'
+          : url.pathname === '/api/office/watch' ? '/office/watch' : '/terminal/stream';
+        // The preview watch reports file and control-file changes instead of
+        // terminal bytes, so it carries the document path rather than a cursor.
+        const payload = url.pathname === '/api/office/watch'
+          ? { path: typeof input.path === 'string' ? input.path : '' }
+          : { after: Math.max(0, Number(input.after) || 0) };
+        const upstream = await runnerStream(streamPath, auth.user.id, payload);
         res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store, no-transform', 'X-Accel-Buffering': 'no' });
         const stream = Readable.fromWeb(upstream.body);
         // Destroying the node stream cancels the web stream it wraps; calling
@@ -474,7 +480,7 @@ export const server = createServer(async (req, res) => {
         stream.pipe(res);
         return;
       }
-      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/chats/fork', '/api/chats/truncate', '/api/chats/project', '/api/chats/permission', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/terminal/exec', '/api/terminal/open', '/api/terminal/write', '/api/terminal/read', '/api/terminal/close', '/api/browser/open', '/api/browser/input', '/api/browser/navigate', '/api/browser/close', '/api/git/status', '/api/git/checkout', '/api/chats/settings/save'].includes(url.pathname)) {
+      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/chats/fork', '/api/chats/truncate', '/api/chats/project', '/api/chats/permission', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/terminal/exec', '/api/terminal/open', '/api/terminal/write', '/api/terminal/read', '/api/terminal/close', '/api/browser/open', '/api/browser/input', '/api/browser/navigate', '/api/browser/close', '/api/office/feedback', '/api/git/status', '/api/git/checkout', '/api/chats/settings/save'].includes(url.pathname)) {
         // A cold Chromium launch or a slow first navigation outlasts the
         // ordinary 45s runner budget; only these two may take that long.
         const slow = ['/api/browser/open', '/api/browser/navigate'].includes(url.pathname);

@@ -4,6 +4,7 @@ import { normalizeSearch, publicSearch } from '../../search.mjs';
 // Vite dev-only middleware that emulates the gateway API so the Iris console can be
 // previewed without the backend. Never included in the production build.
 import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 
 const now = Date.now();
@@ -163,7 +164,23 @@ const fileText = {
   'iris-rebuild/src/app.ts': 'export const version = "0.2.0";\n',
 };
 const encodedFiles = new Set();
+// Real Office fixtures so the preview and its element quoting can be exercised
+// in `npm run dev` without an agent writing a file first.
+const mockModified = new Map();
+for (const [target, file] of [
+  ['default/季度报告.docx', 'quarterly-report.docx'],
+  ['default/预算表.xlsx', 'budget.xlsx'],
+  ['default/产品规划.pptx', 'product-deck.pptx'],
+]) {
+  try {
+    fileText[target] = readFileSync(new URL('./fixtures/' + file, import.meta.url)).toString('base64');
+    encodedFiles.add(target);
+    mockModified.set(target, Math.floor(Date.now() / 1000));
+  } catch {}
+}
 const pendingApprovals = new Map();
+// Latest selection the reader published from an Office preview.
+let mockPreviewFeedback = null;
 let searchConfig = normalizeSearch();
 let featureConfig={revision:0,autoCompaction:true,skills:BUILTIN_SKILLS.map(s=>s.id),customSkills:[],mcpServers:[]};
 const memoryConfig = {revision:0,persona:'',global:'',projects:{}};
@@ -190,7 +207,13 @@ function listDir(dirPath) {
     if (fp.startsWith(prefix)) {
       const rest = fp.slice(prefix.length);
       if (rest && !rest.includes('/')) {
-        entries.push({ name: rest, path: fp, type: 'file', size: encodedFiles.has(fp) ? Buffer.from(content, 'base64').length : Buffer.byteLength(content, 'utf8') });
+        entries.push({
+          name: rest,
+          path: fp,
+          type: 'file',
+          size: encodedFiles.has(fp) ? Buffer.from(content, 'base64').length : Buffer.byteLength(content, 'utf8'),
+          modified: mockModified.get(fp) || Math.floor(now / 1000),
+        });
       }
     }
   }
@@ -800,6 +823,9 @@ export function devMock() {
             '.pdf': 'application/pdf', '.txt': 'text/plain; charset=utf-8',
             '.md': 'text/markdown; charset=utf-8', '.py': 'text/plain; charset=utf-8',
             '.js': 'text/javascript; charset=utf-8', '.html': 'text/html; charset=utf-8',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
           };
           const mime = mimeMap[ext] || 'application/octet-stream';
           const isImg = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(p);
@@ -814,6 +840,51 @@ export function devMock() {
             res.setHeader('Content-Disposition', `attachment; filename="${p.split('/').pop() || 'file'}"`);
           }
           return res.end(buffer);
+        }
+        if (path === '/api/office/feedback') {
+          if (req.method === 'POST') mockPreviewFeedback = { ...body, at: Math.floor(Date.now() / 1000) };
+          return send({ ok: true, state: mockPreviewFeedback });
+        }
+        if (path === '/api/office/watch') {
+          // Mirrors the real preview server: the file stamp and the agent's
+          // control file are both read from the workspace on every tick.
+          const target = normPath(body.path || '');
+          const stampOf = file => {
+            const value = fileText[file];
+            if (value === undefined) return null;
+            const size = encodedFiles.has(file) ? Buffer.from(value, 'base64').length : Buffer.byteLength(value, 'utf8');
+            return [mockModified.get(file) || 0, size];
+          };
+          const controlOf = () => {
+            try { return JSON.parse(fileText['.iris/preview-agent.json'] || 'null'); } catch { return null; }
+          };
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          let stopped = false;
+          let lastFile = undefined;
+          let lastControl = undefined;
+          const tick = () => {
+            if (stopped) return;
+            const file = stampOf(target);
+            const control = controlOf();
+            const controlStamp = JSON.stringify(control);
+            if (lastFile === undefined) {
+              res.write(JSON.stringify({ type: 'hello', file, control }) + '\n');
+            } else if (JSON.stringify(file) !== JSON.stringify(lastFile)) {
+              res.write(JSON.stringify({ type: 'changed', file }) + '\n');
+            }
+            if (controlStamp !== JSON.stringify(lastControl)) {
+              if (lastControl !== undefined && control) res.write(JSON.stringify({ type: 'agent', control }) + '\n');
+              lastControl = control;
+            }
+            lastFile = file;
+            timer = setTimeout(tick, 600);
+          };
+          let timer = null;
+          req.on('close', () => { stopped = true; if (timer) clearTimeout(timer); });
+          tick();
+          return;
         }
         if (path === '/api/files/preview') {
           const p = normPath(q.get('path') || '');
@@ -840,6 +911,7 @@ export function devMock() {
           if (parent) dirs.add(parent);
           fileText[p] = String(body.content ?? '');
           if(body.encoding==='base64')encodedFiles.add(p);else encodedFiles.delete(p);
+          mockModified.set(p, Math.floor(Date.now() / 1000) + (mockModified.get(p) ? 1 : 0));
           return send({ ok: true, revision: sha256(fileText[p]) });
         }
         if (path === '/api/files/manage') {

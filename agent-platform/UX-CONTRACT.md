@@ -147,6 +147,20 @@ Escape closes idle dialogs and focus returns to their trigger.
   reaches the network solely through the same egress proxy as tools, and the browser holds
   no mount of the workspace. Frames stop when the pane hides and the container is reclaimed
   when idle. The browser and the terminal can each take the whole viewport.
+- Word, Excel and PowerPoint files open in a rendered preview (docx-preview for Word;
+  the workbook and deck are parsed from their OOXML parts) instead of a download or a hex
+  dump. Every paragraph, table cell, shape and slide is hoverable and clickable: a click
+  quotes that element, Ctrl/⌘/Shift+click adds or removes elements, and dragging selects
+  just the highlighted run of text. The selection bar names the element exactly as the
+  agent should address it (第 3 段, 表格 1 · 第 2 行第 1 列, 销售数据!D3, 第 2 张 · 标题)
+  and quoting adds it to the composer with the file path, so the prompt carries both.
+- The preview is a live session, not a snapshot. A preview stream reports when the file
+  changes and reloads the pane in place; the agent publishes what it changed through
+  `/workspace/.iris/preview-agent.json`, which scrolls to and highlights those elements
+  and shows its note above the page. The reader's current selection is written to
+  `/workspace/.iris/preview-user.json` for the agent to read. Documents open in a pane
+  wide enough to read (the workspace widens once), fit to width by default, and can take
+  the whole viewport; a visible tab keeps its own close button.
 
 ## Streaming and conversation navigation
 

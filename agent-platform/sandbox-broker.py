@@ -582,6 +582,8 @@ class Handler(BaseHTTPRequestHandler):
             user = value.get("user", "")
             if not USER.fullmatch(user):
                 return self.reply(422, {"error": "用户无效"})
+            if self.path.startswith('/preview/'):
+                return self.preview(user, value)
             if self.path == '/wiki/embedding':
                 return self.embedding(value)
             if self.path == '/files/download':
@@ -932,6 +934,116 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
+
+    # ---- Office preview service ------------------------------------------
+    # The preview stays live while the agent edits a document. The workspace is
+    # the one channel both sides can always reach: the agent writes
+    # .iris/preview-agent.json, the reader's selection lands in
+    # .iris/preview-user.json, and this stream reports when either one changes.
+    def preview(self, user, value):
+        path = value.get('path')
+        if not isinstance(path, str) or not path or len(path) > 1024 or any(c in path for c in '\x00\r\n'):
+            return self.reply(422, {'error': '工作区路径无效'})
+        parts = path.removeprefix('/workspace/').split('/')
+        if any(part in {'', '.', '..'} for part in parts):
+            return self.reply(422, {'error': '工作区路径无效'})
+        path = '/'.join(parts)
+        if self.path == '/preview/watch':
+            return self.preview_stream(user, path)
+        if self.path == '/preview/feedback':
+            return self.preview_feedback(user, path, value)
+        return self.reply(404, {'error': '接口不存在'})
+
+    def preview_stream(self, user, rel):
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/x-ndjson; charset=utf-8')
+        self.send_header('Cache-Control', 'no-store, no-transform')
+        self.send_header('X-Accel-Buffering', 'no')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        self.close_connection = True
+        deadline = time.monotonic() + 120
+        root = workspace(user)
+        control_path = root / '.iris' / 'preview-agent.json'
+
+        def stamp_of(target):
+            try:
+                info = os.stat(target)
+                return [int(info.st_mtime), int(info.st_size)]
+            except OSError:
+                return None
+
+        def control_of():
+            try:
+                if control_path.stat().st_size > 65536:
+                    return None
+                value = json.loads(control_path.read_text(encoding='utf-8'))
+                return value if isinstance(value, dict) else None
+            except (OSError, ValueError):
+                return None
+
+        try:
+            last_file = stamp_of(root / rel)
+            last_control = stamp_of(control_path)
+            hello = {'type': 'hello', 'file': last_file}
+            control = control_of() if last_control else None
+            if control:
+                hello['control'] = control
+            self.wfile.write(json.dumps(hello, ensure_ascii=False).encode() + b'\n')
+            self.wfile.flush()
+            last_ping = time.monotonic()
+            while time.monotonic() < deadline:
+                time.sleep(0.4)
+                current = stamp_of(root / rel)
+                if current != last_file:
+                    last_file = current
+                    self.wfile.write(json.dumps({'type': 'changed', 'file': current}, ensure_ascii=False).encode() + b'\n')
+                    self.wfile.flush()
+                    last_ping = time.monotonic()
+                control_stamp = stamp_of(control_path)
+                if control_stamp != last_control:
+                    last_control = control_stamp
+                    control = control_of()
+                    if control:
+                        self.wfile.write(json.dumps({'type': 'agent', 'control': control}, ensure_ascii=False).encode() + b'\n')
+                        self.wfile.flush()
+                        last_ping = time.monotonic()
+                if time.monotonic() - last_ping >= 5:
+                    last_ping = time.monotonic()
+                    self.wfile.write(b'{"type":"ping"}\n')
+                    self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+
+    def preview_feedback(self, user, rel, value):
+        anchor, text = value.get('anchor'), value.get('text')
+        if anchor is not None and (not isinstance(anchor, str) or len(anchor) > 300):
+            return self.reply(422, {'error': '引用位置无效'})
+        if text is not None and (not isinstance(text, str) or len(text) > 4000):
+            return self.reply(422, {'error': '引用内容过长'})
+        payload = {
+            'file': rel,
+            'anchor': (anchor or '')[:300],
+            'text': (text or '')[:4000],
+            'kind': 'quote' if value.get('kind') == 'quote' else 'focus',
+            'at': int(time.time()),
+        }
+        root = workspace(user)
+        folder = root / '.iris'
+        try:
+            folder.mkdir(mode=0o777, exist_ok=True)
+            os.chmod(folder, 0o777)
+        except OSError:
+            pass
+        target = folder / 'preview-user.json'
+        temp = folder / ('.preview-user.%d.tmp' % os.getpid())
+        try:
+            temp.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+            os.chmod(temp, 0o644)
+            os.replace(temp, target)
+        except OSError as error:
+            return self.reply(500, {'error': str(error)[:200]})
+        return self.reply(200, {'ok': True, 'state': payload})
 
     def reply(self, status, value):
         data = json.dumps(value, ensure_ascii=False).encode()

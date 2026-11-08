@@ -10,7 +10,7 @@ const runner = createServer(async (req, res) => {
   let raw = ''; for await (const chunk of req) raw += chunk;
   lastRunner = { path: req.url, value: JSON.parse(raw) };
   if (req.url === '/prompt') lastPrompt = lastRunner.value;
-  if (req.url === '/browser/stream' || req.url === '/terminal/stream') {
+  if (req.url === '/browser/stream' || req.url === '/terminal/stream' || req.url === '/office/watch') {
     res.writeHead(200, {'content-type':'application/x-ndjson'});
     res.write(JSON.stringify({ type:'ping', after:lastRunner.value.after }) + '\n');
     const timer=setTimeout(() => res.end(), 2000);
@@ -110,7 +110,7 @@ test('new file/chat endpoints enforce CSRF and derive tenant identity; local mod
   assert.equal((await fetch(base + '/api/git/status?project=app', { headers })).status, 200);
   assert.equal(lastRunner.path, '/git/status');
   assert.equal(lastRunner.value.project, 'app');
-  for (const path of ['/api/approvals/resolve', '/api/questions/answer', '/api/steer', '/api/search/settings/save', '/api/search/test', '/api/memory/update', '/api/background/stop', '/api/background/clear-history', '/api/features/save', '/api/features/mcp/test', '/api/context/compact', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/chats/project', '/api/chats/permission', '/api/terminal/exec', '/api/terminal/stream', '/api/browser/open', '/api/browser/stream', '/api/browser/input', '/api/browser/navigate', '/api/browser/close', '/api/git/checkout', '/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/files/upload', '/api/files/manage', '/api/toolchains/change', '/api/toolchains/cancel']) {
+  for (const path of ['/api/approvals/resolve', '/api/questions/answer', '/api/steer', '/api/search/settings/save', '/api/search/test', '/api/memory/update', '/api/background/stop', '/api/background/clear-history', '/api/features/save', '/api/features/mcp/test', '/api/context/compact', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/chats/project', '/api/chats/permission', '/api/terminal/exec', '/api/terminal/stream', '/api/browser/open', '/api/browser/stream', '/api/browser/input', '/api/browser/navigate', '/api/browser/close', '/api/office/feedback', '/api/office/watch', '/api/git/checkout', '/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/files/upload', '/api/files/manage', '/api/toolchains/change', '/api/toolchains/cancel']) {
     const value = JSON.stringify({ user: 'forged', thread: '11111111-1111-4111-8111-111111111111', title: 'test', content: 'test', path: 'test.txt' });
     assert.equal((await fetch(base + path, { method: 'POST', headers: { cookie }, body: value })).status, 403);
     assert.equal((await fetch(base + path, { method: 'POST', headers, body: value })).status, 200);

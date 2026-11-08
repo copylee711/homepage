@@ -72,6 +72,10 @@ export interface TextQuote {
   id: string;
   text: string;
   source?: string;
+  /** Workspace file the quote was taken from, for preview element quotes. */
+  path?: string;
+  /** Where inside that file: 第 3 段 / 销售!B4 / 第 2 张 · 标题. */
+  anchor?: string;
 }
 
 function uuid() {
@@ -303,7 +307,7 @@ export const useSession = defineStore('session', {
     clearWorkspaceRefs() {
       this.workspaceRefs = [];
     },
-    addTextQuote(text: string, source = 'Iris') {
+    addTextQuote(text: string, source = 'Iris', ref?: { path?: string; anchor?: string }) {
       const clean = String(text || '')
         .replace(/\r\n?/g, '\n')
         .replace(/[ \t]+/g, ' ')
@@ -311,11 +315,13 @@ export const useSession = defineStore('session', {
         .replace(/(?<=\S)\n(?=\S)/g, ' ')
         .trim();
       if (!clean) return;
-      if (this.textQuotes.some(q => q.text === clean)) return;
+      if (this.textQuotes.some(q => q.text === clean && q.path === ref?.path && q.anchor === ref?.anchor)) return;
       this.textQuotes.push({
         id: uuid(),
         text: clean,
         source,
+        path: ref?.path,
+        anchor: ref?.anchor,
       });
     },
     removeTextQuote(id: string) {
@@ -444,7 +450,13 @@ export const useSession = defineStore('session', {
         sections.push('【工作区引用文件】\n' + workspaceRefs.map(r => `- \`/workspace/${r.path}\``).join('\n'));
       }
       if (attachedQuotes.length > 0) {
-        sections.push('【引用内容】\n' + attachedQuotes.map(q => q.text.split('\n').map(l => '> ' + l).join('\n')).join('\n\n'));
+        sections.push('【引用内容】\n' + attachedQuotes.map(q => {
+          const body = q.text.split('\n').map(l => '> ' + l).join('\n');
+          if (!q.path) return body;
+          const file = '/workspace/' + String(q.path).replace(/^\/workspace\/?/, '').replace(/^\/+/, '');
+          const anchor = q.anchor || q.source || '';
+          return `> 文件：\`${file}\`${anchor ? ' · ' + anchor : ''}\n${body}`;
+        }).join('\n\n'));
       }
       const imageOnly = !rawText && !attachedQuotes.length && attachedRefs.length > 0
         && attachedRefs.every(r => r.type === 'image' || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(r.name || ''));
