@@ -7,7 +7,7 @@ import vue from '@vitejs/plugin-vue';
 // by esbuild and resolves the mock's parent modules during `vite build`, so the
 // specifier has to be computed from this file's URL at runtime.
 async function loadDevMock() {
-  const specifier = new URL('./dev/mock-plugin.mjs', import.meta.url).href;
+  const specifier = new URL('./dev/mock-plugin.mjs', import.meta.url).href + '?t=' + Date.now();
   const { devMock } = await import(specifier);
   return devMock();
 }

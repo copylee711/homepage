@@ -1,6 +1,7 @@
 import { widgetDocument,WIDGET_CSP } from '../../widget-document.mjs';
 import { BUILTIN_SKILLS, publicFeatures } from '../../features.mjs';
 import { normalizeSearch, publicSearch } from '../../search.mjs';
+import { SourceWiki } from '../../source-wiki.mjs';
 // Vite dev-only middleware that emulates the gateway API so the Iris console can be
 // previewed without the backend. Never included in the production build.
 import { createHash, randomUUID } from 'node:crypto';
@@ -552,6 +553,18 @@ export function devMock() {
         if(path==='/api/widget-document'){res.setHeader('Content-Type','text/html; charset=utf-8');res.setHeader('Content-Security-Policy',WIDGET_CSP);res.end(widgetDocument(globalThis.__irisQaWidgets?.get(q.get('id'))||''));return;}
         if (path === '/api/search/settings') return send(publicSearch(searchConfig));
         if (path === '/api/search/settings/save') { searchConfig=normalizeSearch(body.config,searchConfig);return send(publicSearch(searchConfig)); }
+        if (path === '/api/search/wiki') {
+          globalThis.__irisDevWiki ||= new SourceWiki(mkdtempSync(join(tmpdir(), 'iris-dev-wiki-')));
+          return send(globalThis.__irisDevWiki.publicConfig(await globalThis.__irisDevWiki.get('a'.repeat(64))));
+        }
+        if (path === '/api/search/wiki/save') {
+          globalThis.__irisDevWiki ||= new SourceWiki(mkdtempSync(join(tmpdir(), 'iris-dev-wiki-')));
+          try {
+            return send(globalThis.__irisDevWiki.publicConfig(await globalThis.__irisDevWiki.save('a'.repeat(64), body.config || {})));
+          } catch (e) {
+            return send({ error: e.message || '保存失败' }, e.status || 422);
+          }
+        }
         if (path === '/api/search/test') return send({engine:'示例来源',results:[{title:'Python 官方文档',url:'https://docs.python.org/3/',snippet:'开发模式搜索结果'}]});
         if (path === '/api/background') return send({tasks:[]});
         if (path === '/api/memory' || path === '/api/memory/update') {
