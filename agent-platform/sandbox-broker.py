@@ -115,9 +115,9 @@ def run_tool(user, value, lease):
             return web_access.compact_page(web_access.fetch_resilient(value.get("url")))
         finally:
             web_slots.release()
-    if value.get("op") not in {"read", "write", "mkdir", "access", "bash", "list", "search-files", "file-read", "file-write", "file-manage", "toolchain-list", "toolchain-change"}:
+    if value.get("op") not in {"read", "ocr-source", "write", "mkdir", "access", "bash", "list", "search-files", "file-read", "file-write", "file-manage", "toolchain-list", "toolchain-change"}:
         raise ValueError("工具不支持")
-    readonly = value.get("op") in {"list", "file-read", "read", "search-files"}
+    readonly = value.get("op") in {"list", "file-read", "read", "ocr-source", "search-files"}
     key = user + ":view" if readonly else user
     name = ("cl-sandbox-view-" if readonly else "cl-sandbox-") + user
     lock = locks.setdefault(key, threading.Lock())
@@ -163,7 +163,8 @@ def run_tool(user, value, lease):
                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             output, _ = proc.communicate(json.dumps(value).encode(), timeout=quota['timeout'] + 15)
-            if len(output) > (21 * 1024 * 1024 if value.get('op') == 'file-read' else 1500000):
+            output_limit = {'file-read': 21, 'ocr-source': 68}.get(value.get('op'))
+            if len(output) > (output_limit * 1024 * 1024 if output_limit else 1500000):
                 raise ValueError("工具输出超限")
             result = json.loads(output)
             if "error" in result:

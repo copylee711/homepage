@@ -266,6 +266,88 @@ def search_files(value):
             if len(results) >= 100: return {'matches': results, 'truncated': True, 'scanned': scanned}
     return {'matches': results[:100], 'truncated': len(results)>100, 'scanned': scanned}
 
+def ocr_source(path, value):
+    from io import BytesIO
+    from pypdf import PdfReader, PdfWriter
+
+    if not path.is_relative_to(ROOT):
+        raise ValueError("OCR 仅支持工作区中的 PDF 或图片")
+    ext = path.suffix.lower().lstrip(".")
+    signatures = {
+        "pdf": b"%PDF-", "png": b"\x89PNG\r\n\x1a\n",
+        "jpg": b"\xff\xd8\xff", "jpeg": b"\xff\xd8\xff",
+    }
+    if ext not in signatures:
+        raise ValueError("OCR 支持 PDF、PNG 和 JPEG")
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK), "rb") as source:
+        fd = source.fileno()
+        opened = Path(os.readlink(f"/proc/self/fd/{fd}"))
+        info = os.fstat(fd)
+        if not opened.is_relative_to(ROOT) or not stat.S_ISREG(info.st_mode):
+            raise ValueError("OCR 需要工作区中的普通文件")
+        if not source.read(8).startswith(signatures[ext]):
+            raise ValueError("OCR 文件格式与扩展名不符")
+        if info.st_size > 200 * 1024 * 1024:
+            raise ValueError("OCR 文件超过 200 MiB")
+        revision = f"{info.st_dev}:{info.st_ino}:{info.st_size}:{info.st_mtime_ns}"
+        mode = value.get("mode")
+        if mode != "info" and value.get("revision") != revision:
+            raise ValueError("OCR 文件已变化，请重新识别")
+        source.seek(0)
+        pdf = PdfReader(source) if ext == "pdf" else None
+        pages = len(pdf.pages) if pdf is not None else 1
+        if mode == "info":
+            return {"pages": pages, "size": info.st_size, "revision": revision}
+
+        start, end = value.get("start"), value.get("end")
+        if type(start) is not int or type(end) is not int or not 1 <= start <= end <= pages or end - start >= 200:
+            raise ValueError("OCR 页码无效")
+        if mode == "local" and end - start < 4:
+            output = []
+            with tempfile.TemporaryDirectory(prefix="iris-ocr-") as temp:
+                for page in range(start, end + 1):
+                    src = f"/proc/self/fd/{fd}"
+                    if pdf is not None:
+                        prefix = temp + "/page"
+                        subprocess.run(["pdftoppm", "-f", str(page), "-l", str(page),
+                                        "-scale-to", "3400", "-singlefile", "-gray", "-png", src, prefix],
+                                       pass_fds=(fd,), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                       check=True, timeout=12)
+                        src = prefix + ".png"
+                    result = subprocess.run(["tesseract", src, "stdout", "-l", "chi_sim+eng", "--psm", "6"],
+                                            pass_fds=(fd,), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                            env={**os.environ, "OMP_THREAD_LIMIT": "1"}, check=True, timeout=25)
+                    text = result.stdout.decode("utf-8").strip() or "（未识别到文本）"
+                    output.append(f"## 第 {page} 页\n\n{text}")
+            return {"markdown": "\n\n".join(output)}
+
+        if mode not in {"file", "free"} or (mode == "free" and end - start >= 20):
+            raise ValueError("OCR 操作无效")
+        limit = 10000000 if mode == "free" else 50 * 1024 * 1024
+        if start == 1 and end == pages and info.st_size <= limit:
+            source.seek(0)
+            data = source.read(limit + 1)
+            if len(data) <= limit:
+                return {"data": base64.b64encode(data).decode(), "ext": ext, "start": start, "count": pages}
+        if pdf is None:
+            return {}
+        while end >= start:
+            writer = PdfWriter()
+            for page in range(start - 1, end):
+                writer.add_page(pdf.pages[page])
+            buffer = BytesIO()
+            writer.write(buffer)
+            if buffer.tell() <= limit:
+                return {"data": base64.b64encode(buffer.getbuffer()).decode(), "ext": ext,
+                        "start": start, "count": end - start + 1}
+            if mode != "free":
+                return {}
+            end = start + (end - start + 1) // 2 - 1
+        return {}
+
+
+
+
 def main(value):
     op = value.get("op")
     if op in {"toolchain-list", "toolchain-change"}:
@@ -286,6 +368,8 @@ def main(value):
     # Pi read/write tools resolve inside the sandbox; symlinks cannot cross mounts.
     if not path.is_absolute():
         path = Path("/workspace") / path
+    if op == "ocr-source":
+        return ocr_source(path, value)
     if op == "read":
         with path.open("rb") as file:
             data = file.read(LIMIT + 1)

@@ -26,6 +26,7 @@ COPY agent-platform/conversations.mjs agent-platform/workspace.mjs ./
 COPY agent-platform/session-snapshot.mjs agent-platform/turn-watchdog.mjs ./
 COPY agent-platform/tool-approvals.mjs agent-platform/source-wiki.mjs ./
 COPY agent-platform/execution-policy.mjs agent-platform/search.mjs agent-platform/memory.mjs ./
+COPY agent-platform/ocr.mjs ./
 COPY agent-platform/features.mjs agent-platform/mcp.mjs agent-platform/stream-wire.mjs agent-platform/web-session.mjs ./
 COPY agent-platform/execution-policy.mjs agent-platform/agent-guidance.mjs agent-platform/figure-catalog.mjs /opt/pi/
 COPY agent-platform/packages.mjs agent-platform/usage.mjs agent-platform/zip.mjs ./

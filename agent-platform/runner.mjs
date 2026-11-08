@@ -1,3 +1,4 @@
+import { ocrSettings, recognizeDocument } from './ocr.mjs';
 import { promptInput } from './prompt-input.mjs';
 import { WebSession } from './web-session.mjs';
 import { TurnWatchdog } from './turn-watchdog.mjs';
@@ -61,6 +62,8 @@ function noticesPreamble(notices) {
 }
 
 const secret = required('RUNNER_SECRET');
+const ocr = ocrSettings(secret);
+const ocrUsers = new Set();
 const sessions = new Map();
 const searchSettings = new SearchSettings();
 const sourceWiki = new SourceWiki();
@@ -556,6 +559,28 @@ export const server = createServer(async (req, res) => {
       if (req.url === '/runtime/context') {const item=(await chats.loadMeta(pi.user)).chats[pi.thread];return json(res,200,{context:memoryContext(await memories.read(pi.user,pi.projectId))+(item?.titleSource==='pending'?'\nThis is a new conversation: call set_chat_title early with a concise summary of the actual task, rather than copying user text.':'')});}
       if (req.url === '/runtime/memory/read') return json(res, 200, await memories.read(pi.user, pi.projectId));
       if (req.url === '/runtime/memory/update') return json(res, 200, await memories.update(pi.user, pi.projectId, await body(req)));
+      if (req.url === '/runtime/ocr') {
+        const { path, firstPage, lastPage } = await body(req);
+        if (pi.execution === 'plan') fail(403, '计划模式下无法运行 OCR');
+        if (typeof path !== 'string' || !path.startsWith('/workspace/') || path.length > 1024 || /[\u0000\r\n]/.test(path)) fail(422, 'OCR 文件路径无效');
+        if (ocrUsers.has(pi.user) || ocrUsers.size >= 3) fail(409, 'OCR 正忙，请稍后重试');
+        const controller = new AbortController();
+        res.once('close', () => controller.abort());
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(720000)]);
+        const run = (op, fields) => {
+          signal.throwIfAborted();
+          return sandboxTool(pi.lease, { op, ...fields }, 150000, signal);
+        };
+        ocrUsers.add(pi.user);
+        try {
+          const settings = await ocr.load(pi.user).catch(() => ({ online: false }));
+          const { markdown, ...result } = await recognizeDocument({ path, firstPage, lastPage, settings, run, signal });
+          const output = '/workspace/' + pi.projectId + '/ocr-' + randomUUID() + '.md';
+          await run('file-write', { path: output, content: Buffer.from(markdown).toString('base64'), encoding: 'base64', overwrite: true });
+          invalidateWorkspace(pi.user);
+          return json(res, 200, { ...result, path: output, preview: markdown.slice(0, 10000), truncated: markdown.length > 10000 });
+        } finally { ocrUsers.delete(pi.user); }
+      }
       if (req.url === '/runtime/policy') return json(res, 200, { execution: pi.execution, goal: !!pi.goal });
       if (req.url === '/runtime/goal/continue') {
         if (!pi.goal || pi.goal.continues >= pi.goal.max) return json(res, 200, { continue: false });
@@ -635,6 +660,8 @@ export const server = createServer(async (req, res) => {
     // gateway allows (up to 12 MiB per image) instead of the 64 KiB default.
     const input = await body(req, req.url === '/files/upload' ? 21 * 1024 * 1024 : req.url === '/prompt' ? 20 * 1024 * 1024 : req.url === '/features/save' ? 256 * 1024 : ['/search/settings/save', '/search/wiki/save'].includes(req.url) ? 512 * 1024 : 65536);
     if (!/^[a-f0-9]{64}$/.test(input.user || '')) fail(422, '用户标识无效');
+    if (req.url === '/ocr/settings') return json(res, 200, await ocr.status(input.user));
+    if (req.url === '/ocr/settings/save') return json(res, 200, await ocr.save(input.user, input.settings || {}));
     if (req.url === '/image') {
       if(input.path){const value=await downloadWorkspace(input.user,input.path);const data=Buffer.from(value.data,'base64');const mime=data.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))?'image/png':data[0]===255&&data[1]===216?'image/jpeg':data.subarray(0,3).toString()==='GIF'?'image/gif':data.subarray(0,4).toString()==='RIFF'&&data.subarray(8,12).toString()==='WEBP'?'image/webp':'';if(!mime||data.length>5*1024*1024)fail(415,'图片格式不支持或超过 5 MiB');return json(res,200,{data:value.data,mime});}
       const lease=(await sandbox('/lease',input.user)).token;

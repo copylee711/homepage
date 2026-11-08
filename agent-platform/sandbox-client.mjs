@@ -40,12 +40,12 @@ export async function sandboxStream(path, user, extra) {
 }
 
 // Tool requests use the short-lived per-user lease, never the host control secret.
-export async function sandboxTool(token, value, timeout = 30000) {
+export async function sandboxTool(token, value, timeout = 30000, signal) {
   let response;
   try {
     response = await fetch(url + '/tool', { method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-      body: JSON.stringify(value), signal: AbortSignal.timeout(timeout), redirect: 'error' });
+      body: JSON.stringify(value), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout), redirect: 'error' });
   } catch { fail(503, '独立沙箱暂时不可用，请稍后重试'); }
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {

@@ -240,6 +240,22 @@ runner 不挂载工作区。浏览时沙箱正在运行命令会提示稍后刷�
 runner 和 sandbox 镜像并更新主机 broker 脚本。UI/权限行为见 `UX-CONTRACT.md`。
 
 
+## 扫描件识别
+
+将 PDF、PNG 或 JPEG 放入工作区后，可请 Iris 识别整份文件或指定页码。
+内置工具 `document_ocr` 在当前项目保存 Markdown，返回页码、识别来源和短预览。
+本地 Tesseract 识别中文简体和英文，输出纯文本。在线服务可保留表格结构。
+
+“设置 → 扫描件识别”可为当前账户开启在线识别，并保存 MinerU 或 PaddleOCR AI Studio
+Token。开启后，Iris 会向服务商上传选定的页面。顺序为已配置的 MinerU 精准解析、
+已配置的 PaddleOCR、MinerU 免密解析、本地 Tesseract。免密接口的每个 PDF 分片最多
+20 页和 10 MB。在线识别默认关闭，Token 仅由 runner 保存和使用，配置接口只返回保存状态。
+
+OCR 每次最多处理 200 页，源文件上限为 200 MiB，Token 路径的整批上传上限为 50 MiB。
+文件可以从已有工作区路径读取。浏览器普通上传仍受独立的工作区上传限制。
+部署时需要更新 gateway、runner、sandbox 镜像和主机上的 sandbox broker。OCR Token
+加密使用 `RUNNER_SECRET` 派生密钥。轮换前需备份旧设置，轮换后由管理员移走旧的 `data/ocr` 配置目录，再由用户重新配置。
+
 ## 浏览器原生能力（2026-11）
 
 - 三档工具执行策略、运行中切换、结构化 ask_user、任务计划及运行中补充指令。

@@ -89,6 +89,7 @@ const totalDurationMs = computed(() => list.value.reduce((acc, b) => acc + (Numb
 
 const VERBS: Record<string, string> = {
   read: '读取',
+  document_ocr: '识别扫描件',
   image_search:'搜索图片',
   write: '写入',
   edit: '编辑',

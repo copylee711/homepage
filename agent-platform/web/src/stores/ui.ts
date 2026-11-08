@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 
 export type Tone = 'info' | 'success' | 'warning' | 'error';
-export type SettingsTab = 'general' | 'capabilities' | 'memory' | 'background' | 'search' | 'providers' | 'grants' | 'packages' | 'toolchains' | 'archived' | 'shortcuts' | 'usage';
+export type SettingsTab = 'general' | 'capabilities' | 'memory' | 'background' | 'search' | 'ocr' | 'providers' | 'grants' | 'packages' | 'toolchains' | 'archived' | 'shortcuts' | 'usage';
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'max';
 export interface Toast { id: number; message: string; tone: Tone; action?: { label: string; run: () => void } | null; }
 

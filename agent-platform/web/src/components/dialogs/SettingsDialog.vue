@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue';
 import CapabilitiesPanel from '../settings/CapabilitiesPanel.vue';
 import MemoryPanel from '../settings/MemoryPanel.vue';
 import SearchPanel from '../settings/SearchPanel.vue';
+import OcrPanel from '../settings/OcrPanel.vue';
 import BaseDialog from './BaseDialog.vue';
 import Icon from '../Icon.vue';
 import ProvidersPanel from '../settings/ProvidersPanel.vue';
@@ -28,6 +29,7 @@ const navItems = computed(() => {
     { id: 'capabilities', icon: 'package', label: '能力', show: session.canExecute },
     { id: 'memory', icon: 'edit', label: '人设与记忆', show: session.canExecute },
     { id: 'search', icon: 'search', label: '联网搜索', show: session.canExecute },
+    { id: 'ocr', icon: 'file', label: '扫描件识别', show: session.canExecute },
     { id: 'providers', icon: 'sparkle', label: '模型与供应商', show: session.isAdmin },
     { id: 'grants', icon: 'users', label: '执行授权与配额', show: session.isAdmin },
     { id: 'packages', icon: 'package', label: '技能资源市场', show: session.isAdmin },
@@ -206,6 +208,7 @@ async function remove(c: any) {
         <CapabilitiesPanel v-else-if="ui.settingsTab === 'capabilities' && session.canExecute" />
         <MemoryPanel v-else-if="ui.settingsTab === 'memory' && session.canExecute" />
         <SearchPanel v-else-if="ui.settingsTab === 'search' && session.canExecute" />
+        <OcrPanel v-else-if="ui.settingsTab === 'ocr' && session.canExecute" />
         <ProvidersPanel v-else-if="ui.settingsTab === 'providers' && session.isAdmin" />
         <GrantsPanel v-else-if="ui.settingsTab === 'grants' && session.isAdmin" />
         <PackagesPanel v-else-if="ui.settingsTab === 'packages' && session.isAdmin" />

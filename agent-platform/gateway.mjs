@@ -350,6 +350,10 @@ export const server = createServer(async (req, res) => {
       if (url.pathname === '/api/search/settings' && req.method === 'GET') {
         const response = await runner('/search/settings', auth.user.id, {}); return json(res, 200, await response.json());
       }
+      if (url.pathname === '/api/ocr/settings' && req.method === 'GET') {
+        const response = await runner('/ocr/settings', auth.user.id, {});
+        return json(res, 200, await response.json());
+      }
       if (url.pathname === '/api/features' && req.method === 'GET') { const response = await runner('/features', auth.user.id, {}); return json(res, 200, await response.json()); }
       if (url.pathname === '/api/chats/settings' && req.method === 'GET') { const response = await runner('/chats/settings', auth.user.id, {}); return json(res, 200, await response.json()); }
       if (url.pathname === '/api/usage' && req.method === 'GET') { const response = await runner('/usage', auth.user.id, { days: Number(url.searchParams.get('days')) || 30 }); return json(res, 200, await response.json()); }
@@ -411,6 +415,10 @@ export const server = createServer(async (req, res) => {
         return json(res, 200, await response.json());
       }
       const input = await body(req, url.pathname === '/api/prompt' ? 15 * 1024 * 1024 : url.pathname === '/api/features/save' ? 256 * 1024 : (url.pathname === '/api/search/settings/save' || url.pathname === '/api/search/wiki/save' || url.pathname === '/api/terminal/write' || url.pathname === '/api/browser/input') ? 512 * 1024 : 65536);
+      if (url.pathname === '/api/ocr/settings/save') {
+        const response = await runner('/ocr/settings/save', auth.user.id, { settings: input });
+        return json(res, 200, await response.json());
+      }
       if (['/api/features/save','/api/features/mcp/test','/api/context/compact'].includes(url.pathname)) { const response = await runner(url.pathname.replace('/api',''), auth.user.id, {config:input.config,id:input.id,thread:input.thread,instructions:input.instructions}, AbortSignal.timeout(190000));return json(res,200,await response.json()); }
       if (url.pathname === '/api/memory/update') {
         const response = await runner('/memory/update', auth.user.id, { project: input.project, scope: input.scope, action: input.action, content: input.content, revision: input.revision }); return json(res, 200, await response.json());
