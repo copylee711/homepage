@@ -1078,7 +1078,7 @@ class Handler(BaseHTTPRequestHandler):
         script = Path(__file__).with_name('office-edit.py')
         try:
             result = subprocess.run(
-                ['docker', 'run', '--rm', '--network', 'none', '--user', '1000:1000',
+                ['docker', 'run', '--rm', '-i', '--network', 'none', '--user', '1000:1000',
                  '--entrypoint', '/usr/bin/python3',
                  '-e', 'HOME=/tmp', '-v', f'{root}:/workspace:rw', '-v', f'{script}:/opt/office-edit.py:ro',
                  IMAGE, '-I', '/opt/office-edit.py'],
