@@ -199,6 +199,7 @@ async function reconnect() {
 function setFontSize(delta: number) {
   fontSize = Math.max(9, Math.min(20, Math.round((fontSize + delta) * 2) / 2));
   if (term) term.options.fontSize = fontSize;
+  try { localStorage.setItem('iris-term-font', String(fontSize)); } catch {}
   requestAnimationFrame(fitPane);
 }
 
@@ -242,11 +243,13 @@ function fitPane() {
 onMounted(() => {
   const element = host.value;
   if (!element) return;
+  try { fontSize = Number(localStorage.getItem('iris-term-font')) || fontSize; } catch {}
+  fontSize = Math.max(9, Math.min(20, fontSize));
   term = new Terminal({
     cursorBlink: true,
     cursorStyle: 'bar',
     fontFamily: getComputedStyle(element).fontFamily || 'monospace',
-    fontSize: 12.5,
+    fontSize,
     lineHeight: 1.35,
     letterSpacing: 0,
     scrollback: 5000,

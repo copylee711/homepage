@@ -40,7 +40,7 @@ const SIZES = [
   { key: '390x844', label: '手机 390 × 844', width: 390, height: 844 },
   { key: 'follow', label: '跟随面板尺寸', width: 0, height: 0 },
 ];
-const sizeKey = ref('1280x800');
+const sizeKey = ref((() => { try { return localStorage.getItem('iris-browser-size') || '1280x800'; } catch { return '1280x800'; } })());
 const sizeMenu = ref(false);
 
 let seq = 0;
@@ -239,6 +239,7 @@ function navigate(action: 'goto' | 'back' | 'forward' | 'reload') {
 function changeSize(item: { key: string; width: number; height: number }) {
   sizeKey.value = item.key;
   sizeMenu.value = false;
+  try { localStorage.setItem('iris-browser-size', item.key); } catch {}
   if (!running) return;
   const size = sizeFor(item.key);
   void post('/api/browser/navigate', { action: 'resize', width: size.width, height: size.height }).catch(() => {});

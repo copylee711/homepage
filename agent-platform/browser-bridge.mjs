@@ -20,6 +20,9 @@ for (const candidate of ['playwright-core', '/usr/local/lib/node_modules/playwri
 const QUALITY = 62;
 const MAX_WIDTH = 1440;
 const MAX_HEIGHT = 1000;
+// Chromium keeps a few frames unacknowledged; acking about 60ms after arrival
+// caps the stream near 16 fps, which is smooth on a page and cheap on one CPU.
+const ACK_PACE_MS = 60;
 
 let browser = null;
 let context = null;
@@ -111,11 +114,14 @@ async function startScreencast() {
   const session = await context.newCDPSession(page);
   cdp = session;
   session.on('Page.screencastFrame', async params => {
-    try { await session.send('Page.screencastFrameAck', { sessionId: params.sessionId }); } catch {}
-    if (closed || session !== cdp) return;
+    const arrivedAt = Date.now();
     const width = Number(params.metadata?.deviceWidth) || viewport.width;
     const height = Number(params.metadata?.deviceHeight) || viewport.height;
-    await emitFrame(params.data, width, height);
+    try { await emitFrame(params.data, width, height); } catch {}
+    setTimeout(() => {
+      if (closed || session !== cdp) return;
+      session.send('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => {});
+    }, Math.max(0, arrivedAt + ACK_PACE_MS - Date.now()));
   });
   await session.send('Page.enable');
   await session.send('Page.startScreencast', {
