@@ -307,6 +307,16 @@ function zoomPercent() {
   return Math.round(Number(raw || 1) * 100);
 }
 
+// Ctrl/⌘ + wheel zooms the page without letting the browser zoom the console.
+function onWheel(event: WheelEvent) {
+  if (!event.ctrlKey && !event.metaKey) return;
+  event.preventDefault();
+  const current = Number(host.value?.style.zoom || 1);
+  const next = Math.min(2.4, Math.max(0.35, Math.round((current - Math.sign(event.deltaY) * 0.1) * 100) / 100));
+  zoom.value = next;
+  if (host.value) host.value.style.zoom = String(next);
+}
+
 function stepZoom(delta: number) {
   const current = zoom.value || zoomPercent() / 100;
   zoom.value = Math.min(2, Math.max(0.4, Math.round((current + delta) * 20) / 20));
@@ -730,7 +740,7 @@ onBeforeUnmount(() => {
     </div>
     <p v-for="note in notes" :key="note" class="op-note">{{ note }}</p>
 
-    <div ref="stage" class="op-stage" :class="'is-' + format">
+    <div ref="stage" class="op-stage" :class="'is-' + format" @wheel="onWheel">
       <div
         ref="host"
         class="op-host"
