@@ -54,3 +54,33 @@ test('repeating the same request many times in a row is the loop that stops retr
   assert.equal(looped.stopRetry, true); assert.deepEqual(looped.results, [1]); assert.equal(calls, 1);
   assert.notEqual((await web.run('search', 'different', operation)).stopRetry, true);
 });
+
+test('curated image search matches bilingual concepts locally and preserves configured fallback', async () => {
+  const { searchImages } = await import('../figure-catalog.mjs');
+  const requests = [];
+  const external = async request => {
+    requests.push(request);
+    return { engine: 'configured-search', results: [] };
+  };
+  for (const [query, title] of [
+    ['讲讲电磁学高斯定理，最好配图', /高斯/],
+    ['Gauss’s law electric flux', /高斯/],
+    ['第二类曲线积分的切向投影', /向量场/],
+    ['fluid mosaic model diagram', /细胞膜/],
+  ]) {
+    const result = await searchImages({ query, count: 1 }, external);
+    assert.equal(result.engine, 'iris-figure-catalog');
+    assert.equal(result.results.length, 1);
+    const [figure] = result.results;
+    assert.match(figure.title, title);
+    assert.match(figure.url, /^https:\/\/upload\.wikimedia\.org\//);
+    assert.match(figure.sourceUrl, /^https:\/\/commons\.wikimedia\.org\//);
+    assert.ok(figure.author && figure.license);
+  }
+  assert.equal(requests.length, 0);
+  assert.equal((await searchImages({ query: 'Gaussian mixture models', count: 2 }, external)).engine, 'configured-search');
+  await searchImages({ query: '高斯定律', externalOnly: true }, external);
+  assert.deepEqual(requests.map(({ query, category }) => [query, category]), [
+    ['Gaussian mixture models', 'image'], ['高斯定律', 'image'],
+  ]);
+});
