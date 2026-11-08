@@ -4,8 +4,9 @@ import Icon from './Icon.vue';
 import { fileToBase64 } from '../services/files';
 import MarkdownView from './MarkdownView.vue';
 import TerminalPane from './TerminalPane.vue';
+import BrowserPane from './BrowserPane.vue';
 import DropMenu, { type MenuItem } from './DropMenu.vue';
-import { useWorkspace, FILES_TAB, TERMINAL_TAB, type OpenFileTab } from '../stores/workspace';
+import { useWorkspace, FILES_TAB, TERMINAL_TAB, BROWSER_TAB, type OpenFileTab } from '../stores/workspace';
 import { useUi } from '../stores/ui';
 import { useSession } from '../stores/session';
 import { formatBytes } from '../services/format';
@@ -67,6 +68,7 @@ const crumbs = computed(() => {
 });
 
 const isTerminalActive = computed(() => ws.activeTab === TERMINAL_TAB);
+const isBrowserActive = computed(() => ws.activeTab === BROWSER_TAB);
 
 const currentFolderLabel = computed(() => {
   if (activeFileTab.value) {
@@ -102,8 +104,28 @@ function toggleTerminal() {
   }
 }
 
+// The live browser keeps running while its tab is hidden, exactly like the
+// shell: closing the tab would drop the page the user was working in.
+const browserEverOpened = ref(false);
+const browserRef = ref<InstanceType<typeof BrowserPane> | null>(null);
+
+function openBrowserTab() {
+  ws.activeTab = BROWSER_TAB;
+  browserEverOpened.value = true;
+  // A real page is unreadable in a 300px column; give the dock room once.
+  if (ui.workspaceW < 560) ui.setWorkspaceW(600);
+}
+
+function toggleBrowser() {
+  if (isBrowserActive.value) {
+    ws.activeTab = ws.tabs[0]?.path || FILES_TAB;
+  } else {
+    openBrowserTab();
+  }
+}
+
 const activeFileTab = computed<OpenFileTab | null>(() => {
-  if (ws.activeTab === FILES_TAB || ws.activeTab === TERMINAL_TAB) {
+  if (ws.activeTab === FILES_TAB || ws.activeTab === TERMINAL_TAB || ws.activeTab === BROWSER_TAB) {
     if (isDual.value && ws.activeTab === FILES_TAB) {
       return ws.tabs[0] || null;
     }
@@ -638,6 +660,16 @@ onMounted(() => {
         >
           <Icon name="terminal" :size="15" />
         </button>
+        <button
+          type="button"
+          class="icon-button small"
+          :class="{ 'is-on': isBrowserActive }"
+          aria-label="打开实时浏览器"
+          title="实时浏览器（真实页面 + 实时画面与操控）"
+          @click="toggleBrowser"
+        >
+          <Icon name="globe" :size="15" />
+        </button>
         <button ref="addAnchor" type="button" class="icon-button small" aria-label="新建或上传" title="新建或上传" @click="openAddMenu">
           <Icon name="plus" :size="16" />
         </button>
@@ -668,7 +700,7 @@ onMounted(() => {
     </header>
 
     <!-- Single-sidebar Tab Bar (shown when not in dual mode and (tabs exist or terminal active)) -->
-    <div v-if="!isDual && (ws.tabs.length || isTerminalActive)" class="ws-tabs" role="tablist">
+    <div v-if="!isDual && (ws.tabs.length || isTerminalActive || isBrowserActive)" class="ws-tabs" role="tablist">
       <button
         type="button"
         role="tab"
@@ -691,6 +723,17 @@ onMounted(() => {
         <Icon name="terminal" :size="13" />
         <span>终端</span>
       </button>
+      <button
+        type="button"
+        role="tab"
+        class="ws-tab ws-tab-browser"
+        :class="{ 'is-active': isBrowserActive }"
+        title="实时浏览器"
+        @click="openBrowserTab"
+      >
+        <Icon name="globe" :size="13" />
+        <span>浏览器</span>
+      </button>
       <div
         v-for="t in ws.tabs"
         :key="t.path"
@@ -712,7 +755,7 @@ onMounted(() => {
     <div class="ws-stage" :class="{ 'is-dual': isDual }">
       <!-- Explorer Pane (supports rubber-band marquee + Ctrl/Shift multi-select) -->
       <div
-        v-show="isDual ? true : (!activeFileTab && !isTerminalActive)"
+        v-show="isDual ? true : (!activeFileTab && !isTerminalActive && !isBrowserActive)"
         ref="fileListRef"
         tabindex="-1"
         class="file-list"
@@ -825,8 +868,13 @@ onMounted(() => {
         <TerminalPane v-if="terminalEverOpened" ref="termRef" />
       </section>
 
+      <!-- Live Browser Pane: a real Chromium page, streamed as frames -->
+      <section v-show="isBrowserActive" class="ws-browser-pane">
+        <BrowserPane v-if="browserEverOpened" ref="browserRef" />
+      </section>
+
       <!-- File Viewer / Editor Pane -->
-      <section v-if="!isTerminalActive && (isDual || activeFileTab)" class="ws-viewer">
+      <section v-if="!isTerminalActive && !isBrowserActive && (isDual || activeFileTab)" class="ws-viewer">
         <!-- In dual mode, file tabs sit across the top of the right column -->
         <div v-if="isDual && (ws.tabs.length || isTerminalActive)" class="ws-tabs ws-tabs-dual" role="tablist">
           <button

@@ -441,8 +441,11 @@ export const server = createServer(async (req, res) => {
         return json(res, 200, await response.json());
       }
 
-      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/chats/fork', '/api/chats/truncate', '/api/chats/project', '/api/chats/permission', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/terminal/exec', '/api/terminal/open', '/api/terminal/write', '/api/terminal/read', '/api/terminal/close', '/api/git/status', '/api/git/checkout', '/api/chats/settings/save'].includes(url.pathname)) {
-        const response = await runner(url.pathname.replace('/api', ''), auth.user.id, input);
+      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/chats/fork', '/api/chats/truncate', '/api/chats/project', '/api/chats/permission', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/terminal/exec', '/api/terminal/open', '/api/terminal/write', '/api/terminal/read', '/api/terminal/close', '/api/browser/open', '/api/browser/frame', '/api/browser/input', '/api/browser/navigate', '/api/browser/close', '/api/git/status', '/api/git/checkout', '/api/chats/settings/save'].includes(url.pathname)) {
+        // A cold Chromium launch or a slow first navigation outlasts the
+        // ordinary 45s runner budget; only these two may take that long.
+        const slow = ['/api/browser/open', '/api/browser/navigate'].includes(url.pathname);
+        const response = await runner(url.pathname.replace('/api', ''), auth.user.id, input, slow ? AbortSignal.timeout(95000) : undefined);
         return json(res, 200, await response.json());
       }
       if (url.pathname === '/api/abort') {

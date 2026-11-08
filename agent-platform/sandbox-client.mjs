@@ -1,15 +1,15 @@
 import { required, fail } from './shared.mjs';
 const url = process.env.SANDBOX_URL || 'http://192.168.84.1:18082';
-export async function sandbox(path, user, token, policy, extra) {
+export async function sandbox(path, user, token, policy, extra, timeout = 15000) {
   const payload = { user, token, policy };
   if (extra && typeof extra === 'object') Object.assign(payload, extra);
   const response = await fetch(url + path, { method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + required('SANDBOX_SECRET') },
-    body: JSON.stringify(payload), signal: AbortSignal.timeout(15000) });
+    body: JSON.stringify(payload), signal: AbortSignal.timeout(timeout) });
   if (!response.ok) {
-    // Terminal control is interactive: the broker's own reason (memory budget,
-    // terminal gone after a restart) is what the user needs to see.
-    if (path.startsWith('/pty/')) {
+    // Terminal and browser control are interactive: the broker's own reason
+    // (memory budget, session gone after a restart) is what the user needs.
+    if (path.startsWith('/pty/') || path.startsWith('/browser/')) {
       const detail = await response.json().catch(() => ({}));
       if (typeof detail.error === 'string' && detail.error) fail(response.status === 400 || response.status === 409 ? 409 : 503, detail.error);
     }

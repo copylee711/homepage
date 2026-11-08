@@ -892,6 +892,58 @@ export const server = createServer(async (req, res) => {
     if (req.url === '/terminal/close') {
       return json(res, 200, await sandbox('/pty/close', input.user, undefined, null, {}));
     }
+    // Live browser. Chromium runs inside a disposable sandbox container and the
+    // host relays JPEG frames and input events; no page ever reaches this
+    // process, and the browser can only use the same egress proxy as tools.
+    if (req.url === '/browser/open') {
+      const width = Math.max(320, Math.min(Number(input.width) || 1280, 1920));
+      const height = Math.max(320, Math.min(Number(input.height) || 800, 1400));
+      const result = await sandbox('/browser/open', input.user, undefined, null, { width, height }, 70000);
+      return json(res, 200, result);
+    }
+    if (req.url === '/browser/frame') {
+      const after = Math.max(0, Number(input.after) || 0);
+      const wait = Math.max(0, Math.min(Number(input.wait) || 0, 8));
+      return json(res, 200, await sandbox('/browser/frame', input.user, undefined, null, { after, wait }, 25000));
+    }
+    if (req.url === '/browser/input') {
+      const kind = String(input.kind || '');
+      if (!['click', 'dblclick', 'move', 'wheel', 'text', 'key'].includes(kind)) fail(422, '浏览器输入类型无效');
+      const payload = { kind };
+      for (const key of ['x', 'y', 'dx', 'dy']) if (Number.isFinite(Number(input[key]))) payload[key] = Math.round(Number(input[key]));
+      if (kind === 'text') {
+        if (typeof input.text !== 'string' || !input.text || input.text.length > 20000) fail(422, '输入内容无效');
+        payload.text = input.text;
+      }
+      if (kind === 'key') {
+        if (typeof input.key !== 'string' || !input.key || input.key.length > 40) fail(422, '按键无效');
+        payload.key = input.key;
+        if (Array.isArray(input.modifiers)) payload.modifiers = input.modifiers.filter(m => ['Control', 'Shift', 'Alt', 'Meta'].includes(m)).slice(0, 4);
+      }
+      return json(res, 200, await sandbox('/browser/input', input.user, undefined, null, payload, 30000));
+    }
+    if (req.url === '/browser/navigate') {
+      const action = String(input.action || '');
+      if (!['goto', 'back', 'forward', 'reload', 'resize'].includes(action)) fail(422, '浏览器导航类型无效');
+      const payload = { action };
+      if (action === 'goto') {
+        const raw = typeof input.url === 'string' ? input.url.trim() : '';
+        if (!raw || raw.length > 4000) fail(422, '网址无效');
+        const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : 'https://' + raw;
+        let parsed;
+        try { parsed = new URL(withScheme); } catch { fail(422, '网址格式无效'); }
+        if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) fail(422, '只支持普通的 http 与 https 网页');
+        payload.url = parsed.href;
+      }
+      if (action === 'resize') {
+        payload.width = Math.max(320, Math.min(Number(input.width) || 1280, 1920));
+        payload.height = Math.max(320, Math.min(Number(input.height) || 800, 1400));
+      }
+      return json(res, 200, await sandbox('/browser/navigate', input.user, undefined, null, payload, 60000));
+    }
+    if (req.url === '/browser/close') {
+      return json(res, 200, await sandbox('/browser/close', input.user, undefined, null, {}, 20000));
+    }
     if (req.url === '/chats') {
       const busy = new Set([...sessions.values()].filter(e => e.pi.user === input.user && (e.pi.busy || e.initializing)).map(e => e.pi.thread));
       await chats.autoArchive(input.user, busy).catch(() => {});

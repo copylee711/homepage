@@ -343,8 +343,189 @@ terminal_memory = {}
 TERMINAL_IDLE = int(os.environ.get('SANDBOX_TERMINAL_IDLE_SECONDS', '1800'))
 
 
-def cancel_terminal(user):
-    docker('rm', '-f', 'cl-term-' + user)
+class Browser:
+    """One real Chromium page per user, driven by Playwright inside a disposable
+    container. Only JPEG frames and input events cross the boundary: the page
+    never shares a port, a filesystem or a network namespace with the host.
+    """
+
+    def __init__(self, user, quota, width, height):
+        self.user = user
+        self.name = 'cl-browser-' + user
+        self.lock = threading.Lock()
+        self.cond = threading.Condition(self.lock)
+        self.stdin_lock = threading.Lock()
+        self.seq = 0
+        self.frame = None
+        self.closed = False
+        self.error = ''
+        self.last_use = time.monotonic()
+        self.width, self.height = width, height
+        self.proc = None
+        self.reader = None
+        self.ready = threading.Event()
+        self.waiting = {}
+        self.next_id = 0
+        self.start(quota)
+
+    def start(self, quota):
+        with open(Path(__file__).with_name('browser-bridge.mjs'), 'rb') as file:
+            program = base64.b64encode(file.read()).decode()
+        docker('rm', '-f', self.name)
+        created = docker(
+            'create', '-i', '--name', self.name, '--label', 'copylee.browser=1',
+            '--network', NETWORK, '--read-only',
+            '--sysctl', 'net.ipv6.conf.all.disable_ipv6=1',
+            '--user', '1000:1000', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
+            '--memory', str(quota['memory_mib']) + 'm', '--memory-swap', str(quota['memory_mib']) + 'm',
+            '--cpus', str(quota['cpus']), '--pids-limit', str(quota['pids']),
+            '--ulimit', 'nofile=256:256', '--ulimit', f"fsize={quota['disk_mib'] * 1048576}:{quota['disk_mib'] * 1048576}",
+            '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m,mode=1777', '--shm-size', '32m',
+            '--env', 'HOME=/tmp',
+            '--env', 'HTTP_PROXY=http://192.168.85.2:3128', '--env', 'HTTPS_PROXY=http://192.168.85.2:3128',
+            '--env', 'IRIS_BROWSER_PROGRAM=' + program,
+            '--log-driver', 'none', '--entrypoint', 'node', IMAGE,
+            '-e', 'const f=require("fs");f.writeFileSync("/tmp/bridge.mjs",Buffer.from(process.env.IRIS_BROWSER_PROGRAM,"base64"));import("/tmp/bridge.mjs")')
+        if created.returncode:
+            raise ValueError('浏览器容器创建失败')
+        try:
+            self.proc = subprocess.Popen(
+                ['docker', 'start', '-ai', self.name],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except Exception:
+            docker('rm', '-f', self.name)
+            raise ValueError('浏览器容器启动失败')
+        self.reader = threading.Thread(target=self._pump, daemon=True)
+        self.reader.start()
+        if not self.ready.wait(50):
+            with self.lock:
+                message = self.error
+            self.close()
+            raise ValueError(message or '浏览器启动超时，请重试')
+
+    def _pump(self):
+        stream = self.proc.stdout
+        while True:
+            try:
+                line = stream.readline()
+            except (ValueError, OSError):
+                break
+            if not line:
+                break
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            with self.cond:
+                kind = event.get('type')
+                if kind == 'frame':
+                    self.seq = int(event.get('seq') or self.seq + 1)
+                    self.frame = event
+                    self.last_use = time.monotonic()
+                    self.cond.notify_all()
+                elif kind == 'ready':
+                    self.ready.set()
+                    self.cond.notify_all()
+                elif kind == 'result':
+                    slot = self.waiting.get(int(event.get('id') or 0))
+                    if slot:
+                        slot['value'] = event
+                        slot['event'].set()
+                elif kind == 'fatal':
+                    self.error = str(event.get('error') or '')[:300]
+                    self.ready.set()
+        with self.cond:
+            self.closed = True
+            if not self.ready.is_set():
+                self.ready.set()
+            for slot in self.waiting.values():
+                slot['event'].set()
+            self.cond.notify_all()
+        try:
+            self.proc.wait(timeout=5)
+        except Exception:
+            pass
+
+    def command(self, op, timeout=30, **payload):
+        self.last_use = time.monotonic()
+        if self.closed:
+            raise ValueError('浏览器已关闭，请重新打开')
+        with self.lock:
+            self.next_id += 1
+            ident = self.next_id
+            slot = {'event': threading.Event(), 'value': None}
+            self.waiting[ident] = slot
+        message = {**payload, 'id': ident, 'op': op}
+        try:
+            with self.stdin_lock:
+                self.proc.stdin.write((json.dumps(message, ensure_ascii=False) + '\n').encode())
+                self.proc.stdin.flush()
+        except (BrokenPipeError, ValueError, OSError):
+            self.close()
+            raise ValueError('浏览器已关闭，请重新打开') from None
+        try:
+            if not slot['event'].wait(timeout):
+                raise ValueError('浏览器操作超时，请重试')
+            value = slot['value'] or {}
+            if not value.get('ok'):
+                raise ValueError(str(value.get('error') or '浏览器操作失败'))
+            return value.get('value') or {}
+        finally:
+            with self.lock:
+                self.waiting.pop(ident, None)
+
+    def read(self, after, wait):
+        with self.cond:
+            deadline = time.monotonic() + max(0.0, min(wait, 10.0))
+            while self.seq <= after and not self.closed:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self.cond.wait(remaining)
+            self.last_use = time.monotonic()
+            frame = dict(self.frame) if self.frame else None
+            return {'frame': frame, 'seq': self.seq, 'closed': self.closed,
+                    'error': self.error, 'ready': self.ready.is_set()}
+
+    def close(self):
+        with self.cond:
+            if self.proc is not None:
+                try:
+                    with self.stdin_lock:
+                        self.proc.stdin.write(b'{"op":"close","id":0}\n')
+                        self.proc.stdin.flush()
+                except Exception:
+                    pass
+            self.closed = True
+            self.cond.notify_all()
+        if self.proc is not None:
+            try:
+                self.proc.stdin.close()
+            except Exception:
+                pass
+            try:
+                self.proc.wait(timeout=8)
+            except Exception:
+                try: self.proc.kill()
+                except Exception: pass
+        cancel_browser(self.user)
+
+
+browsers = {}
+browser_memory = {}
+BROWSER_IDLE = int(os.environ.get('SANDBOX_BROWSER_IDLE_SECONDS', '1800'))
+
+
+def cancel_browser(user):
+    docker('rm', '-f', 'cl-browser-' + user)
+
+
+def close_browser(user):
+    with guard:
+        item = browsers.pop(user, None)
+        browser_memory.pop(user, None)
+    if item:
+        item.close()
 
 
 def close_terminal(user):
@@ -353,6 +534,10 @@ def close_terminal(user):
         terminal_memory.pop(user, None)
     if item:
         item.close()
+
+
+def cancel_terminal(user):
+    docker('rm', '-f', 'cl-term-' + user)
 
 
 backgrounds = background_module.BackgroundTasks(workspace, quotas, project_policy, IMAGE, NETWORK, active_memory)
@@ -381,6 +566,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(401, {"error": "服务认证失败"})
             if self.path.startswith('/pty/'):
                 return self.pty(value)
+            if self.path.startswith('/browser/'):
+                return self.browser(value)
             if self.path == '/background/preview':
                 return self.reply(200, backgrounds.preview(value.get('token'), value.get('path', '/')))
             if self.path == "/package":
@@ -447,7 +634,7 @@ class Handler(BaseHTTPRequestHandler):
             quota = quotas.get(user)
             rules = project_policy.policy(value.get('policy'))
             with guard:
-                used = sum(active_memory.values()) + backgrounds.memory_used() + sum(terminal_memory.values())
+                used = sum(active_memory.values()) + backgrounds.memory_used() + sum(terminal_memory.values()) + sum(browser_memory.values())
                 if used + quota['memory_mib'] > int(os.environ.get('SANDBOX_ACTIVE_MEMORY_MIB', '4096')):
                     return self.reply(409, {'error': '沙箱运行内存预算已满，请稍后重试'})
                 terminal_memory[user] = quota['memory_mib']
@@ -478,6 +665,89 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {'ok': True})
         return self.reply(404, {'error': '接口不存在'})
 
+    def browser(self, value):
+        user = value.get('user', '')
+        if not USER.fullmatch(user):
+            return self.reply(422, {'error': '用户无效'})
+        if self.path == '/browser/open':
+            close_browser(user)
+            quota = quotas.get(user)
+            width = max(320, min(int(value.get('width') or 1280), 1920))
+            height = max(320, min(int(value.get('height') or 800), 1400))
+            with guard:
+                used = sum(active_memory.values()) + backgrounds.memory_used() + sum(terminal_memory.values()) + sum(browser_memory.values())
+                if used + quota['memory_mib'] > int(os.environ.get('SANDBOX_ACTIVE_MEMORY_MIB', '4096')):
+                    return self.reply(409, {'error': '沙箱运行内存预算已满，请稍后重试'})
+                browser_memory[user] = quota['memory_mib']
+            try:
+                item = Browser(user, quota, width, height)
+            except ValueError as error:
+                with guard: browser_memory.pop(user, None)
+                return self.reply(400, {'error': str(error)})
+            with guard:
+                browsers[user] = item
+            url = value.get('url')
+            if isinstance(url, str) and url.strip():
+                try:
+                    item.command('goto', 40, url=url[:4000])
+                except ValueError as error:
+                    return self.reply(200, {'ok': True, 'warning': str(error)[:300]})
+            return self.reply(200, {'ok': True, 'width': width, 'height': height})
+        with guard:
+            item = browsers.get(user)
+        if not item:
+            return self.reply(404, {'error': '浏览器未打开'})
+        if self.path == '/browser/frame':
+            after = max(0, int(value.get('after') or 0))
+            wait = max(0.0, min(float(value.get('wait') or 0), 10.0))
+            return self.reply(200, item.read(after, wait))
+        if self.path == '/browser/input':
+            kind = value.get('kind')
+            if kind not in {'click', 'dblclick', 'move', 'wheel', 'text', 'key'}:
+                return self.reply(422, {'error': '浏览器输入类型无效'})
+            payload = {'kind': kind}
+            for key in ('x', 'y', 'dx', 'dy'):
+                if value.get(key) is not None:
+                    payload[key] = int(value.get(key))
+            if kind == 'text':
+                text = value.get('text')
+                if not isinstance(text, str) or len(text) > 20000:
+                    return self.reply(422, {'error': '输入内容无效'})
+                payload['text'] = text
+            if kind == 'key':
+                key = value.get('key')
+                if not isinstance(key, str) or not key or len(key) > 40:
+                    return self.reply(422, {'error': '按键无效'})
+                payload['key'] = key
+                modifiers = value.get('modifiers')
+                if isinstance(modifiers, list):
+                    payload['modifiers'] = [m for m in modifiers if m in {'Control', 'Shift', 'Alt', 'Meta'}][:4]
+            try:
+                return self.reply(200, {'ok': True, 'value': item.command('input', 20, **payload)})
+            except ValueError as error:
+                return self.reply(400, {'error': str(error)})
+        if self.path == '/browser/navigate':
+            action = value.get('action')
+            try:
+                if action == 'goto':
+                    url = value.get('url')
+                    if not isinstance(url, str) or not url.strip() or len(url) > 4000:
+                        return self.reply(422, {'error': '网址无效'})
+                    return self.reply(200, {'ok': True, 'value': item.command('goto', 40, url=url)})
+                if action in {'back', 'forward', 'reload'}:
+                    return self.reply(200, {'ok': True, 'value': item.command(action, 30)})
+                if action == 'resize':
+                    width = max(320, min(int(value.get('width') or 1280), 1920))
+                    height = max(320, min(int(value.get('height') or 800), 1400))
+                    return self.reply(200, {'ok': True, 'value': item.command('resize', 15, width=width, height=height)})
+            except ValueError as error:
+                return self.reply(400, {'error': str(error)})
+            return self.reply(422, {'error': '浏览器导航类型无效'})
+        if self.path == '/browser/close':
+            close_browser(user)
+            return self.reply(200, {'ok': True})
+        return self.reply(404, {'error': '接口不存在'})
+
     def reply(self, status, value):
         data = json.dumps(value, ensure_ascii=False).encode()
         self.send_response(status)
@@ -496,10 +766,14 @@ def sweep():
         with guard:
             stale = [user for user, item in terminals.items()
                      if item.closed or time.monotonic() - item.last_use > TERMINAL_IDLE]
+            stale_browsers = [user for user, item in browsers.items()
+                              if item.closed or time.monotonic() - item.last_use > BROWSER_IDLE]
         # Removing a terminal shells out to docker; keep that off the guard so a
         # slow container teardown cannot stall every other sandbox request.
         for user in stale:
             close_terminal(user)
+        for user in stale_browsers:
+            close_browser(user)
         with guard:
             backgrounds.sweep()
             expired = {lease["user"] for lease in leases.values() if lease["expires"] <= time.monotonic()}
@@ -513,7 +787,7 @@ def sweep():
 
 if __name__ == "__main__":
     # Fail closed across control-plane restarts; kill only our labelled tool containers.
-    old = docker("ps", "-aq", "--filter", "label=copylee.sandbox=1").stdout.decode().split() + docker('ps', '-aq', '--filter', 'label=copylee.background=1').stdout.decode().split() + docker('ps', '-aq', '--filter', 'label=copylee.terminal=1').stdout.decode().split()
+    old = docker("ps", "-aq", "--filter", "label=copylee.sandbox=1").stdout.decode().split() + docker('ps', '-aq', '--filter', 'label=copylee.background=1').stdout.decode().split() + docker('ps', '-aq', '--filter', 'label=copylee.terminal=1').stdout.decode().split() + docker('ps', '-aq', '--filter', 'label=copylee.browser=1').stdout.decode().split()
     if old:
         docker("rm", "-f", *old)
     threading.Thread(target=sweep, daemon=True).start()

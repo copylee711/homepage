@@ -325,6 +325,54 @@ function solidPng(width, height, r, g, b) {
   ]);
 }
 
+// A drawn stand-in for a Chromium frame: enough structure to check the live
+// pane, coordinate mapping and click feedback without a real sandbox.
+const mockBrowser = { open: false, url: '', title: '', width: 1280, height: 800, history: [], index: -1, clicks: [], keys: 0 };
+
+function mockBrowserPng() {
+  const w = mockBrowser.width, h = mockBrowser.height;
+  const rgb = Buffer.alloc(w * h * 3, 255);
+  const set = (x, y, r, g, b) => {
+    x = Math.round(x); y = Math.round(y);
+    if (x < 0 || y < 0 || x >= w || y >= h) return;
+    const i = (y * w + x) * 3;
+    rgb[i] = r; rgb[i + 1] = g; rgb[i + 2] = b;
+  };
+  const rect = (x, y, rw, rh, r, g, b) => {
+    for (let j = y; j < y + rh; j += 1) for (let i = x; i < x + rw; i += 1) set(i, j, r, g, b);
+  };
+  const disc = (cx, cy, radius, r, g, b) => {
+    for (let j = -radius; j <= radius; j += 1) {
+      const span = Math.sqrt(Math.max(0, radius * radius - j * j));
+      for (let i = -span; i <= span; i += 1) set(cx + i, cy + j, r, g, b);
+    }
+  };
+  const scale = w / 1280;
+  rect(0, 0, w, h, 255, 255, 255);
+  rect(0, 0, w, Math.round(56 * scale), 246, 246, 248);
+  rect(0, Math.round(55 * scale), w, 1, 226, 226, 230);
+  for (let i = 0; i < 3; i += 1) disc(Math.round((26 + i * 24) * scale), Math.round(28 * scale), Math.round(6 * scale), 212, 212, 216);
+  rect(Math.round(112 * scale), Math.round(16 * scale), Math.round((w / scale - 140) * scale), Math.round(26 * scale), 233, 233, 238);
+  if (mockBrowser.url && mockBrowser.url !== 'about:blank') {
+    rect(Math.round(40 * scale), Math.round(96 * scale), Math.round((w / scale - 80) * scale), Math.round(150 * scale), 236, 236, 241);
+    rect(Math.round(40 * scale), Math.round(282 * scale), Math.round(520 * scale), Math.round(18 * scale), 222, 222, 228);
+    rect(Math.round(40 * scale), Math.round(316 * scale), Math.round((w / scale - 200) * scale), Math.round(12 * scale), 232, 232, 237);
+    rect(Math.round(40 * scale), Math.round(344 * scale), Math.round((w / scale - 320) * scale), Math.round(12 * scale), 232, 232, 237);
+    rect(Math.round(40 * scale), Math.round(392 * scale), Math.round(150 * scale), Math.round(44 * scale), 37, 99, 235);
+    rect(Math.round(40 * scale), Math.round(486 * scale), Math.round((w / scale - 120) * scale), Math.round(1 * scale), 232, 232, 236);
+  }
+  for (const point of mockBrowser.clicks.slice(-12)) disc(point.x, point.y, Math.round(9 * scale), 220, 38, 38);
+  const stride = 1 + w * 3;
+  const raw = Buffer.alloc(stride * h);
+  for (let y = 0; y < h; y += 1) rgb.copy(raw, y * stride + 1, y * w * 3, (y + 1) * w * 3);
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), pngChunk('IHDR', ihdr), pngChunk('IDAT', deflateSync(raw)), pngChunk('IEND', Buffer.alloc(0))]);
+}
+
 export function devMock() {
   return {
     name: 'iris-dev-mock',
@@ -382,6 +430,67 @@ export function devMock() {
           });
         }
         if(path==='/api/context/compact')return send({ok:true,skipped:true,reason:'当前上下文较短，暂不需要压缩'});
+        if (path === '/api/browser/open') {
+          mockBrowser.open = true;
+          mockBrowser.width = Math.max(320, Math.min(Number(body.width) || 1280, 1920));
+          mockBrowser.height = Math.max(320, Math.min(Number(body.height) || 800, 1400));
+          mockBrowser.url = '';
+          mockBrowser.title = '';
+          mockBrowser.history = [];
+          mockBrowser.index = -1;
+          mockBrowser.clicks = [];
+          mockBrowser.keys = 0;
+          return send({ ok: true, width: mockBrowser.width, height: mockBrowser.height });
+        }
+        if (path === '/api/browser/frame') {
+          if (!mockBrowser.open) return send({ closed: true, error: '浏览器已关闭', seq: 0, frame: null });
+          const after = Math.max(0, Number(body.after) || 0);
+          const current = Math.floor(Date.now() / 700);
+          const started = Date.now();
+          while (current <= after && Date.now() - started < 1200) await new Promise(r => setTimeout(r, 120));
+          const seq = Math.max(current, after + 1);
+          return send({
+            seq,
+            closed: false,
+            frame: {
+              seq, mime: 'image/png', data: mockBrowserPng().toString('base64'),
+              url: mockBrowser.url, title: mockBrowser.title,
+              width: mockBrowser.width, height: mockBrowser.height,
+              canBack: mockBrowser.index > 0,
+              canForward: mockBrowser.index >= 0 && mockBrowser.index < mockBrowser.history.length - 1,
+              loading: false,
+            },
+          });
+        }
+        if (path === '/api/browser/input') {
+          if (body.kind === 'click' || body.kind === 'dblclick') mockBrowser.clicks.push({ x: Number(body.x) || 0, y: Number(body.y) || 0 });
+          if (body.kind === 'text') mockBrowser.keys += String(body.text || '').length;
+          if (body.kind === 'key') mockBrowser.keys += 1;
+          return send({ ok: true, value: {} });
+        }
+        if (path === '/api/browser/navigate') {
+          const action = String(body.action || '');
+          if (action === 'goto') {
+            const raw = String(body.url || '').trim();
+            const target = /^[a-z]+:\/\//i.test(raw) ? raw : 'https://' + raw;
+            mockBrowser.history = mockBrowser.history.slice(0, mockBrowser.index + 1);
+            mockBrowser.history.push(target);
+            mockBrowser.index = mockBrowser.history.length - 1;
+            mockBrowser.url = target;
+            mockBrowser.title = target.replace(/^https?:\/\//, '').split('/')[0];
+          } else if (action === 'back') {
+            mockBrowser.index = Math.max(0, mockBrowser.index - 1);
+            mockBrowser.url = mockBrowser.history[mockBrowser.index] || '';
+          } else if (action === 'forward') {
+            mockBrowser.index = Math.min(mockBrowser.history.length - 1, mockBrowser.index + 1);
+            mockBrowser.url = mockBrowser.history[mockBrowser.index] || '';
+          } else if (action === 'resize') {
+            mockBrowser.width = Math.max(320, Math.min(Number(body.width) || 1280, 1920));
+            mockBrowser.height = Math.max(320, Math.min(Number(body.height) || 800, 1400));
+          }
+          return send({ ok: true, value: { url: mockBrowser.url, title: mockBrowser.title } });
+        }
+        if (path === '/api/browser/close') { mockBrowser.open = false; return send({ ok: true }); }
         if(path==='/api/widgets'){globalThis.__irisQaWidgets ||= new Map();const id=String(globalThis.__irisQaWidgets.size);globalThis.__irisQaWidgets.set(id,body.html);return send({url:'/api/widget-document?id='+id});}
         if(path==='/api/widget-document'){res.setHeader('Content-Type','text/html; charset=utf-8');res.setHeader('Content-Security-Policy',WIDGET_CSP);res.end(widgetDocument(globalThis.__irisQaWidgets?.get(q.get('id'))||''));return;}
         if (path === '/api/search/settings') return send(publicSearch(searchConfig));

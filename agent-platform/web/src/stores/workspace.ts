@@ -73,6 +73,7 @@ let termLineSeq = 0;
 
 export const FILES_TAB = '__files__';
 export const TERMINAL_TAB = '__terminal__';
+export const BROWSER_TAB = '__browser__';
 
 export const useWorkspace = defineStore('workspace', {
   state: () => ({
