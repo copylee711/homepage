@@ -155,7 +155,7 @@ export class SourceWiki {
     const index = cached?.fingerprint === fingerprint ? cached.vectors : null;
     const query = prompt.trim().slice(0, 1800);
     const input = index ? [query] : [query, ...descriptions];
-    const result = await sandbox('/wiki/embedding', user, undefined, null, { url, model, apiKey, input }, 1350);
+    const result = await sandbox('/wiki/embedding', user, undefined, null, { url, model, apiKey, input }, 3400);
     if (!Array.isArray(result.data) || result.data.length !== input.length) return [];
     const vectors = input.map((_, i) => unitVector(result.data.find(item => item.index === i)?.embedding));
     const [queryVector, ...built] = vectors;

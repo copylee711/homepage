@@ -226,7 +226,7 @@ def fetch_public(raw, raw_html=False, use_proxy=True, request=None, image=False,
                             data = payload; break
             else:
                 data = response.read(max_bytes + 1)
-            text = data[:MAX_BYTES].decode("utf-8", errors="replace")
+            text = data[:max_bytes].decode("utf-8", errors="replace")
             images=[]
             if "html" in kind and not raw_html:
                 parser = TextHTML(raw); parser.feed(text)
