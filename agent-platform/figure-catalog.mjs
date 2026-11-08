@@ -65,24 +65,36 @@ export function subjectSites(subject) {
     .map(([, url]) => new URL(url).hostname))].slice(0, 3);
 }
 
+function matchFigures(text, count) {
+  const query = normalize(text);
+  return figures
+    .map(({ aliases, ...figure }) => ({
+      figure,
+      score: Math.max(0, ...aliases.map(alias => {
+        const phrase = normalize(alias);
+        const matched = /\p{Script=Han}/u.test(phrase)
+          ? query.includes(phrase)
+          : ` ${query} `.includes(` ${phrase} `);
+        return matched ? (query === phrase ? 1000 : 0) + phrase.length : 0;
+      })),
+    }))
+    .filter(entry => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, count)
+    .map(({ figure }) => figure);
+}
+
+export function figureContext(prompt) {
+  if (typeof prompt !== 'string' || /(?:纯文字|只用文字|不要配图|不需要配图|text[- ]only|no (?:images|pictures|figures|visuals))/i.test(prompt)) return '';
+  const results = matchFigures(prompt, 1);
+  if (!results.length) return '';
+  return '\nA curated teaching figure matches the latest user prompt: ' + JSON.stringify(results[0]) +
+    '. If the task is a concept explanation and this figure explains it, embed it directly in Markdown beside the relevant paragraph, with its source link and credit. No lookup or preview is needed. Respect the user’s requested format.';
+}
+
 export async function searchImages(params, externalSearch) {
   if (!params.externalOnly) {
-    const query = normalize(params.query);
-    const results = figures
-      .map(({ aliases, ...figure }) => ({
-        figure,
-        score: Math.max(0, ...aliases.map(alias => {
-          const phrase = normalize(alias);
-          const matched = /\p{Script=Han}/u.test(phrase)
-            ? query.includes(phrase)
-            : ` ${query} `.includes(` ${phrase} `);
-          return matched ? (query === phrase ? 1000 : 0) + phrase.length : 0;
-        })),
-      }))
-      .filter(entry => entry.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, params.count ?? 5)
-      .map(({ figure }) => figure);
+    const results = matchFigures(params.query, params.count ?? 5);
     if (results.length) return { status: 'ok', engine: 'iris-figure-catalog', query: params.query, results };
   }
   const sites = params.externalOnly ? [] : subjectSites(params.subject);

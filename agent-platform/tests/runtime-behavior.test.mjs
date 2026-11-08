@@ -95,3 +95,10 @@ test('OpenWiki sources are selected only for a matching subject and skipped for 
   const hit = await searchImages({ query: '高斯定律', subject: 'physics' }, () => assert.fail('unexpected external search'));
   assert.equal(hit.engine, 'iris-figure-catalog');
 });
+
+test('known visual topics ground a turn without a tool call and respect text-only requests', async () => {
+  const { figureContext } = await import('../figure-catalog.mjs');
+  assert.match(figureContext('Give me an intuitive explanation of Gauss’s law.'), /Gauss_Sphere_Charge_Inside/);
+  assert.equal(figureContext('第二类曲线积分，不要配图'), '');
+  assert.equal(figureContext('Explain a Gaussian mixture'), '');
+});
