@@ -161,6 +161,16 @@ Escape closes idle dialogs and focus returns to their trigger.
   `/workspace/.iris/preview-user.json` for the agent to read. Documents open in a pane
   wide enough to read (the workspace widens once), fit to width by default, and can take
   the whole viewport; a visible tab keeps its own close button.
+- A reader can edit the selected paragraph, cell or text box in place. The edit is written
+  into the real file through the document libraries, so the agent sees the file itself
+  change; the edit is also queued and prepended to the next prompt, so the agent re-reads
+  the document instead of overwriting it. The preview keeps one previous version and
+  offers 回到上一版 while it exists. Every such edit surfaces as 「读者在实时预览里手工修改过文档」.
+- Terminal, browser and document tabs exist only while they are open: opening one from the
+  workspace header adds its tab, and its close button removes the tab and releases the
+  session. The file browser tab is the only permanent one. A document can also be pulled
+  into its own browser window from the preview header; quotes taken there return to the
+  console that opened it.
 
 ## Streaming and conversation navigation
 

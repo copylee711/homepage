@@ -17,6 +17,10 @@ export interface OfficeElementInfo {
   detail?: string;
   /** Which page / slide / sheet the element belongs to. */
   page?: string;
+  /** Raw value used when the reader edits the element (display text may be formatted). */
+  value?: string;
+  /** Where a reader edit is written back: paragraph N, sheet!ref, slide N shape M. */
+  edit?: { kind: 'docx' | 'xlsx' | 'pptx'; paragraph?: number; sheet?: string; ref?: string; slide?: number; shape?: number };
 }
 
 export interface OfficeRenderResult {

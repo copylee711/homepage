@@ -13,7 +13,7 @@ import { parsePptx, renderPptxSlide, type PptxDeck } from '../services/office/pp
 // Office files render in the pane and every paragraph, cell and shape is
 // clickable: a click pins it and hands its text to the composer as a quote, so
 // the agent knows exactly which element the request is about.
-const props = defineProps<{ tab: OpenFileTab; fullscreen?: boolean }>();
+const props = defineProps<{ tab: OpenFileTab; fullscreen?: boolean; standalone?: boolean }>();
 const emit = defineEmits<{ (event: 'toggle-fullscreen'): void }>();
 const session = useSession();
 const ui = useUi();
@@ -37,6 +37,10 @@ const zoom = ref(0); // 0 = fit to width
 const refreshing = ref(false);
 const updated = ref(false);
 const agentNote = ref<{ note: string; at: number } | null>(null);
+const editing = ref(false);
+const editDraft = ref('');
+const savingEdit = ref(false);
+const restoreAvailable = ref(false);
 
 const format = computed(() => officeFormat(props.tab.name));
 let elementIndex = new Map<string, OfficeElementInfo>();
@@ -47,6 +51,7 @@ let lastStamp = '';
 let hovered: HTMLElement | null = null;
 let downPoint: { x: number; y: number } | null = null;
 let dragged = false;
+let anchorId = '';
 
 const selectionKind = computed(() => {
   if (textPick.value) return '选中文字';
@@ -64,7 +69,7 @@ const selectionText = computed(() => {
 });
 const selectionDetail = computed(() => {
   if (textPick.value) return '仅引用拖选中的文字';
-  if (selected.value.length > 1) return 'Ctrl / ⌘ 点击可增减元素';
+  if (selected.value.length > 1) return 'Shift 连选 · Ctrl / ⌘ 增减';
   return selected.value[0]?.detail || '';
 });
 const hasSelection = computed(() => !!textPick.value || selected.value.length > 0);
@@ -85,28 +90,94 @@ function paintSelection() {
 function clearSelection() {
   hovered?.removeAttribute('data-iris-hover');
   hovered = null;
+  editing.value = false;
+  editDraft.value = '';
   selectedIds.clear();
   selected.value = [];
   textPick.value = null;
+  anchorId = '';
   paintSelection();
   window.getSelection()?.removeAllRanges();
 }
 
-/** Click selects one element; Ctrl/⌘/Shift+click adds or removes one. */
-function selectNode(node: HTMLElement | null, additive = false) {
+/** Click selects one; Shift extends from the anchor; Ctrl/⌘ toggles one. */
+function selectNode(node: HTMLElement | null, additive = false, range = false) {
   const id = node?.dataset.irisEl || '';
   if (!id) { if (!additive) clearSelection(); return; }
   textPick.value = null;
+  if (range && anchorId && anchorId !== id) {
+    const nodes = Array.from(host.value?.querySelectorAll('[data-iris-el]') || []) as HTMLElement[];
+    const from = nodes.findIndex(item => item.dataset.irisEl === anchorId);
+    const to = nodes.findIndex(item => item.dataset.irisEl === id);
+    if (from >= 0 && to >= 0) {
+      selectedIds.clear();
+      for (let at = Math.min(from, to); at <= Math.max(from, to); at += 1) {
+        const key = nodes[at].dataset.irisEl;
+        if (key) selectedIds.add(key);
+      }
+      selected.value = [...selectedIds].map(key => elementIndex.get(key) || { id: key, label: key, kind: '元素', text: '' });
+      editing.value = false;
+      editDraft.value = '';
+      paintSelection();
+      queueFeedback();
+      return;
+    }
+  }
   if (additive) {
     if (selectedIds.has(id)) selectedIds.delete(id);
     else selectedIds.add(id);
   } else {
     selectedIds.clear();
     selectedIds.add(id);
+    anchorId = id;
   }
+  if (selectedIds.has(id) && !additive) anchorId = id;
   selected.value = [...selectedIds].map(key => elementIndex.get(key) || { id: key, label: key, kind: '元素', text: '' });
+  editing.value = false;
+  editDraft.value = '';
   paintSelection();
   queueFeedback();
+}
+
+/** The one element a reader can edit in place, or null for a multi-selection. */
+const editable = computed(() => {
+  if (textPick.value || selected.value.length !== 1) return null;
+  return selected.value[0]?.edit ? selected.value[0] : null;
+});
+
+function startEdit() {
+  const element = editable.value;
+  if (!element) return;
+  editing.value = true;
+  editDraft.value = element.value ?? element.text ?? '';
+  void nextTick(() => {
+    const box = document.querySelector('.op-edit-input') as HTMLTextAreaElement | null;
+    box?.focus();
+    box?.select();
+  });
+}
+
+async function saveEdit() {
+  const element = editable.value;
+  if (!element?.edit || savingEdit.value) return;
+  savingEdit.value = true;
+  try {
+    const response = await fetch('/api/office/edit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrf() },
+      body: JSON.stringify({ path: props.tab.path, target: element.edit, value: editDraft.value, anchor: element.label }),
+      credentials: 'same-origin',
+      redirect: 'error',
+    });
+    const value = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(value?.error || '无法保存这个修改');
+    editing.value = false;
+    ui.toast('已保存修改，Agent 会在下一轮看到', { tone: 'success' });
+  } catch (error: any) {
+    ui.toast(error?.message || '无法保存这个修改', { tone: 'error' });
+  } finally {
+    savingEdit.value = false;
+  }
 }
 
 function nodeFrom(target: EventTarget | null) {
@@ -162,16 +233,59 @@ function onClick(event: MouseEvent) {
   event.preventDefault();
   if (dragged) { dragged = false; return; }
   const node = nodeFrom(event.target);
-  selectNode(node, event.ctrlKey || event.metaKey || event.shiftKey);
+  selectNode(node, event.ctrlKey || event.metaKey, event.shiftKey);
 }
 
 function quote() {
   const label = selectionLabel.value;
   const text = selectionText.value;
   if (!label || !text) return;
-  session.addTextQuote(text, label, { path: props.tab.path, anchor: label });
   sendFeedback('quote');
+  if (props.standalone) {
+    // A detached window hands the quote back to the console that opened it.
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage({ type: 'iris:quote', text, label, path: props.tab.path }, location.origin);
+      ui.toast('已引用到主窗口的输入框', { tone: 'success' });
+    } else {
+      void navigator.clipboard?.writeText(text)
+        .then(() => ui.toast('已复制选中内容', { tone: 'success' }))
+        .catch(() => ui.toast('无法复制，请手动选择文字', { tone: 'error' }));
+    }
+    return;
+  }
+  session.addTextQuote(text, label, { path: props.tab.path, anchor: label });
   ui.toast(`已引用 ${label} 到输入框`, { tone: 'success' });
+}
+
+async function restorePrevious() {
+  const ok = await ui.confirm({
+    title: '回到上一版',
+    message: '用这份文档上一个版本覆盖当前内容。Agent 对文件的改动会丢失，你的手工修改也会回到上一版。',
+    confirmText: '回到上一版',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    const response = await fetch('/api/office/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrf() },
+      body: JSON.stringify({ path: props.tab.path }),
+      credentials: 'same-origin',
+      redirect: 'error',
+    });
+    const value = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(value?.error || '无法回到上一版');
+    restoreAvailable.value = false;
+    ui.toast('已回到上一版', { tone: 'success' });
+  } catch (error: any) {
+    ui.toast(error?.message || '无法回到上一版', { tone: 'error' });
+  }
+}
+
+function openWindow() {
+  const name = 'iris-preview-' + props.tab.path.replace(/[^A-Za-z0-9]+/g, '-').slice(-40);
+  const url = '/?preview=1&path=' + encodeURIComponent(props.tab.path);
+  window.open(url, name, 'width=1100,height=840');
 }
 
 function fitZoom() {
@@ -282,7 +396,7 @@ async function load(preserve = true) {
   try {
     const response = await fetch(fileUrl(), { credentials: 'same-origin', redirect: 'error' });
     if (!response.ok) {
-      throw new Error(response.status === 413 ? '文件超过 15 MiB，无法在浏览器内预览' : '无法读取这个文件');
+      throw new Error(response.status === 404 ? '文件不存在或无权访问' : '无法读取这个文件');
     }
     const buffer = await response.arrayBuffer();
     if (token !== loadToken) return;
@@ -387,6 +501,7 @@ function applyControl(control: any) {
 function handleWatchEvent(event: any) {
   if (!event || typeof event !== 'object') return;
   if (event.type === 'hello') {
+    restoreAvailable.value = event.restore === true;
     const stamp = stampOf(event.file);
     const moved = lastStamp && stamp !== lastStamp;
     lastStamp = stamp;
@@ -395,6 +510,7 @@ function handleWatchEvent(event: any) {
     return;
   }
   if (event.type === 'changed') {
+    restoreAvailable.value = event.restore === true;
     const stamp = stampOf(event.file);
     if (stamp === lastStamp) return;
     lastStamp = stamp;
@@ -571,6 +687,25 @@ onBeforeUnmount(() => {
         <span v-if="updated" class="op-updated"><span class="op-dot"></span>已更新</span>
         <span class="op-hint">点击元素即可引用给 Agent</span>
         <button
+          v-if="restoreAvailable"
+          type="button"
+          class="op-btn"
+          title="回到上一版（撤销这次对文件的改动）"
+          @click="restorePrevious"
+        >
+          <Icon name="rotate-ccw" :size="12" /><span>回到上一版</span>
+        </button>
+        <button
+          v-if="!standalone"
+          type="button"
+          class="op-btn op-icon"
+          title="在独立窗口打开"
+          aria-label="在独立窗口打开"
+          @click="openWindow"
+        >
+          <Icon name="external-link" :size="13" />
+        </button>
+        <button
           type="button"
           class="op-btn op-icon"
           :class="{ 'is-on': fullscreen }"
@@ -614,18 +749,39 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-if="hasSelection" class="op-selection">
+    <div v-if="hasSelection" class="op-selection" :class="{ 'is-editing': editing }">
       <div class="op-sel-body">
         <div class="op-sel-head">
-          <span class="op-sel-kind">{{ selectionKind }}</span>
+          <span class="op-sel-kind">{{ editing ? '编辑' : selectionKind }}</span>
           <span class="op-sel-label">{{ selectionLabel }}</span>
-          <span v-if="selectionDetail" class="op-sel-detail">{{ selectionDetail }}</span>
+          <span v-if="selectionDetail && !editing" class="op-sel-detail">{{ selectionDetail }}</span>
+          <span v-else-if="editing" class="op-sel-detail">Ctrl / ⌘ + Enter 保存</span>
         </div>
-        <div class="op-sel-text" :class="{ 'is-empty': !selectionText }">{{ selectionText || '（无文字内容）' }}</div>
+        <textarea
+          v-if="editing"
+          v-model="editDraft"
+          class="op-edit-input"
+          rows="3"
+          spellcheck="false"
+          aria-label="编辑选中元素"
+          @keydown.esc.stop="editing = false"
+          @keydown.ctrl.enter.prevent="saveEdit"
+          @keydown.meta.enter.prevent="saveEdit"
+        ></textarea>
+        <div v-else class="op-sel-text" :class="{ 'is-empty': !selectionText }">{{ selectionText || '（无文字内容）' }}</div>
       </div>
       <div class="op-sel-actions">
-        <button type="button" class="op-btn is-primary" @click="quote">引用到对话</button>
-        <button type="button" class="op-btn" @click="clearSelection">取消</button>
+        <template v-if="editing">
+          <button type="button" class="op-btn is-primary" :disabled="savingEdit" @click="saveEdit">{{ savingEdit ? '保存中…' : '保存' }}</button>
+          <button type="button" class="op-btn" :disabled="savingEdit" @click="editing = false">取消</button>
+        </template>
+        <template v-else>
+          <button v-if="editable" type="button" class="op-btn" title="直接修改这个元素，Agent 会看到" @click="startEdit">
+            <Icon name="edit" :size="12" /><span>编辑</span>
+          </button>
+          <button type="button" class="op-btn is-primary" @click="quote">引用到对话</button>
+          <button type="button" class="op-btn" @click="clearSelection">取消</button>
+        </template>
       </div>
     </div>
   </div>
@@ -679,6 +835,9 @@ onBeforeUnmount(() => {
 .op-sel-detail { flex: none; color: var(--faint); font-size: 10.5px; }
 .op-sel-text { margin-top: 4px; max-height: 58px; overflow: auto; color: var(--text-2); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .op-sel-text.is-empty { color: var(--faint); font-style: italic; }
+.op-selection.is-editing { align-items: stretch; }
+.op-edit-input { width: 100%; margin-top: 5px; min-height: 54px; max-height: 140px; resize: vertical; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 12.5px; line-height: 1.5; font-family: inherit; }
+.op-edit-input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent); outline-offset: 0; border-color: var(--accent); }
 .op-sel-actions { flex: none; display: flex; align-items: center; gap: 5px; }
 
 /* Selection chrome inside rendered documents. */

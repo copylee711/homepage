@@ -480,10 +480,12 @@ export const server = createServer(async (req, res) => {
         stream.pipe(res);
         return;
       }
-      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/chats/fork', '/api/chats/truncate', '/api/chats/project', '/api/chats/permission', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/terminal/exec', '/api/terminal/open', '/api/terminal/write', '/api/terminal/read', '/api/terminal/close', '/api/browser/open', '/api/browser/input', '/api/browser/navigate', '/api/browser/close', '/api/office/feedback', '/api/git/status', '/api/git/checkout', '/api/chats/settings/save'].includes(url.pathname)) {
+      if (['/api/chats/rename', '/api/chats/pin', '/api/chats/archive', '/api/chats/delete', '/api/chats/fork', '/api/chats/truncate', '/api/chats/project', '/api/chats/permission', '/api/projects/create', '/api/projects/rename', '/api/projects/delete', '/api/terminal/exec', '/api/terminal/open', '/api/terminal/write', '/api/terminal/read', '/api/terminal/close', '/api/browser/open', '/api/browser/input', '/api/browser/navigate', '/api/browser/close', '/api/office/feedback', '/api/office/edit', '/api/office/restore', '/api/git/status', '/api/git/checkout', '/api/chats/settings/save'].includes(url.pathname)) {
         // A cold Chromium launch or a slow first navigation outlasts the
         // ordinary 45s runner budget; only these two may take that long.
-        const slow = ['/api/browser/open', '/api/browser/navigate'].includes(url.pathname);
+        // A cold Chromium launch, a first navigation, or writing an Office
+        // element back through the document libraries can outlast the budget.
+        const slow = ['/api/browser/open', '/api/browser/navigate', '/api/office/edit'].includes(url.pathname);
         const response = await runner(url.pathname.replace('/api', ''), auth.user.id, input, slow ? AbortSignal.timeout(95000) : undefined);
         return json(res, 200, await response.json());
       }

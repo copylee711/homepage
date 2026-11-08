@@ -489,6 +489,8 @@ export function renderPptxSlide(host: HTMLElement, deck: PptxDeck, index: number
         text: shape.text,
         detail: `${slide.width}×${slide.height} · 第 ${index + 1} / ${deck.slides.length} 张`,
         page: `第 ${index + 1} 张`,
+        value: shape.text,
+        edit: shape.kind === 'text' ? { kind: 'pptx', slide: index + 1, shape: Number(shape.id.split('-').pop()) } : undefined,
       });
     }
     page.appendChild(node);

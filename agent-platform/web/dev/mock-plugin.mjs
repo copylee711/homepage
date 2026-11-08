@@ -4,7 +4,11 @@ import { normalizeSearch, publicSearch } from '../../search.mjs';
 // Vite dev-only middleware that emulates the gateway API so the Iris console can be
 // previewed without the backend. Never included in the production build.
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 
 const now = Date.now();
@@ -181,6 +185,8 @@ for (const [target, file] of [
 const pendingApprovals = new Map();
 // Latest selection the reader published from an Office preview.
 let mockPreviewFeedback = null;
+// One previous version per file, so "回到上一版" works in dev as well.
+const mockHistory = new Map();
 let searchConfig = normalizeSearch();
 let featureConfig={revision:0,autoCompaction:true,skills:BUILTIN_SKILLS.map(s=>s.id),customSkills:[],mcpServers:[]};
 const memoryConfig = {revision:0,persona:'',global:'',projects:{}};
@@ -841,6 +847,42 @@ export function devMock() {
           }
           return res.end(buffer);
         }
+        if (path === '/api/office/edit') {
+          // Dev writes the edit back with the same helper the host uses, so the
+          // preview really reloads a changed file.
+          const target = normPath(body.path || '');
+          if (!(target in fileText)) return send({ error: '文件不存在' }, 404);
+          const dir = mkdtempSync(join(tmpdir(), 'iris-office-'));
+          try {
+            const name = target.split('/').pop();
+            writeFileSync(join(dir, name), Buffer.from(fileText[target], 'base64'));
+            const result = spawnSync('python', [fileURLToPath(new URL('../../office-edit.py', import.meta.url))], {
+              input: JSON.stringify({ path: name, target: body.target || {}, value: String(body.value ?? '') }),
+              env: { ...process.env, IRIS_OFFICE_ROOT: dir },
+              encoding: 'utf8',
+            });
+            const output = String(result.stdout || '').trim().split(/\r?\n/).pop();
+            let reply = {};
+            try { reply = JSON.parse(output || '{}'); } catch { reply = {}; }
+            if (!reply.ok) return send({ error: reply.error || '无法写入这个元素' }, 400);
+            mockHistory.set(target, fileText[target]);
+            fileText[target] = readFileSync(join(dir, name)).toString('base64');
+            encodedFiles.add(target);
+            mockModified.set(target, Math.floor(Date.now() / 1000) + 1);
+            return send({ ok: true, before: reply.before, after: reply.after });
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        }
+        if (path === '/api/office/restore') {
+          const target = normPath(body.path || '');
+          const previous = mockHistory.get(target);
+          if (!previous) return send({ error: '没有可回退的上一版' }, 404);
+          fileText[target] = previous;
+          mockHistory.delete(target);
+          mockModified.set(target, Math.floor(Date.now() / 1000) + 1);
+          return send({ ok: true });
+        }
         if (path === '/api/office/feedback') {
           if (req.method === 'POST') mockPreviewFeedback = { ...body, at: Math.floor(Date.now() / 1000) };
           return send({ ok: true, state: mockPreviewFeedback });
@@ -870,9 +912,9 @@ export function devMock() {
             const control = controlOf();
             const controlStamp = JSON.stringify(control);
             if (lastFile === undefined) {
-              res.write(JSON.stringify({ type: 'hello', file, control }) + '\n');
+              res.write(JSON.stringify({ type: 'hello', file, control, restore: mockHistory.has(target) }) + '\n');
             } else if (JSON.stringify(file) !== JSON.stringify(lastFile)) {
-              res.write(JSON.stringify({ type: 'changed', file }) + '\n');
+              res.write(JSON.stringify({ type: 'changed', file, restore: mockHistory.has(target) }) + '\n');
             }
             if (controlStamp !== JSON.stringify(lastControl)) {
               if (lastControl !== undefined && control) res.write(JSON.stringify({ type: 'agent', control }) + '\n');

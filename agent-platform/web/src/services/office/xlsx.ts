@@ -466,9 +466,15 @@ export function renderSheet(host: HTMLElement, book: Workbook, sheetIndex: numbe
         text: cell.value || (cell.formula ? `=${cell.formula}` : ''),
         detail: [detail, cell.numeric ? '数值' : '文本'].filter(Boolean).join(' · '),
         page: sheet.name,
+        value: cell.raw == null ? '' : String(cell.raw),
+        edit: { kind: 'xlsx', sheet: sheet.name, ref },
       });
     } else {
-      elements.set(id, { id, label: `${sheet.name}!${ref}`, kind: '单元格', text: '', detail: '空单元格', page: sheet.name });
+      elements.set(id, {
+        id, label: `${sheet.name}!${ref}`, kind: '单元格', text: '', detail: '空单元格', page: sheet.name,
+        value: '',
+        edit: { kind: 'xlsx', sheet: sheet.name, ref },
+      });
     }
     return td;
   };

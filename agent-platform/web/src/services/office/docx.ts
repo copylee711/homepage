@@ -102,6 +102,20 @@ export async function renderDocx(buffer: ArrayBuffer, host: HTMLElement): Promis
     experimental: false,
   });
 
+  // docx-preview hangs list markers on a negative text-indent, which puts them
+  // outside the paragraph box; move that indent into padding so the selection
+  // outline encloses the bullet too, without moving any text.
+  const lists = Array.from(host.querySelectorAll('p[class*="iris-docx-num-"]')) as HTMLElement[];
+  const indents = lists.map(paragraph => {
+    const style = getComputedStyle(paragraph);
+    return { paragraph, margin: parseFloat(style.marginLeft) || 0, padding: parseFloat(style.paddingLeft) || 0 };
+  });
+  for (const item of indents) {
+    if (item.margin <= 0) continue;
+    item.paragraph.style.paddingLeft = (item.padding + item.margin) + 'px';
+    item.paragraph.style.marginLeft = '0px';
+  }
+
   const pages = Array.from(host.querySelectorAll('section.iris-docx'));
   const elements = new Map<string, OfficeElementInfo>();
   const marks = host.querySelectorAll(`span[id^="${MARKER}"]`);
@@ -129,7 +143,12 @@ export async function renderDocx(buffer: ArrayBuffer, host: HTMLElement): Promis
         ? `标题「${text.slice(0, 16) || meta.style}」`
         : `第 ${meta.ordinal} 段`;
     const detail = [meta.style && `样式 ${meta.style}`, page > 0 && `第 ${page} 页`].filter(Boolean).join(' · ');
-    elements.set(id, { id, label, kind, text, detail, page: page ? `第 ${page} 页` : undefined });
+    elements.set(id, {
+      id, label, kind, text, detail,
+      page: page ? `第 ${page} 页` : undefined,
+      value: text,
+      edit: { kind: 'docx', paragraph: index + 1 },
+    });
   }
 
   const notes: string[] = [];

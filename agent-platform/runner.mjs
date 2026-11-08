@@ -30,6 +30,36 @@ import { packageCatalog, changePackage, packageArguments, packageTextFiles } fro
 import { toolchainBusy, toolchainStatus, startToolchain, renewToolchain, cancelToolchain } from './toolchains.mjs';
 import { listWorkspace, previewWorkspace, downloadWorkspace, uploadWorkspace, manageWorkspace, invalidateWorkspace } from './workspace.mjs';
 
+// A reader can edit an element in the live preview. Those edits are queued by
+// the sandbox host; the next prompt carries them so the agent re-reads the
+// document instead of overwriting what the user just wrote.
+async function previewNotices(user) {
+  try {
+    const value = await sandbox('/preview/notices', user, undefined, null, {}, 15000);
+    return Array.isArray(value?.notices) ? value.notices : [];
+  } catch {
+    return [];
+  }
+}
+
+function noticesPreamble(notices) {
+  if (!notices.length) return '';
+  const lines = notices.slice(-6).map(item => {
+    const at = Number(item?.at) || 0;
+    const stamp = new Date(at * 1000).toISOString().slice(5, 16).replace('T', ' ');
+    const where = [item?.file, item?.anchor].filter(Boolean).join(' · ');
+    const before = String(item?.old || '').slice(0, 160);
+    const after = String(item?.new || '').slice(0, 160);
+    return `- ${stamp} · ${where}：「${before}」→「${after}」`;
+  });
+  return [
+    '【读者在实时预览里手工修改过文档】',
+    ...lines,
+    '这些修改就在文件里。动这些文件前先读取当前内容，以现在的版本为基准，保留读者的改动；',
+    '如果读者的改写和你的计划冲突，在回复里说明，不要直接改回去。',
+  ].join('\n');
+}
+
 const secret = required('RUNNER_SECRET');
 const sessions = new Map();
 const searchSettings = new SearchSettings();
@@ -1001,6 +1031,26 @@ export const server = createServer(async (req, res) => {
       stream.pipe(res);
       return;
     }
+    if (req.url === '/office/restore') {
+      const path = typeof input.path === 'string' ? input.path.trim() : '';
+      if (!path || path.length > 1024) fail(422, '工作区路径无效');
+      return json(res, 200, await sandbox('/preview/restore', input.user, undefined, null, { path }, 30000));
+    }
+    if (req.url === '/office/edit') {
+      const path = typeof input.path === 'string' ? input.path.trim() : '';
+      if (!path || path.length > 1024) fail(422, '工作区路径无效');
+      const target = input.target && typeof input.target === 'object' ? input.target : null;
+      if (!target || !['docx', 'xlsx', 'pptx'].includes(target.kind)) fail(422, '元素类型无效');
+      if (typeof input.value !== 'string' || input.value.length > 4000) fail(422, '内容过长');
+      const payload = {
+        path,
+        target: Object.fromEntries(['kind', 'paragraph', 'sheet', 'ref', 'slide', 'shape']
+          .filter(key => target[key] !== undefined).map(key => [key, target[key]])),
+        value: input.value,
+        anchor: typeof input.anchor === 'string' ? input.anchor.slice(0, 200) : '',
+      };
+      return json(res, 200, await sandbox('/preview/edit', input.user, undefined, null, payload, 120000));
+    }
     if (req.url === '/office/feedback') {
       const path = typeof input.path === 'string' ? input.path.trim() : '';
       if (!path || path.length > 1024) fail(422, '工作区路径无效');
@@ -1103,8 +1153,10 @@ export const server = createServer(async (req, res) => {
       // The first message doubles as the provisional title until the agent
       // names the conversation; attachment-only messages keep the generic one.
       await chats.initialize(input.user, input.thread, input.projectId, input.permission, prompt.message);
+      const notice = noticesPreamble(await previewNotices(input.user));
+      const message = notice ? `${notice}\n\n${prompt.message}` : prompt.message;
       const pi = await instance(input.user, input.thread);
-      return await pi.prompt(res, prompt.message, input.thinking, prompt.images, input.permission, input.goal === true);
+      return await pi.prompt(res, message, input.thinking, prompt.images, input.permission, input.goal === true);
     }
     fail(404, '接口不存在');
   } catch (error) {

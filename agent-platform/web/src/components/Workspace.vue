@@ -732,7 +732,7 @@ onMounted(() => {
     </header>
 
     <!-- Single-sidebar Tab Bar (shown when not in dual mode and (tabs exist or terminal active)) -->
-    <div v-if="!isDual && (ws.tabs.length || isTerminalActive || isBrowserActive)" class="ws-tabs" role="tablist">
+    <div v-if="!isDual && (ws.tabs.length || terminalEverOpened || browserEverOpened)" class="ws-tabs" role="tablist">
       <button
         type="button"
         role="tab"
@@ -745,6 +745,7 @@ onMounted(() => {
         <span>{{ currentFolderLabel }}</span>
       </button>
       <div
+        v-if="terminalEverOpened"
         role="tab"
         class="ws-tab ws-tab-terminal"
         :class="{ 'is-active': isTerminalActive }"
@@ -758,6 +759,7 @@ onMounted(() => {
         </button>
       </div>
       <div
+        v-if="browserEverOpened"
         role="tab"
         class="ws-tab ws-tab-browser"
         :class="{ 'is-active': isBrowserActive }"
@@ -939,8 +941,9 @@ onMounted(() => {
       <!-- File Viewer / Editor Pane -->
       <section v-if="!isTerminalActive && !isBrowserActive && (isDual || activeFileTab)" class="ws-viewer" :class="{ 'is-fullscreen': fullscreen === 'file' }">
         <!-- In dual mode, file tabs sit across the top of the right column -->
-        <div v-if="isDual && (ws.tabs.length || isTerminalActive)" class="ws-tabs ws-tabs-dual" role="tablist">
+        <div v-if="isDual && (ws.tabs.length || terminalEverOpened || browserEverOpened)" class="ws-tabs ws-tabs-dual" role="tablist">
           <div
+            v-if="terminalEverOpened"
             role="tab"
             class="ws-tab ws-tab-terminal"
             :class="{ 'is-active': isTerminalActive }"
@@ -950,6 +953,20 @@ onMounted(() => {
             <Icon name="terminal" :size="13" />
             <span>终端</span>
             <button type="button" class="ws-tab-close" aria-label="关闭终端" title="关闭终端" @click.stop="closeTerminalTab">
+              <Icon name="x" :size="11" />
+            </button>
+          </div>
+          <div
+            v-if="browserEverOpened"
+            role="tab"
+            class="ws-tab ws-tab-browser"
+            :class="{ 'is-active': isBrowserActive }"
+            title="实时浏览器"
+            @click="openBrowserTab"
+          >
+            <Icon name="globe" :size="13" />
+            <span>浏览器</span>
+            <button type="button" class="ws-tab-close" aria-label="关闭浏览器" title="关闭浏览器" @click.stop="closeBrowserTab">
               <Icon name="x" :size="11" />
             </button>
           </div>

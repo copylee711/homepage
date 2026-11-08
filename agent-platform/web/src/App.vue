@@ -50,8 +50,19 @@ function onResize() {
   if (window.innerWidth > 860 && ui.mobileDrawer === 'sidebar') ui.mobileDrawer = null;
 }
 
+function onPreviewQuote(event: MessageEvent) {
+  if (event.origin !== location.origin) return;
+  const data = event.data;
+  if (!data || data.type !== 'iris:quote' || typeof data.text !== 'string' || !data.text) return;
+  const label = typeof data.label === 'string' ? data.label : '预览引用';
+  const path = typeof data.path === 'string' ? data.path : undefined;
+  session.addTextQuote(data.text, label, path ? { path, anchor: label } : undefined);
+  ui.toast('已从独立窗口引用到输入框', { tone: 'success' });
+}
+
 onMounted(() => {
   session.boot();
+  window.addEventListener('message', onPreviewQuote);
   window.addEventListener('resize', onResize, { passive: true });
   window.addEventListener('keydown', (e) => {
     const mod = e.metaKey || e.ctrlKey;

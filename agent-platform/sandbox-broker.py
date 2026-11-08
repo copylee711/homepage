@@ -1,5 +1,6 @@
 """Host control plane. Never mounted into a tool container; no arbitrary Docker API."""
 import base64
+import hashlib
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
@@ -8,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shutil
 import stat
 import struct
 import subprocess
@@ -952,6 +954,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.preview_stream(user, path)
         if self.path == '/preview/feedback':
             return self.preview_feedback(user, path, value)
+        if self.path == '/preview/edit':
+            return self.preview_edit(user, path, value)
+        if self.path == '/preview/notices':
+            return self.preview_notices(user)
+        if self.path == '/preview/restore':
+            return self.preview_restore(user, path)
         return self.reply(404, {'error': '接口不存在'})
 
     def preview_stream(self, user, rel):
@@ -965,6 +973,29 @@ class Handler(BaseHTTPRequestHandler):
         deadline = time.monotonic() + 120
         root = workspace(user)
         control_path = root / '.iris' / 'preview-agent.json'
+
+        # A rolling copy of the version each reader last saw keeps "undo the
+        # agent's rewrite" available without a full version store.
+        history = root / '.iris' / 'history'
+        key = hashlib.sha1(rel.encode()).hexdigest()[:16]
+        latest, previous = history / (key + '.latest'), history / (key + '.prev')
+
+        def remember():
+            try:
+                history.mkdir(mode=0o777, exist_ok=True)
+                shutil.copyfile(root / rel, latest)
+                os.chmod(latest, 0o600)
+            except OSError:
+                pass
+
+        def advance():
+            try:
+                if latest.exists():
+                    os.replace(latest, previous)
+                shutil.copyfile(root / rel, latest)
+                os.chmod(latest, 0o600)
+            except OSError:
+                pass
 
         def stamp_of(target):
             try:
@@ -985,7 +1016,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             last_file = stamp_of(root / rel)
             last_control = stamp_of(control_path)
-            hello = {'type': 'hello', 'file': last_file}
+            if not latest.exists():
+                remember()
+            hello = {'type': 'hello', 'file': last_file, 'restore': previous.exists()}
             control = control_of() if last_control else None
             if control:
                 hello['control'] = control
@@ -997,7 +1030,8 @@ class Handler(BaseHTTPRequestHandler):
                 current = stamp_of(root / rel)
                 if current != last_file:
                     last_file = current
-                    self.wfile.write(json.dumps({'type': 'changed', 'file': current}, ensure_ascii=False).encode() + b'\n')
+                    advance()
+                    self.wfile.write(json.dumps({'type': 'changed', 'file': current, 'restore': previous.exists()}, ensure_ascii=False).encode() + b'\n')
                     self.wfile.flush()
                     last_ping = time.monotonic()
                 control_stamp = stamp_of(control_path)
@@ -1014,6 +1048,124 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
+
+    def preview_edit(self, user, rel, value):
+        # The reader's own edit is written back into the real file by a one-off
+        # container running the document libraries, then queued as a notice so
+        # the next agent turn knows the file changed under it.
+        target = value.get('target')
+        text = value.get('value')
+        if not isinstance(target, dict) or target.get('kind') not in {'docx', 'xlsx', 'pptx'}:
+            return self.reply(422, {'error': '元素类型无效'})
+        if not isinstance(text, str) or len(text) > 4000:
+            return self.reply(422, {'error': '内容过长'})
+        payload = {'path': rel, 'value': text, 'target': {'kind': target['kind']}}
+        for key, limit in (('paragraph', 100000), ('slide', 10000), ('shape', 10000)):
+            if target.get(key) is not None:
+                try:
+                    payload['target'][key] = max(1, min(int(target[key]), limit))
+                except (TypeError, ValueError):
+                    return self.reply(422, {'error': '元素位置无效'})
+        if target.get('sheet') is not None:
+            if not isinstance(target['sheet'], str) or len(target['sheet']) > 100:
+                return self.reply(422, {'error': '工作表无效'})
+            payload['target']['sheet'] = target['sheet']
+        if target.get('ref') is not None:
+            if not isinstance(target['ref'], str) or not re.fullmatch(r'[A-Za-z]{1,3}\d{1,7}', target['ref']):
+                return self.reply(422, {'error': '单元格无效'})
+            payload['target']['ref'] = target['ref'].upper()
+        root = workspace(user)
+        script = Path(__file__).with_name('office-edit.py')
+        try:
+            result = subprocess.run(
+                ['docker', 'run', '--rm', '--network', 'none', '--user', '1000:1000',
+                 '-e', 'HOME=/tmp', '-v', f'{root}:/workspace:rw', '-v', f'{script}:/opt/office-edit.py:ro',
+                 IMAGE, '/usr/bin/python3', '-I', '/opt/office-edit.py'],
+                input=json.dumps(payload, ensure_ascii=False).encode(), capture_output=True, timeout=90)
+        except (subprocess.TimeoutExpired, OSError) as error:
+            return self.reply(503, {'error': '写入超时：%s' % str(error)[:120]})
+        output = result.stdout.decode('utf-8', 'replace').strip().splitlines()
+        try:
+            reply = json.loads(output[-1]) if output else {}
+        except ValueError:
+            reply = {}
+        if not reply.get('ok'):
+            return self.reply(400, {'error': str(reply.get('error') or '无法写入这个元素')[:200]})
+        self.record_user_edit(root, rel, value.get('anchor'), reply.get('before', ''), text)
+        return self.reply(200, {'ok': True, 'before': reply.get('before', ''), 'after': text})
+
+    def preview_restore(self, user, rel):
+        # Put back the version the readers last saw.
+        root = workspace(user)
+        key = hashlib.sha1(rel.encode()).hexdigest()[:16]
+        history = root / '.iris' / 'history'
+        previous, latest = history / (key + '.prev'), history / (key + '.latest')
+        if not previous.exists():
+            return self.reply(404, {'error': '没有可回退的上一版'})
+        target = root / rel
+        temp = root / '.iris' / ('.restore.%d.tmp' % os.getpid())
+        try:
+            shutil.copyfile(previous, temp)
+            os.chown(temp, 1000, 1000)
+            os.chmod(temp, 0o644)
+            os.replace(temp, target)
+            shutil.copyfile(target, latest)
+            os.chmod(latest, 0o600)
+            previous.unlink()
+        except OSError as error:
+            try:
+                temp.unlink()
+            except OSError:
+                pass
+            return self.reply(500, {'error': str(error)[:200]})
+        return self.reply(200, {'ok': True})
+    def record_user_edit(self, root, rel, anchor, before, after):
+        folder = root / '.iris'
+        try:
+            folder.mkdir(mode=0o777, exist_ok=True)
+            os.chmod(folder, 0o777)
+        except OSError:
+            return
+        target = folder / 'user-edits.json'
+        entries = []
+        try:
+            if target.stat().st_size <= 256 * 1024:
+                entries = json.loads(target.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            entries = []
+        if not isinstance(entries, list):
+            entries = []
+        entries.append({
+            'file': rel,
+            'anchor': str(anchor or '')[:200],
+            'old': str(before or '')[:1000],
+            'new': str(after or '')[:1000],
+            'at': int(time.time()),
+        })
+        entries = entries[-20:]
+        temp = folder / ('.user-edits.%d.tmp' % os.getpid())
+        try:
+            temp.write_text(json.dumps(entries, ensure_ascii=False), encoding='utf-8')
+            os.chmod(temp, 0o644)
+            os.replace(temp, target)
+        except OSError:
+            pass
+
+    def preview_notices(self, user):
+        # Consumed once: the runner prepends them to the next prompt.
+        target = workspace(user) / '.iris' / 'user-edits.json'
+        try:
+            document = target.read_text(encoding='utf-8')
+            entries = json.loads(document)
+        except (OSError, ValueError):
+            return self.reply(200, {'notices': []})
+        try:
+            target.unlink()
+        except OSError:
+            pass
+        if not isinstance(entries, list):
+            entries = []
+        return self.reply(200, {'notices': entries[-10:]})
 
     def preview_feedback(self, user, rel, value):
         anchor, text = value.get('anchor'), value.get('text')
