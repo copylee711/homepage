@@ -94,7 +94,11 @@ export class SourceWiki {
         return { ...old, ...source, origin: old?.origin || 'user', failures: value.retry === true ? 0 : (old?.failures || 0) };
       });
       if (new Set(sources.map(key)).size !== sources.length) fail(422, '同一类别中存在重复地址');
-      return { ...current, auto: input.auto === true, sources };
+      const retained = new Set(sources.map(key));
+      const suppressed = new Set(current.suppressed || []);
+      for (const source of current.sources) if (!retained.has(key(source))) suppressed.add(key(source));
+      for (const id of retained) suppressed.delete(id);
+      return { ...current, auto: input.auto === true, sources, suppressed: [...suppressed].slice(-320) };
     });
   }
   maintain(user, proposals, checks, revision) {
@@ -109,7 +113,7 @@ export class SourceWiki {
         return { ...source, failures };
       });
       for (const source of proposals) {
-        if (sources.length >= 80 || sources.some(item => key(item) === key(source))) continue;
+        if (sources.length >= 80 || current.suppressed?.includes(key(source)) || sources.some(item => key(item) === key(source))) continue;
         sources.push({ ...source, origin: 'agent', addedAt: new Date().toISOString() });
         changed = true;
       }

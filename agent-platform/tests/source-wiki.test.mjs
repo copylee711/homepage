@@ -20,6 +20,8 @@ test('public defaults, account isolation, stale drafts and bounded automatic mai
     const edited = await wiki.save(user, { ...base, auto: true, sources: base.sources.slice(1) });
     assert.ok(!(await wiki.get(user)).sources.some(source => source.url === base.sources[0].url));
     assert.equal((await wiki.maintain(user, [candidate], new Map(), 0)).revision, edited.revision);
+    const ignored = await wiki.maintain(user, [base.sources[0]], new Map(), edited.revision);
+    assert.equal(ignored.revision, edited.revision);
     const tracked = 'https://github.com/trending';
     let state = edited;
     for (let i = 0; i < 3; i++) state = await wiki.maintain(user, [candidate], new Map([[tracked, false]]), state.revision);
