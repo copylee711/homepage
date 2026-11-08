@@ -275,6 +275,7 @@ class Pi {
     this.goal = goal ? { continues: 0, max: 20 } : null;
     this.fanout = new TurnFanout(); this.persisted = 0; this.disk = Promise.resolve();
     this.turnFile = await resetTurnLog(this.user, this.thread);
+    this.publish({ type: 'turn_clock', startedAt: this.lastRenew });
     // The HTTP response is only a subscriber. Its close must not kill Pi.
     try {
       if (!res.destroyed && !res.writableEnded) {
@@ -288,10 +289,9 @@ class Pi {
       this.abortTurn();
     });
     this.deadline = setInterval(() => { if (this.busy) this.watchdog.check(); }, 15000);
-    // Gateway heartbeats renew the lease. If that stops, the lease is already
-    // dead and this turn must not keep running on a stale authorization.
+    // Bound how long a turn can run without a successful control-plane renewal.
     this.renewWatch = setInterval(() => {
-      if (this.busy && Date.now() - (this.lastRenew || 0) > 30000) this.abortTurn('页面已离线，执行授权未续期，任务已停止。');
+      if (this.busy && Date.now() - (this.lastRenew || 0) > 300000) this.abortTurn('云端执行授权长时间未能续期，任务已停止。');
     }, 5000);
     let checking = false;
     this.storageCheck = setInterval(async () => {
@@ -577,7 +577,7 @@ export const server = createServer(async (req, res) => {
     if (req.url === '/renew') {
       await renewToolchain(input.user);
       for (const entry of sessions.values()) {
-        if (entry.pi.user === input.user && entry.pi.busy) {
+        if (entry.pi.user === input.user && entry.pi.busy && (!input.thread || entry.pi.thread === input.thread)) {
           await sandbox('/renew', input.user, entry.pi.lease);
           entry.pi.lastRenew = Date.now();
         }

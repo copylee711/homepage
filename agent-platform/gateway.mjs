@@ -58,7 +58,7 @@ async function identity(req) {
 }
 const cloudTurns = createCloudTurns({
   runner,
-  identity: identityFromToken,
+  identity: token => sso('/execution/introspect', { token }),
   heartbeatMs: Number(process.env.TURN_HEARTBEAT_MS) || 10000,
 });
 function writeAccess(req, auth) {

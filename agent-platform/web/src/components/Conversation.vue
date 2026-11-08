@@ -9,7 +9,7 @@ import WelcomeHero from './WelcomeHero.vue';
 import TurnNavigator from './TurnNavigator.vue';
 import FloatingPlanPanel from './FloatingPlanPanel.vue';
 import FloatingBackgroundPanel from './FloatingBackgroundPanel.vue';
-import { textContent } from '../services/format';
+import { formatDuration, textContent } from '../services/format';
 import { useSession } from '../stores/session';
 
 const session = useSession();
@@ -191,6 +191,14 @@ watch(
   },
   { immediate: true }
 );
+const elapsedNow = ref(Date.now());
+watch(() => live.value?.startedAt, (startedAt, _, onCleanup) => {
+  if (!startedAt) return;
+  elapsedNow.value = Date.now();
+  const timer = setInterval(() => { elapsedNow.value = Date.now(); }, 1000);
+  onCleanup(() => clearInterval(timer));
+}, { immediate: true });
+const elapsedLabel = computed(() => formatDuration(Math.max(0, elapsedNow.value - (live.value?.startedAt ?? elapsedNow.value)), true));
 const liveStatusText = computed(() => {
   const cur = live.value;
   if (!cur) return '';
@@ -264,6 +272,7 @@ onMounted(() => {
               <span v-if="live.error" class="status-error">{{ live.error }}</span>
               <span v-else-if="live.stopped">已停止生成</span>
               <span v-else class="status-text">{{ liveStatusText }}</span>
+              <span v-if="!live.error && !live.stopped && !live.finished" class="status-elapsed">· 已耗时 {{ elapsedLabel }}</span>
             </div>
           </div>
         </article>
@@ -307,6 +316,7 @@ onMounted(() => {
 }
 .conversation-state { padding: 40px 0; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: 12.5px; }
 .message-status { min-height: 18px; display: flex; align-items: center; gap: 8px; margin-top: 9px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.status-elapsed { white-space: nowrap; opacity: .8; }
 .message-status.is-error { color: var(--danger); }
 .tool-approval { margin-top: 14px; padding: 14px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-2); }
 .tool-approval strong { font-size: 13px; }

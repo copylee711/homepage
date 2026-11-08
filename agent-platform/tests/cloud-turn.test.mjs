@@ -42,13 +42,14 @@ const runner = createServer(async (req, res) => {
 await new Promise(resolve => runner.listen(0, '127.0.0.1', resolve));
 process.env.RUNNER_URL = `http://127.0.0.1:${runner.address().port}`;
 
-let admin = true, granted = true;
+let admin = true, granted = true, ssoAvailable = true;
 const homepage = createServer(async (req, res) => {
   let incoming = '';
   for await (const chunk of req) incoming += chunk;
   JSON.parse(incoming || '{}');
   assert.equal(req.headers['x-agent-client-secret'], 'a'.repeat(64));
   res.setHeader('Content-Type', 'application/json');
+  if (!ssoAvailable && req.url.endsWith('/execution/introspect')) { res.writeHead(503); res.end('{}'); return; }
   res.end(JSON.stringify({ user: { id: 'user-1', name: 'Tester' }, can_execute: admin || granted, admin }));
 });
 await new Promise(resolve => homepage.listen(0, '127.0.0.1', resolve));
@@ -122,7 +123,15 @@ test('browser disconnect keeps the turn, explicit abort and lost permission stil
   assert.match((await first.take(1))[0], /started/);
   controller.abort();
   await first.cancel();
-  await delay(180);
+  // More than the old five-heartbeat cutoff, while the browser is away.
+  ssoAvailable = false;
+  try {
+    await delay(320);
+    assert.deepEqual(stops(), []);
+  } finally { ssoAvailable = true; }
+  const renewalCount = calls.filter(path => path === '/renew').length;
+  for (let i = 0; i < 40 && calls.filter(path => path === '/renew').length === renewalCount; i++) await delay(25);
+  assert.ok(calls.filter(path => path === '/renew').length > renewalCount);
   assert.deepEqual(stops(), []);
   assert.equal(promptClosed, false);
   assert.equal(active?.writableEnded, false);

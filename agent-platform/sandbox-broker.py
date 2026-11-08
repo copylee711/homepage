@@ -114,7 +114,7 @@ def run_tool(user, value, lease):
             web_slots.release()
     if value.get("op") not in {"read", "write", "mkdir", "access", "bash", "list", "search-files", "file-read", "file-write", "file-manage", "toolchain-list", "toolchain-change"}:
         raise ValueError("工具不支持")
-    readonly = value.get("op") in {"list", "file-read"}
+    readonly = value.get("op") in {"list", "file-read", "read", "search-files"}
     key = user + ":view" if readonly else user
     name = ("cl-sandbox-view-" if readonly else "cl-sandbox-") + user
     lock = locks.setdefault(key, threading.Lock())
@@ -419,15 +419,16 @@ class Handler(BaseHTTPRequestHandler):
                 if self.path == "/lease":
                     thread = value.get("thread")
                     token = secrets.token_urlsafe(48)
-                    leases[token] = {"user": user, "expires": time.monotonic() + 20,
-                                     "policy": project_policy.policy(value.get("policy")),
-                                     "thread": thread if isinstance(thread, str) and re.fullmatch(r"[a-f0-9-]{36}", thread) else None}
+                    thread = thread if isinstance(thread, str) and re.fullmatch(r"[a-f0-9-]{36}", thread) else None
+                    ttl = 300 if thread else 20
+                    leases[token] = {"user": user, "expires": time.monotonic() + ttl, "ttl": ttl,
+                                     "policy": project_policy.policy(value.get("policy")), "thread": thread}
                     return self.reply(200, {"token": token})
                 if self.path == "/renew":
                     lease = leases.get(value.get("token"))
                     if not lease or lease["user"] != user or lease["expires"] <= time.monotonic():
                         return self.reply(403, {"error": "租约已失效"})
-                    lease["expires"] = time.monotonic() + 20
+                    lease["expires"] = time.monotonic() + lease["ttl"]
                     return self.reply(200, {"ok": True})
             return self.reply(404, {"error": "接口不存在"})
         except Conflict as error:

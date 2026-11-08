@@ -79,6 +79,25 @@ def test_pkce_private_client_replay_and_independent_session(agent):
         assert row and row.token_hash != token and row.expires_at <= time.time() + 8 * 3600
 
 
+def test_execution_can_outlive_agent_login_but_not_explicit_revocation(agent):
+    client, app, _ = agent
+    login(client)
+    token = exchange(client, authorize(client)).json()["token"]
+    with Session(app.state.engine) as session:
+        row = session.get(AgentSession, digest(token))
+        row.expires_at = time.time() - 1
+        session.add(row)
+        session.commit()
+    assert introspect(client, token).status_code == 401
+    # A new browser session must not garbage-collect the credential for an active turn.
+    assert exchange(client, authorize(client)).status_code == 200
+    path = '/api/agent/execution/introspect'
+    assert client.post(path, json={"token": token}).status_code == 401
+    assert client.post(path, headers=PRIVATE, json={"token": token}).json()["can_execute"]
+    assert client.post('/api/agent/revoke', headers=PRIVATE, json={"token": token}).status_code == 200
+    assert client.post(path, headers=PRIVATE, json={"token": token}).status_code == 401
+
+
 def test_parent_logout_revokes_app_session(agent):
     client, app, _ = agent
     headers = login(client)

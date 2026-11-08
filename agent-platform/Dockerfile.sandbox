@@ -31,7 +31,8 @@ RUN ln -s /usr/bin/python3 /usr/local/bin/python \
 # Headless browser for project E2E tests and screenshots, with CJK font fallback.
 RUN apt-get update && apt-get install -y --no-install-recommends chromium fonts-wqy-zenhei \
     && rm -rf /var/lib/apt/lists/* \
-    && npm install --global --ignore-scripts --fetch-retries=1 playwright-core@1.64.1 \
+    && npm install --global --ignore-scripts --fetch-retries=1 playwright-core@1.64.1 agent-browser@0.41.2 \
+    && agent-browser --version \
     && npm cache clean --force
 # Shared fonts and dependencies used by the bundled document skills.
 RUN apt-get update && apt-get install -y --no-install-recommends \

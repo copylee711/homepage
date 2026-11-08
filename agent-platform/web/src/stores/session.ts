@@ -371,6 +371,8 @@ export const useSession = defineStore('session', {
       const controller = new AbortController();
       const live = reactive(reactiveLive());
       const messages = this.messages;
+      const previousUser = messages.findLast(item => item.role === 'user');
+      if (previousUser && Number(previousUser.timestamp) > 0) live.startedAt = Number(previousUser.timestamp);
       this.liveMessages = messages;
       this.controller = controller;
       this.live = live;
@@ -515,7 +517,7 @@ export const useSession = defineStore('session', {
       } finally {
         settleTools(live, live.stopped ? 'stopped' : 'interrupted');
         // fold the live view model into the transcript as a finalized message
-        const durationMs = Math.max(0, Date.now() - turnStartTime);
+        const durationMs = Math.max(0, Date.now() - live.startedAt);
         streamMessages.push({ role: 'assistant', timestamp: Date.now(), durationMs, content: live.blocks, stopReason: live.stopReason === 'length' ? 'length' : undefined, _vm: live, _fresh: true });
         const notes = live.error ? [{ at: Date.now(), kind: 'error', message: live.error }]
           : live.stopped ? [{ at: Date.now(), kind: 'stopped', message: '任务已由你停止。' }] : [];

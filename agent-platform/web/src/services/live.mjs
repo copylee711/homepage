@@ -4,6 +4,7 @@ import { readToolImage } from './tool-images.mjs';
 // A plain reactive-friendly object describing the streaming assistant turn.
 export function reactiveLive() {
   return {
+    startedAt: Date.now(),
     blocks: [],
     approvals: [],
     questions: [],
@@ -23,6 +24,10 @@ export function reactiveLive() {
 export function handleEvent(event, live) {
   if (!event || typeof event !== 'object') return;
   const vm = live;
+  if (event.type === 'turn_clock' && Number.isFinite(event.startedAt)) {
+    vm.startedAt = event.startedAt;
+    return;
+  }
   if (event.type === 'extension_ui_request' && event.method === 'input' && event.question) {
     vm.questions.push({ id: event.id, question: event.question, state: 'pending', answer: '', saving: false, error: '' });
     vm.status = '等待你的回答…'; vm.spinner = false; return;

@@ -7,7 +7,7 @@ import { TurnFanout } from './turn-stream.mjs';
  * leaves. Explicit abort, lost authorization, or the runner finishing the
  * stream are what stop it.
  */
-export function createCloudTurns({ runner, identity, heartbeatMs = 10000 }) {
+export function createCloudTurns({ runner, identity, heartbeatMs = 10000, renewalGraceMs = 240000 }) {
   const turns = new Map();
   const sweep = setInterval(() => {
     const now = Date.now();
@@ -31,7 +31,7 @@ export function createCloudTurns({ runner, identity, heartbeatMs = 10000 }) {
       this.controller = new AbortController();
       this.finished = false;
       this.policyStop = false;
-      this.failures = 0;
+      this.lastAuthorized = Date.now();
       this.reading = false;
       this.streamLost = false;
       this.retainUntil = 0;
@@ -58,12 +58,12 @@ export function createCloudTurns({ runner, identity, heartbeatMs = 10000 }) {
         if (!current.can_execute) this.stopPolicy('执行授权已失效，任务已停止');
         else {
           await runner('/renew', this.userId, { thread: this.thread });
-          this.failures = 0;
+          this.lastAuthorized = Date.now();
         }
       } catch (error) {
         if (this.finished || this.policyStop) return;
         if (error?.status === 401 || error?.status === 403) this.stopPolicy('登录或执行授权已失效，任务已停止');
-        else if (++this.failures >= 5) this.stopPolicy('账户服务不可用，任务已停止');
+        else if (Date.now() - this.lastAuthorized >= renewalGraceMs) this.stopPolicy('云端执行授权长时间未能续期，任务已停止');
       } finally { this.beating = false; }
     }
 

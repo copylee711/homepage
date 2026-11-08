@@ -18,6 +18,7 @@ from .auth import digest
 from .models import AgentGrant, AgentSession, User, UserChallenge, UserSession
 
 router = APIRouter(prefix="/api/agent", tags=["agent-sso"])
+EXECUTION_SESSION_GRACE = 24 * 3600
 
 
 def database(request: Request):
@@ -94,7 +95,7 @@ def exchange(body: Exchange, request: Request, session: Session = Depends(databa
     if not parent or parent.user_id != row.user_id or parent.expires_at <= time.time() \
             or not user or user.disabled:
         raise HTTPException(401, "本站登录已失效")
-    session.exec(delete(AgentSession).where(AgentSession.expires_at <= time.time()))
+    session.exec(delete(AgentSession).where(AgentSession.expires_at <= time.time() - EXECUTION_SESSION_GRACE))
     token = secrets.token_urlsafe(48)
     expires = min(parent.expires_at, time.time() + 8 * 3600)
     session.add(AgentSession(token_hash=digest(token), user_id=user.id,
@@ -107,11 +108,22 @@ def exchange(body: Exchange, request: Request, session: Session = Depends(databa
 
 @router.post("/introspect")
 def introspect(body: Token, request: Request, session: Session = Depends(database)):
+    return session_identity(body, request, session, execution=False)
+
+
+@router.post("/execution/introspect")
+def introspect_execution(body: Token, request: Request, session: Session = Depends(database)):
+    return session_identity(body, request, session, execution=True)
+
+
+def session_identity(body: Token, request: Request, session: Session, *, execution: bool):
     client(request)
     row = session.get(AgentSession, digest(body.token))
     parent = session.get(UserSession, row.parent_hash) if row else None
     user = session.get(User, row.user_id) if row else None
-    if not row or row.expires_at <= time.time() or not parent \
+    now = time.time()
+    cutoff = now - EXECUTION_SESSION_GRACE if execution else now
+    if not row or row.expires_at <= cutoff or not parent \
             or parent.expires_at <= time.time() or parent.user_id != row.user_id \
             or not user or user.disabled:
         raise HTTPException(401, "Agent 登录已失效")
