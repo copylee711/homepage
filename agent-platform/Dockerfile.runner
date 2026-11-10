@@ -20,7 +20,7 @@ RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 ENV PATH="/opt/pi/node_modules/.bin:$PATH" PI_CODING_AGENT_DIR=/data/agent HOME=/data
 WORKDIR /app
 COPY agent-platform/runner.mjs agent-platform/shared.mjs agent-platform/turn-stream.mjs agent-platform/prompt-input.mjs ./
-COPY agent-platform/providers.mjs agent-platform/provider-test.mjs agent-platform/provider-models.mjs ./
+COPY agent-platform/providers.mjs agent-platform/provider-test.mjs agent-platform/provider-models.mjs agent-platform/model-quota.mjs ./
 COPY agent-platform/sandbox-client.mjs agent-platform/session-limits.mjs agent-platform/session-cwd.mjs ./
 COPY agent-platform/conversations.mjs agent-platform/workspace.mjs ./
 COPY agent-platform/session-snapshot.mjs agent-platform/turn-watchdog.mjs ./
