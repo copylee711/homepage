@@ -771,13 +771,19 @@ export const server = createServer(async (req, res) => {
       return json(res, 200, { text: lines[Math.floor(Date.now() / 3.6e6) % lines.length] });
     }
 
-    if (req.url === '/quotas' || req.url === '/quotas/save') {
-      if (typeof input.target !== 'string' || !input.target || input.target.length > 128) fail(422, '用户标识无效');
-      const target = createHash('sha256').update(input.target).digest('hex');
-      if (req.url.endsWith('/save') && (toolchainBusy(target) || [...sessions.values()].some(entry => entry.pi.user === target && (entry.pi.busy || entry.pi.maintenance || entry.initializing)))) fail(409, '该用户正在运行任务，请先停止或等待完成');
-      const response = await fetch((process.env.SANDBOX_URL || 'http://192.168.84.1:18082') + (req.url.endsWith('/save') ? '/quota/set' : '/quota/get'), {
+    if (['/quotas', '/quotas/save', '/quotas/defaults', '/quotas/defaults/save'].includes(req.url)) {
+      const defaults = req.url.startsWith('/quotas/defaults');
+      const saving = req.url.endsWith('/save');
+      let target;
+      if (!defaults) {
+        if (typeof input.target !== 'string' || !input.target || input.target.length > 128) fail(422, '用户标识无效');
+        target = createHash('sha256').update(input.target).digest('hex');
+        if (saving && (toolchainBusy(target) || [...sessions.values()].some(entry => entry.pi.user === target && (entry.pi.busy || entry.pi.maintenance || entry.initializing)))) fail(409, '该用户正在运行任务，请先停止或等待完成');
+      }
+      const quotaPath = defaults ? (saving ? '/quota/defaults/set' : '/quota/defaults') : (saving ? '/quota/set' : '/quota/get');
+      const response = await fetch((process.env.SANDBOX_URL || 'http://192.168.84.1:18082') + quotaPath, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + required('SANDBOX_SECRET') },
-        body: JSON.stringify({ user: target, quota: input.quota }), signal: AbortSignal.timeout(130000), redirect: 'error' });
+        body: JSON.stringify({ user: target, quota: input.quota }), signal: AbortSignal.timeout(defaults ? 10000 : 130000), redirect: 'error' });
       const result = await response.json();
       if (!response.ok) fail(response.status === 409 ? 409 : 422, result.error || '配额操作失败');
       return json(res, 200, result);

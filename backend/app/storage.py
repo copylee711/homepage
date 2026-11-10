@@ -11,16 +11,30 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from . import storage_terms
-from .models import DriveMount, HostedImage, StoragePlan, Team, User
+from .models import Content, DriveMount, HostedImage, StoragePlan, Team, User
 
 ADMIN = "admin"
 # 文章与笔记引用的图片：随内容自动增减，不属于任何人，也不计入配额。
 SYSTEM = "system"
 MIB = 1024 * 1024
+DEFAULTS_KEY = "storage_quota_defaults"
+
+
+def default_quota(session: Session) -> dict:
+    row = session.get(Content, DEFAULTS_KEY)
+    if row is not None:
+        return row.value
+    initial = StoragePlan(user_id="")
+    return {"quota_mb": initial.quota_bytes // MIB, "max_image_mb": initial.max_image_bytes // MIB}
 
 
 def plan(session: Session, user_id: str) -> StoragePlan:
-    return session.get(StoragePlan, user_id) or StoragePlan(user_id=user_id)
+    row = session.get(StoragePlan, user_id)
+    if row is not None:
+        return row
+    quota = default_quota(session)
+    return StoragePlan(user_id=user_id, quota_bytes=quota["quota_mb"] * MIB,
+                       max_image_bytes=quota["max_image_mb"] * MIB)
 
 
 def images_used(session: Session, owner: str) -> int:

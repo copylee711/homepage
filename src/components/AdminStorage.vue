@@ -1,34 +1,48 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { confirmDialog } from '../composables/useConfirm'
 import { formatSize } from '../drive'
 import type { DriveMount, StorageSummary } from '../drive'
 import '../styles/admin-panel.css'
 
-type Row = { id: string; email: string; name: string; disabled: boolean; storage: StorageSummary; login: string; mounts: DriveMount[] }
+type Row = { id: string; email: string; name: string; disabled: boolean; has_plan: boolean; storage: StorageSummary; login: string; mounts: DriveMount[] }
 type Server = { disk_total: number; disk_used: number; disk_free: number; drive_local: number; images: number; allocated: number; oss_used: number; oss_allocated: number }
 type State = { users: Row[]; server: Server; admin_images: number; image_count: number; oss_configured: boolean; connection: { sftp_host: string; sftp_port: number; dav_url: string } }
 type Draft = { drive_enabled: boolean; images_enabled: boolean; quota_mb: number; max_image_mb: number; login: string }
-const props = defineProps<{ api: <T>(path: string, method?: string, data?: unknown) => Promise<T> }>()
+const props = defineProps<{ api: <T>(path: string, method?: string, data?: unknown) => Promise<T>; query: string; defaults?: Pick<Draft, 'quota_mb' | 'max_image_mb'> }>()
 const emit = defineEmits<{ notify: [text: string]; fail: [text: string] }>()
 
 const MiB = 1024 * 1024
 const state = ref<State>()
 const drafts = ref<Record<string, Draft>>({})
 const mountForm = ref<Record<string, { path: string; location: string; quota_mb: number; read_only: boolean } | undefined>>({})
-const filter = ref<'enabled' | 'all'>('enabled')
+const filter = ref<'enabled' | 'all'>('all')
 const busy = ref(false)
 
 const server = computed(() => state.value?.server)
 const pct = (part: number, whole: number) => whole ? Math.min(100, part / whole * 100) : 0
 // 已分配配额超过“当前占用 + 剩余空间”时，所有用户都用满会写满磁盘。
 const overcommit = computed(() => server.value ? server.value.allocated > server.value.drive_local + server.value.images + server.value.disk_free : false)
-const shown = computed(() => (state.value?.users ?? []).filter(user => filter.value === 'all' || user.storage.drive_enabled || user.storage.images_enabled || user.storage.used))
+const shown = computed(() => (state.value?.users ?? []).filter(user =>
+  (filter.value === 'all' || user.storage.drive_enabled || user.storage.images_enabled || user.storage.used) &&
+  `${user.name} ${user.email}`.toLowerCase().includes(props.query)))
 
 function draftOf(user: Row): Draft {
   return { drive_enabled: user.storage.drive_enabled, images_enabled: user.storage.images_enabled,
     quota_mb: Math.round((user.storage.quota ?? 200 * MiB) / MiB), max_image_mb: Math.round(user.storage.max_image / MiB), login: user.login }
 }
+watch(() => props.defaults, next => {
+  if (!next) return
+  for (const user of state.value?.users ?? []) {
+    const draft = drafts.value[user.id]
+    if (user.has_plan || !draft) continue
+    const previous = draftOf(user)
+    if (draft.quota_mb === previous.quota_mb) draft.quota_mb = next.quota_mb
+    if (draft.max_image_mb === previous.max_image_mb) draft.max_image_mb = next.max_image_mb
+    user.storage.quota = next.quota_mb * MiB
+    user.storage.max_image = next.max_image_mb * MiB
+  }
+})
 function replace(row: Row) {
   const users = state.value!.users
   users.splice(users.findIndex(user => user.id === row.id), 1, row)
@@ -78,8 +92,8 @@ onMounted(() => work(load))
 
 <template>
   <section class="admin-panel storage">
-    <div class="section-head"><div><p class="eyebrow">Storage</p><h1>云盘与图床</h1></div>
-      <div class="buttons"><button :class="{ selected: filter === 'enabled' }" @click="filter = 'enabled'">已开通</button><button :class="{ selected: filter === 'all' }" @click="filter = 'all'">全部用户</button><button @click="work(load)">刷新</button></div></div>
+    <div class="section-head"><h2>云盘与图床</h2>
+      <div class="buttons"><button :class="{ selected: filter === 'enabled' }" :aria-pressed="filter === 'enabled'" @click="filter = 'enabled'">已开通</button><button :class="{ selected: filter === 'all' }" :aria-pressed="filter === 'all'" @click="filter = 'all'">全部用户</button><button :disabled="busy" @click="work(load)">刷新</button></div></div>
     <p class="subtle">新注册用户默认没有云盘与图床，在这里逐个开通。云盘与图床共用总配额；单独设置配额的挂载点不计入总配额。管理员也按自己的方案计算，避免占满服务器磁盘。</p>
     <section v-if="server" class="edit-card server">
       <div class="server-head"><h2>服务器存储</h2><span class="field-hint">数据目录所在磁盘</span></div>
@@ -97,17 +111,18 @@ onMounted(() => work(load))
       </dl>
     </section>
     <p v-if="state" class="field-hint connection">SFTP：<code>{{ state.connection.sftp_host }}:{{ state.connection.sftp_port }}</code> · WebDAV：<code>{{ state.connection.dav_url }}</code> · OSS {{ state.oss_configured ? '已配置' : '未配置（OSS 挂载点暂不可用）' }}</p>
-    <p v-if="state && !shown.length" class="subtle">还没有开通存储的用户，切换到“全部用户”为他们开通。</p>
+    <p v-if="busy && !state" class="subtle" role="status">正在读取存储方案…</p>
+    <p v-if="state && !shown.length" class="subtle">{{ query ? '没有符合条件的用户。' : filter === 'enabled' ? '暂无已开通的用户。' : '暂无用户。' }}</p>
     <article v-for="user in shown" :key="user.id" class="edit-card user" :class="{ muted: user.disabled }">
       <header>
-        <div class="who"><strong>{{ user.name }}<em v-if="(user.storage.drive_enabled || user.storage.images_enabled) && !user.storage.agreed" class="tag">待同意协议</em><em v-else-if="user.storage.terms_accepted_at" class="tag accent" :title="`同意于 ${user.storage.terms_accepted_at}`">已同意协议</em></strong><span>{{ user.email }}</span></div>
+        <div class="who"><strong>{{ user.name }}<em v-if="user.disabled" class="tag">已停用</em><em v-else-if="(user.storage.drive_enabled || user.storage.images_enabled) && !user.storage.agreed" class="tag">待同意协议</em><em v-else-if="user.storage.terms_accepted_at" class="tag accent" :title="`同意于 ${user.storage.terms_accepted_at}`">已同意协议</em></strong><span>{{ user.email }}</span></div>
         <div class="usage"><strong>{{ formatSize(user.storage.used) }}</strong><span>/ {{ user.storage.quota === null ? '不限' : formatSize(user.storage.quota) }}</span><span class="field-hint">云盘 {{ formatSize(user.storage.drive_used) }} · 图床 {{ formatSize(user.storage.images_used) }}</span></div>
       </header>
       <form v-if="drafts[user.id]" class="plan" @submit.prevent="savePlan(user)">
         <label class="switch"><input v-model="drafts[user.id]!.drive_enabled" type="checkbox"><span>云盘</span></label>
         <label class="switch"><input v-model="drafts[user.id]!.images_enabled" type="checkbox"><span>图床</span></label>
-        <label class="inline">总配额 MiB<input v-model.number="drafts[user.id]!.quota_mb" type="number" min="1" max="10000000"></label>
-        <label class="inline">单张图片 MiB<input v-model.number="drafts[user.id]!.max_image_mb" type="number" min="1" max="20"></label>
+        <label class="inline">总配额 MiB<input v-model.number="drafts[user.id]!.quota_mb" type="number" min="1" max="10000000" required></label>
+        <label class="inline">单张图片 MiB<input v-model.number="drafts[user.id]!.max_image_mb" type="number" min="1" max="20" required></label>
         <button class="primary" type="submit" :disabled="busy">保存方案</button>
       </form>
       <template v-if="user.storage.drive_enabled && drafts[user.id]">
@@ -157,7 +172,7 @@ onMounted(() => work(load))
 .dot { display:inline-block; width:8px; height:8px; margin-right:6px; border-radius:2px; }
 .user.muted { opacity:.6; }
 .user header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; }
-.who { display:flex; flex-direction:column; }
+.who { display:flex; flex-direction:column; min-width:0; overflow-wrap:anywhere; }
 .who strong { font-weight:500; }
 .who span { color:var(--muted); font-size:12px; }
 .who em { font-style:normal; }

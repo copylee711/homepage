@@ -7,7 +7,6 @@ import OcrPanel from '../settings/OcrPanel.vue';
 import BaseDialog from './BaseDialog.vue';
 import Icon from '../Icon.vue';
 import ProvidersPanel from '../settings/ProvidersPanel.vue';
-import GrantsPanel from '../settings/GrantsPanel.vue';
 import PackagesPanel from '../settings/PackagesPanel.vue';
 import ToolchainsPanel from '../settings/ToolchainsPanel.vue';
 import UsagePanel from '../settings/UsagePanel.vue';
@@ -210,7 +209,10 @@ async function remove(c: any) {
         <SearchPanel v-else-if="ui.settingsTab === 'search' && session.canExecute" />
         <OcrPanel v-else-if="ui.settingsTab === 'ocr' && session.canExecute" />
         <ProvidersPanel v-else-if="ui.settingsTab === 'providers' && session.isAdmin" />
-        <GrantsPanel v-else-if="ui.settingsTab === 'grants' && session.isAdmin" />
+        <div v-else-if="ui.settingsTab === 'grants' && session.isAdmin" class="settings-pad">
+          <p>执行授权与沙箱资源配额已迁移到主站权限控制台。</p>
+          <a class="btn btn-solid" href="https://copylee.cn/permissions?section=iris" target="_blank" rel="noopener">打开权限控制台 ↗</a>
+        </div>
         <PackagesPanel v-else-if="ui.settingsTab === 'packages' && session.isAdmin" />
         <ToolchainsPanel v-else-if="ui.settingsTab === 'toolchains' && session.canExecute" />
         <UsagePanel v-else-if="ui.settingsTab === 'usage' && session.canExecute" />

@@ -100,6 +100,28 @@ test('an execution grant never grants provider or user-management privileges', a
   admin = true;
 });
 
+test('permissions relay requires service authentication and forwards the intended quota target', async () => {
+  const path = base + '/auth/permissions/quota/save';
+  const quota = { disk_mib: 1024 };
+  const body = JSON.stringify({ actor: 'site-admin', target: 'user-2', quota });
+  const previous = lastRunner;
+  assert.equal((await fetch(path, { method: 'POST', body })).status, 401);
+  assert.equal(lastRunner, previous);
+  const headers = { 'X-Agent-Client-Secret': 'a'.repeat(64) };
+  assert.equal((await fetch(path, { headers })).status, 405);
+  assert.equal((await fetch(path, { method: 'POST', headers, body })).status, 200);
+  assert.deepEqual(lastRunner, { path: '/quotas/save', value: {
+    user: createHash('sha256').update('site-admin').digest('hex'), target: 'user-2', quota,
+  } });
+  const defaults = base + '/auth/permissions/defaults/save';
+  assert.equal((await fetch(defaults, { method: 'POST', body })).status, 401);
+  const input = JSON.stringify({ actor: 'site-admin', quota });
+  assert.equal((await fetch(defaults, { method: 'POST', headers, body: input })).status, 200);
+  assert.deepEqual(lastRunner, { path: '/quotas/defaults/save', value: {
+    user: createHash('sha256').update('site-admin').digest('hex'), quota,
+  } });
+});
+
 test('new file/chat endpoints enforce CSRF and derive tenant identity; local modules stay authenticated', async () => {
   const cookie = 'copylee_ai=' + 't'.repeat(64);
   admin = false; granted = true;

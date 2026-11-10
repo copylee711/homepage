@@ -3,7 +3,6 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, r
 import { confirmDialog } from '../composables/useConfirm'
 import { fetchJson } from '../content'
 import AdminInbox from './AdminInbox.vue'
-import AdminStorage from './AdminStorage.vue'
 import type { HostedImage } from '../account'
 import type { SiteContent } from '../types'
 import { useTheme } from '../composables/useTheme'
@@ -21,6 +20,8 @@ type ArticleItem = { id: string; title: string; slug: string; published: boolean
 type SyncState = { last_success: string | null; last_error: string; items: unknown[] }
 const { theme, toggle } = useTheme()
 const csrf = ref(''), loading = ref(true), busy = ref(false), error = ref(''), message = ref('')
+const next = new URLSearchParams(location.search).get('next')
+const permissionsReturn = ['/permissions', '/permissions?section=iris', '/permissions?section=defaults'].includes(next ?? '') ? next : ''
 // 成功提示 4 秒后自动消失；错误提示保留到手动关闭或下一次操作。
 let messageTimer: ReturnType<typeof setTimeout> | undefined
 watch(message, value => { clearTimeout(messageTimer); if (value) messageTimer = setTimeout(() => { message.value = '' }, 4000) })
@@ -44,7 +45,7 @@ const navItems: { id: typeof tab.value; name: string; icon: string }[] = [
   { id: 'repos', name: '仓库展示', icon: 'M6 4h10l3 3v13H6Zm4 6h6m-6 4h6m-6 4h3' },
   { id: 'posts', name: '文章管理', icon: 'M5 19h4L19 9l-4-4L5 15Zm8-12 4 4' },
   { id: 'notes', name: '笔记管理', icon: 'M6 4h12v16H6Zm3 4h6m-6 4h6m-6 4h4' },
-  { id: 'storage', name: '云盘与图床', icon: 'M4 7h16v11H4Zm0 0 2-3h12l2 3M8 12h8' },
+  { id: 'storage', name: '图床图片', icon: 'M4 7h16v11H4Zm0 0 2-3h12l2 3M8 12h8' },
   { id: 'accounts', name: '用户与邮件', icon: 'M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm-6 9a6 6 0 0 1 12 0m1-9 5-3m-5 6 5 3' },
   { id: 'inbox', name: '收件箱', icon: 'M4 6h16v12H4Zm0 0 8 7 8-7' },
 ]
@@ -230,6 +231,7 @@ async function login() { await action(async () => {
   await loadAll()
 }) }
 async function loadAll() {
+  if (permissionsReturn) { location.replace(permissionsReturn); return }
   await loadSettings(); await listArticles(); await loadNotes(); await loadAccounts()
   unread.value = (await api<{unread: number}>('/api/admin/inbox?page=1')).unread
 }
@@ -351,8 +353,11 @@ onMounted(async () => {
   window.addEventListener('beforeunload', preventLeave)
   try {
     // 已在前台登录时预填邮箱；进入后台仍需再次验证。
-    email.value = await fetchJson<{user: {email: string}}>('/api/account/me', {credentials: 'same-origin'}).then(data => data.user.email, () => '')
-    csrf.value = (await api<{csrf: string}>('/api/auth/me')).csrf
+    const account = await fetchJson<{user: {id: string; email: string}}>('/api/account/me', {credentials: 'same-origin'}).then(data => data.user, () => undefined)
+    email.value = account?.email ?? ''
+    const admin = await api<{csrf: string; user: {id: string}}>('/api/auth/me')
+    if (permissionsReturn && account?.id !== admin.user.id) return
+    csrf.value = admin.csrf
     await loadAll()
   } catch(err) { if((err as {status?: number}).status !== 401) error.value = err instanceof Error ? err.message : '后台加载失败' }
   finally { loading.value = false }
@@ -363,13 +368,13 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', preventLeave)
 <template>
   <div class="admin-shell">
     <header class="admin-top"><a href="/" class="admin-brand"><LogoMark class="admin-logo" />Copy Lee<span>内容管理</span></a>
-      <div class="top-actions"><a href="/" target="_blank">查看网站 ↗</a><button class="icon-button" @click="toggle" :aria-label="theme === 'dark' ? '切换浅色主题' : '切换深色主题'"><AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" /></button><button v-if="csrf" @click="logout" :disabled="busy">退出</button></div>
+      <div class="top-actions"><a v-if="csrf" href="/permissions">权限控制台 ↗</a><a href="/" target="_blank">查看网站 ↗</a><button class="icon-button" @click="toggle" :aria-label="theme === 'dark' ? '切换浅色主题' : '切换深色主题'"><AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" /></button><button v-if="csrf" @click="logout" :disabled="busy">退出</button></div>
     </header>
     <Transition name="toast"><p v-if="error" class="feedback error" role="alert">{{ error }}<button class="toast-close" aria-label="关闭提示" @click="error = ''">×</button></p></Transition>
     <Transition name="toast"><p v-if="message && !error" class="feedback success" role="status">{{ message }}<button class="toast-close" aria-label="关闭提示" @click="message = ''">×</button></p></Transition>
     <main v-if="loading" class="login-panel"><p>正在加载后台…</p></main>
     <main v-else-if="!csrf" class="login-panel">
-      <p class="eyebrow">Your personal space</p><h1>欢迎回来。</h1><p class="subtle">使用你的站点账户登录后台；即使已在前台登录，这里也需要再次验证。</p>
+      <p class="eyebrow">Your personal space</p><h1>欢迎回来。</h1><p class="subtle">{{ permissionsReturn ? '验证管理员身份后将返回权限控制台。' : '使用你的站点账户登录后台；即使已在前台登录，这里也需要再次验证。' }}</p>
       <form @submit.prevent="login"><fieldset :disabled="busy"><label>邮箱<input v-model="email" type="email" autocomplete="username" required maxlength="254"></label>
         <label>密码<input v-model="password" type="password" autocomplete="current-password" required maxlength="200"></label>
         <button class="primary" type="submit">{{ busy ? '正在登录…' : '登录后台' }}</button></fieldset></form>
@@ -470,9 +475,8 @@ runuser -u copylee -- .venv/bin/python -m app.cli reset-security --email you@exa
           </section>
         </template>
         <template v-if="tab==='storage'">
-          <AdminStorage :api="api" @notify="text => message = text" @fail="text => error = text" />
           <div class="section-head images-head"><div><p class="eyebrow">Image hosting</p><h2 class="images-title">图床图片</h2></div><div class="buttons"><button @click="action(() => loadImages())">刷新</button><label class="upload-button primary">上传图片<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" @change="uploadToHost"></label></div></div>
-          <p class="subtle">文章与笔记编辑器上传的图片存入系统图床：不计配额、不能单独删除，内容不再引用 24 小时后自动清理。管理员用 PicList 等上传的图片计入自己的存储方案。用户的图床与云盘在上方的存储方案中开通。</p>
+          <p class="subtle">文章与笔记编辑器上传的图片由系统自动清理。PicList 等客户端上传的图片计入上传者的存储方案。<a class="permissions-link" href="/permissions">管理云盘与图床权限 ↗</a></p>
           <section v-if="imagesState" class="edit-card"><h2>用量</h2>
             <ul class="note-list"><li v-for="row in imagesState.usage" :key="row.owner"><div class="note-info"><strong>{{ row.label }}</strong><span>{{ row.count }} 张 · {{ mib(row.size) }}</span></div><button @click="imageOwner = row.owner">只看此用户</button></li></ul>
             <p v-if="!imagesState.usage.length" class="subtle">还没有图片。</p>
@@ -560,7 +564,7 @@ runuser -u copylee -- .venv/bin/python -m app.cli reset-security --email you@exa
 .admin-shell { --field-line:color-mix(in srgb,var(--line-strong) 55%,transparent); min-height:100vh; background:radial-gradient(1200px 500px at 85% -10%,var(--bg-tint),transparent 70%),var(--bg); }
 .passkey-login { margin-top:16px; width:100%; }
 .nav-badge { margin-left:auto; min-width:20px; padding:1px 6px; border-radius:999px; background:var(--accent); color:#fff; font:600 11px/18px var(--font-mono); text-align:center; }
-.images-head { margin-top:40px; }
+.permissions-link { color:var(--accent); }
 .images-title { font-size:24px; margin-top:8px; }
 .login-panel .field-hint a,.login-hint a { color:var(--accent); }
 .step-backdrop { position:fixed; inset:0; z-index:50; display:grid; place-items:center; padding:20px; background:rgba(12,13,16,.45); backdrop-filter:blur(6px); }

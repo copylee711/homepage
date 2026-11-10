@@ -145,9 +145,13 @@ def revoke(body: Token, request: Request, session: Session = Depends(database)):
     return {"ok": True}
 
 
-class GrantChange(Token):
+class GrantInput(BaseModel):
     user_id: str = Field(min_length=1, max_length=128)
     days: int = Field(default=0, ge=0, le=30)
+
+
+class GrantChange(Token, GrantInput):
+    pass
 
 
 def app_admin(body: Token, request: Request, session: Session):
@@ -160,7 +164,11 @@ def app_admin(body: Token, request: Request, session: Session):
 @router.post("/grants/list")
 def list_grants(body: Token, request: Request, session: Session = Depends(database)):
     app_admin(body, request, session)
-    users = session.exec(select(User).order_by(User.created_at.desc()).limit(500)).all()
+    return grants_view(request, session, limit=500)
+
+
+def grants_view(request: Request, session: Session, *, limit: int | None = None):
+    users = session.exec(select(User).order_by(User.created_at.desc()).limit(limit)).all()
     grants = {row.user_id: row for row in session.exec(select(AgentGrant)).all()}
     return {"enabled": request.app.state.settings.agent_user_execution_enabled,
             "users": [{"id": u.id, "name": u.name, "email": u.email,
@@ -172,6 +180,11 @@ def list_grants(body: Token, request: Request, session: Session = Depends(databa
 @router.post("/grants/save")
 def save_grant(body: GrantChange, request: Request, session: Session = Depends(database)):
     actor = app_admin(body, request, session)
+    change_grant(body, request, session, actor)
+    return {"ok": True}
+
+
+def change_grant(body: GrantInput, request: Request, session: Session, actor: str):
     user = session.get(User, body.user_id)
     if not user:
         raise HTTPException(404, "账户不存在")
@@ -189,7 +202,8 @@ def save_grant(body: GrantChange, request: Request, session: Session = Depends(d
         session.add(row)
     elif row:
         session.delete(row)
+    expires_at = row.expires_at if body.days else None
     session.commit()
     audit.record("agent.grant" if body.days else "agent.grant.revoke", request,
                  user=actor, ok=True, target=user.id)
-    return {"ok": True}
+    return {"ok": True, "expires_at": expires_at}

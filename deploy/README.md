@@ -81,6 +81,12 @@ Caddy 校验原始请求路径与密钥，拒绝缺失/错误密钥和路径变�
 
 HTTPS Caddy 示例将 `www.copylee.cn` 永久重定向到 `https://copylee.cn`，保留请求路径与查询参数。站点验证使用正式地址 `https://copylee.cn`。修改仓库示例不会自动更新服务器的 `/etc/caddy/Caddyfile`；前端部署流程只同步静态产物。
 
+## 权限控制台发布
+
+`/permissions` 及其别名的静态入口须设置 `no-store` 和 `noindex`。前端先调用 `/api/permissions/access` 验证站点会话与后台会话，拿到管理员 CSRF 后才渲染控制台。这样会话 Cookie 可以继续限定在 `/api`。HTTP 部署仍经 SSH 隧道访问。发布时依次更新 Iris 沙箱代理、runner、网关、主站后端与静态资源，再启用 Caddy 页面路由。Iris 设置的快捷入口随 Iris Web 发布。主站向现有 Iris 域名的 `/auth/permissions/*` 发送服务认证请求，沿用 SSO 密钥和敏感头日志过滤。这些路径须保留 `/auth/*` 的直接网关转发。
+
+存储默认值保存在主站数据库，Iris 默认值保存在沙箱代理的 `quotas.json`。修改 Iris 默认值会在同一份文件中保留现有工作区与账户覆盖值。回滚沙箱代理到不识别默认值的版本前，应先备份并从配额文件移除 `@defaults` 项，保留所有账户记录。
+
 ## 搜索引擎 Sitemap
 
 提交地址为 `https://copylee.cn/sitemap.xml`。后端动态生成标准 XML urlset，包含主页、SCUT 通知页、游戏大厅和游戏页面、文章与笔记列表、隐私政策，以及已发布文章和公开笔记。发布、撤下文章或更改笔记可见性后，下一次请求即反映变化，无需重新构建前端。

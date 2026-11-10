@@ -56,7 +56,7 @@ copylee.cn {
         header X-Content-Type-Options nosniff
         file_server
     }
-    @admin path /admin /admin/*
+    @admin path /admin /admin/* /permission /permission/ /permissions /permissions/
     handle @admin {
         root * /var/www/copylee
         header Cache-Control no-store

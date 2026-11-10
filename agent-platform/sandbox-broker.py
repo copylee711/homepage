@@ -78,8 +78,11 @@ def workspace(user):
         if not image.exists():
             if len(list(ROOT.glob("*.img"))) >= CAPACITY:
                 raise ValueError("沙箱用户容量已满，请联系管理员")
-            with image.open("xb") as file:
-                file.truncate(int(quotas.get(user)['disk_mib']) * 1024 * 1024)
+            with quota_module.lock:
+                quota = quotas.get(user)
+                quotas.check_budget(user, quota, quotas.load())
+                with image.open("xb") as file:
+                    file.truncate(quota['disk_mib'] * 1024 * 1024)
             image.chmod(0o600)
             subprocess.run(["mkfs.ext4", "-q", "-F", "-m", "0", str(image)], check=True, timeout=30)
         mount.mkdir(mode=0o700, exist_ok=True)
@@ -569,6 +572,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, run_tool(user, value, token))
             if not hmac.compare_digest(token, SECRET):
                 return self.reply(401, {"error": "服务认证失败"})
+            if self.path == '/quota/defaults':
+                return self.reply(200, quotas.defaults())
+            if self.path == '/quota/defaults/set':
+                return self.reply(200, quotas.save_defaults(value.get('quota')))
             if self.path.startswith('/pty/'):
                 return self.pty(value)
             if self.path.startswith('/browser/'):

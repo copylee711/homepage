@@ -6,7 +6,7 @@ import secrets
 import smtplib
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -33,6 +33,7 @@ from . import (
     games,
     github_oauth,
     images,
+    permissions,
     storage,
     teams,
     user_security,
@@ -198,7 +199,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        if request.url.path.rstrip("/") == "/account/auth" or request.url.path.startswith("/api/agent/"):
+        if request.url.path.rstrip("/") in {"/account/auth", "/permission", "/permissions"} \
+                or request.url.path.startswith("/api/agent/"):
             response.headers["Referrer-Policy"] = "no-referrer"
             response.headers["Cache-Control"] = "no-store"
             response.headers["X-Robots-Tag"] = "noindex"
@@ -240,6 +242,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(messages_router)
     app.include_router(github_oauth.router)
     app.include_router(agent_sso.router)
+    app.include_router(permissions.router)
 
     @app.get("/api/health")
     def health(session: Session = Depends(database)):
@@ -1100,6 +1103,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/scut/", response_class=HTMLResponse)
     @app.get("/account", response_class=HTMLResponse)
     @app.get("/account/auth", response_class=HTMLResponse)
+    @app.get("/permission", response_class=HTMLResponse)
+    @app.get("/permission/", response_class=HTMLResponse)
+    @app.get("/permissions", response_class=HTMLResponse)
+    @app.get("/permissions/", response_class=HTMLResponse)
     @app.get("/admin", response_class=HTMLResponse)
     @app.get("/admin/{path:path}", response_class=HTMLResponse)
     @app.get("/drive", response_class=HTMLResponse)
@@ -1117,6 +1124,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return HTMLResponse(
             index.read_text(encoding="utf-8"), headers={"Cache-Control": "no-cache"}
         )
+
+    @app.get("/api/permissions/access", include_in_schema=False)
+    def permissions_access(request: Request, session: Session = Depends(database)):
+        section = request.query_params.get("section")
+        target = "/permissions" + ("?" + urlencode({"section": section})
+                                   if section in {"iris", "defaults"} else "")
+        try:
+            user, _ = current_user(request, session)
+        except HTTPException as exc:
+            if exc.status_code != 401:
+                raise
+            return {"redirect": "/account?" + urlencode({"next": target})}
+        if not user.is_admin:
+            return {"redirect": "/"}
+        try:
+            admin = current_session(request, session)
+        except HTTPException as exc:
+            if exc.status_code != 401:
+                raise
+            admin = None
+        if admin is None or admin.user_id != user.id:
+            return {"redirect": "/admin?" + urlencode({"next": target})}
+        return {"csrf": admin.csrf}
 
     return app
 

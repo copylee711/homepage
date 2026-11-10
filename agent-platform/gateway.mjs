@@ -187,6 +187,31 @@ export const server = createServer(async (req, res) => {
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob: https:; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   try {
     const url = new URL(req.url, publicURL);
+    const permissionAction = url.pathname.match(/^\/auth\/permissions\/(quota|quota\/save|defaults|defaults\/save|abort)$/)?.[1];
+    if (permissionAction) {
+      if (req.method !== 'POST') fail(405, '接口仅支持 POST');
+      if (!equal(req.headers['x-agent-client-secret'] || '', secret)) {
+        return json(res, 401, { error: '应用认证失败' });
+      }
+      const { actor, target, quota } = (await body(req)) ?? {};
+      const defaults = permissionAction.startsWith('defaults');
+      if ((defaults ? [actor] : [actor, target]).some(id => typeof id !== 'string' || !id || id.length > 128)) {
+        fail(422, '用户标识无效');
+      }
+      if (permissionAction === 'abort') {
+        cloudTurns.abortUser(target, '执行授权已撤销，任务已停止');
+        await runner('/abort', target, {}, AbortSignal.timeout(4000));
+        return json(res, 200, { ok: true });
+      }
+      if (defaults) {
+        const response = await runner('/quotas/' + permissionAction, actor, { quota }, AbortSignal.timeout(12000));
+        return json(res, 200, await response.json());
+      }
+      const saving = permissionAction === 'quota/save';
+      const response = await runner(saving ? '/quotas/save' : '/quotas', actor,
+        saving ? { target, quota } : { target }, AbortSignal.timeout(saving ? 135000 : 12000));
+      return json(res, 200, await response.json());
+    }
       if (url.pathname.startsWith('/preview/')) {
         if (req.method !== 'GET') fail(405, '预览仅支持 GET');
         const match = url.pathname.match(/^\/preview\/([A-Za-z0-9_-]{43})(\/.*)?$/);

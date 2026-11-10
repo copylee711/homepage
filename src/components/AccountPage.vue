@@ -344,6 +344,7 @@ onBeforeUnmount(() => { clearInterval(timer); clearTimeout(warmup); captchaLifet
             <li v-for="g in games" :key="g.id"><a :href="`/games/${g.id}`">{{ g.name }}</a><span>{{ gameBests[g.id] ? `${gameBests[g.id]!.best} ${g.unit} · ${gameBests[g.id]!.plays} 局` : '未玩过' }}</span></li>
           </ul>
           <a v-if="features.admin" class="ghost wide admin-link" href="/admin">进入管理后台</a>
+          <a v-if="features.admin" class="ghost wide admin-link" href="/permissions">权限控制台</a>
           <button class="ghost wide" type="button" @click="logout">退出登录</button>
         </aside>
         <div v-reveal="120" class="panel">

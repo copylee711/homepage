@@ -375,11 +375,14 @@ class TermsAccept(StrictModel):
     version: str = Field(min_length=1, max_length=32)
 
 
-class StoragePlanWrite(StrictModel):
-    drive_enabled: bool
-    images_enabled: bool
+class StorageQuotaWrite(StrictModel):
     quota_mb: int = Field(ge=1, le=10_000_000)
     max_image_mb: int = Field(ge=1, le=20)
+
+
+class StoragePlanWrite(StorageQuotaWrite):
+    drive_enabled: bool
+    images_enabled: bool
 
 
 class MountCreate(StrictModel):

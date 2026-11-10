@@ -6,7 +6,9 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from sqlmodel import Session, select
 from test_content import ADMIN_EMAIL, ORIGIN, PASSWORD
+from test_content import login as admin_login
 
+from app.accounts import hash_password
 from app.auth import digest
 from app.models import AgentGrant, AgentSession, User, UserChallenge, UserSession
 
@@ -50,6 +52,97 @@ def exchange(client, code, verifier=VERIFIER, headers=PRIVATE):
 
 def introspect(client, token):
     return client.post('/api/agent/introspect', headers=PRIVATE, json={"token": token})
+
+
+def test_permissions_page_redirects_before_serving_html(agent):
+    client, app, _ = agent
+    path = "/permissions?section=defaults"
+    access = "/api/permissions/access?section=defaults"
+
+    def location():
+        result = client.get(access)
+        assert result.status_code == 200
+        assert result.headers["cache-control"] == "no-store"
+        return urlsplit(result.json()["redirect"])
+
+    anonymous = location()
+    assert anonymous.path == "/account" and parse_qs(anonymous.query) == {"next": [path]}
+    with Session(app.state.engine) as session:
+        session.add(User(id="regular", email="regular@example.test", name="Regular",
+                         password_hash=hash_password(PASSWORD), created_at="2026-01-02"))
+        session.commit()
+    result = client.post("/api/account/login", headers={"Origin": ORIGIN},
+                         json={"email": "regular@example.test", "password": PASSWORD})
+    assert result.status_code == 200
+    assert location().path == "/"
+    login(client)
+    step_up = location()
+    assert step_up.path == "/admin" and parse_qs(step_up.query) == {"next": [path]}
+    headers = admin_login(client)
+    assert client.get(access).json() == {"csrf": headers["X-CSRF-Token"]}
+    client.post("/api/account/login", headers={"Origin": ORIGIN},
+                json={"email": "regular@example.test", "password": PASSWORD})
+    assert location().path == "/"
+
+
+def test_storage_defaults_apply_only_to_users_without_plans(agent):
+    from app import storage
+
+    client, app, _ = agent
+    path = "/api/admin/permissions/storage/defaults"
+    assert client.get(path).status_code == 401
+    headers = admin_login(client)
+    assert client.get(path).json() == {"quota_mb": 200, "max_image_mb": 5}
+    new = {"quota_mb": 750, "max_image_mb": 8}
+    assert client.put(path, json=new).status_code == 403
+    assert client.put(path, headers=headers, json=new).json() == new
+    with Session(app.state.engine) as session:
+        assert storage.plan(session, "admin-user").quota_bytes == 20 * 1024 * storage.MIB
+        assert storage.plan(session, "new-user").quota_bytes == 750 * storage.MIB
+        storage.save(session, "new-user", images_enabled=True)
+        session.commit()
+    assert client.put(path, headers=headers, json={"quota_mb": 900, "max_image_mb": 9}).status_code == 200
+    with Session(app.state.engine) as session:
+        assert storage.plan(session, "new-user").max_image_bytes == 8 * storage.MIB
+        assert storage.plan(session, "later-user").max_image_bytes == 9 * storage.MIB
+
+
+def test_permissions_console_requires_separate_admin_session_and_csrf(agent, monkeypatch):
+    client, app, settings = agent
+    path = '/api/admin/permissions/iris'
+    headers = login(client)
+    assert client.get(path + '/grants').status_code == 401
+    assert client.post(path + '/quota', headers=headers,
+                       json={"user_id": "admin-user", "quota": {}}).status_code == 401
+    headers = admin_login(client)
+    assert client.get(path + '/grants').json()["users"][0]["admin"] is True
+    assert client.post(path + '/quota', headers={"Origin": ORIGIN},
+                       json={"user_id": "admin-user", "quota": {}}).status_code == 403
+    assert client.get(path + '/quota', params={"user_id": "missing"}).status_code == 404
+
+    calls = []
+
+    def relay(request, action, payload, *, timeout):
+        calls.append((action, payload))
+        return {"quota": payload.get("quota")}
+
+    monkeypatch.setattr('app.permissions.iris', relay)
+    with Session(app.state.engine) as session:
+        session.add(User(id="visitor", email="visitor@example.com", name="访客",
+                         password_hash="", created_at="2026-01-02T00:00:00+00:00"))
+        session.commit()
+    grant = {"user_id": "visitor", "days": 7}
+    assert client.post(path + '/grants', headers=headers, json=grant).status_code == 409
+    settings.agent_user_execution_enabled = True
+    assert client.post(path + '/grants', headers=headers, json=grant).json()["expires_at"] > time.time()
+    assert client.post(path + '/grants', headers=headers,
+                       json={**grant, "days": 0}).json()["expires_at"] is None
+    assert client.post(path + '/quota', headers=headers,
+                       json={"user_id": "visitor", "quota": {"disk_mib": 1024}}).status_code == 200
+    assert calls == [
+        ("abort", {"actor": "admin-user", "target": "visitor"}),
+        ("quota/save", {"actor": "admin-user", "target": "visitor", "quota": {"disk_mib": 1024}}),
+    ]
 
 
 def test_disabled_and_login_redirect(server, agent):

@@ -46,6 +46,7 @@ const groups = computed<Group[]>(() => {
       { label: 'Messages', href: '/messages', hint: unreadHint.value || '好友与私信', current: path === '/messages', dot: unreadCount.value > 0 },
     ]
     if (features.value.drive && site.value) workspace.push({ label: 'Cloud', href: site.value.cloud, hint: '个人云盘', external: true })
+    if (features.value.admin) workspace.push({ label: 'Permissions', href: '/permissions', hint: '权限控制台', current: path === '/permissions' })
     result.push({ id: 'workspace', label: 'Workspace', items: workspace })
   }
   return result

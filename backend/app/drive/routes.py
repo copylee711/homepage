@@ -644,6 +644,7 @@ def require_user(session: Session, user_id: str) -> User:
 def storage_row(session: Session, user: User) -> dict:
     account = session.get(DriveAccount, user.id)
     return {"id": user.id, "email": user.email, "name": user.name, "disabled": user.disabled,
+            "has_plan": session.get(StoragePlan, user.id) is not None,
             "storage": storage.summary(session, user.id),
             "login": account.login if account else "",
             "mounts": accounts.mounts(session, user.id)}

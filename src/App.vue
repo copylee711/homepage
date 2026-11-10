@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
-import { contentStatus, ready, reloadContent, startContent } from './content'
+import { defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { contentStatus, fetchJson, ready, reloadContent, startContent } from './content'
 import AccountPage from './components/AccountPage.vue'
 import AdminPage from './components/AdminPage.vue'
 import BootScreen from './components/BootScreen.vue'
@@ -32,6 +32,10 @@ const isTeamPage = /^\/t\/[a-z0-9]+\/?$/.test(location.pathname)
 const isTeams = location.pathname.replace(/\/$/, '') === '/teams'
 // 好友与私信：主站 /messages，轮询即可，不需要 WebSocket。
 const MessagesPage = defineAsyncComponent(() => import('./components/messages/MessagesPage.vue'))
+const PermissionsPage = defineAsyncComponent(() => import('./components/PermissionsPage.vue'))
+const isPermissions = /^\/permissions?\/?$/.test(location.pathname)
+const permissionsCsrf = ref('')
+const permissionsError = ref('')
 const isMessages = location.pathname.replace(/\/$/, '') === '/messages'
 const local = /^(localhost|127\.|\[::1\])/.test(location.hostname)
 if ((isDocPage || isTeamPage) && !onCloud && !local) location.replace(location.origin.replace(/\/\/(www\.)?/, '//cloud.') + location.pathname + location.search)
@@ -51,14 +55,29 @@ const isAccount = /^\/account(?:\/auth)?\/?$/.test(location.pathname)
 const isGames = /^\/games(\/|$)/.test(location.pathname)
 let stop: (() => void) | undefined
 let stopScut: (() => void) | undefined
-onMounted(() => { if (!isAdmin) { stop = startContent(); if (!isDrive && !isShare && !isDocPage && !isTeamPage) stopScut = startScut() } })
+onMounted(async () => {
+  if (isAdmin) return
+  if (isPermissions) {
+    try {
+      const access = await fetchJson<{ redirect: string } | { csrf: string }>('/api/permissions/access' + location.search)
+      if ('redirect' in access) { location.replace(access.redirect); return }
+      permissionsCsrf.value = access.csrf
+      if (location.pathname !== '/permissions') history.replaceState(null, '', '/permissions' + location.search)
+    } catch {
+      permissionsError.value = '暂时无法验证访问权限，请刷新重试。'
+      return
+    }
+  }
+  stop = startContent()
+  if (!isPermissions && !isDrive && !isShare && !isDocPage && !isTeamPage) stopScut = startScut()
+})
 onBeforeUnmount(() => { stop?.(); stopScut?.() })
 
 // 从其他页面打开 /#projects 等地址时，浏览器加载瞬间目标尚未渲染，原生锚点跳转会落空。
 // 内容就绪后再定位；之后 1.5 秒内上方区块异步加载导致的高度变化会继续校正，用户一旦滚动即停止。
 watch(ready, async value => {
   const id = decodeURIComponent(location.hash.slice(1))
-  if (!value || !id || isAdmin || isScut || isAccount || isGames || isDrive || isShare || isDocPage || isDocs || isTeamPage || isTeams || isMessages) return
+  if (!value || !id || isAdmin || isPermissions || isScut || isAccount || isGames || isDrive || isShare || isDocPage || isDocs || isTeamPage || isTeams || isMessages) return
   await nextTick()
   const target = document.getElementById(id)
   if (!target) return
@@ -77,6 +96,7 @@ watch(ready, async value => {
 
 <template>
   <AdminPage v-if="isAdmin" />
+  <p v-else-if="isPermissions && !permissionsCsrf && permissionsError" class="container access-error" role="alert">{{ permissionsError }} <a href="/">返回主页</a></p>
   <template v-else-if="ready && isDocPage">
     <DocPage />
   </template>
@@ -89,11 +109,12 @@ watch(ready, async value => {
     <SharePage v-else />
     <SiteFooter :class="{ 'drive-footer': isDrive }" />
   </template>
-  <template v-else-if="ready">
+  <template v-else-if="ready && (!isPermissions || permissionsCsrf)">
   <SiteHeader />
   <p v-if="contentStatus.stale" class="content-banner" role="status">暂时无法检查更新，正在显示已加载的内容。<button @click="reloadContent">重试</button></p>
-  <main :id="isScut || isAccount || isGames || isDocs || isTeams || isMessages ? 'top' : undefined">
+  <main :id="isPermissions || isScut || isAccount || isGames || isDocs || isTeams || isMessages ? 'top' : undefined">
     <ScutSection v-if="isScut" full />
+    <PermissionsPage v-else-if="isPermissions" :csrf="permissionsCsrf" />
     <AccountPage v-else-if="isAccount" />
     <GamesPage v-else-if="isGames" />
     <div v-else-if="isDocs" class="container docs-page"><DocsList /></div>
@@ -110,11 +131,13 @@ watch(ready, async value => {
   </main>
   <SiteFooter />
   </template>
-  <Transition name="boot"><BootScreen v-if="!isAdmin && !ready" /></Transition>
+  <Transition name="boot"><BootScreen v-if="!isAdmin && (!isPermissions || permissionsCsrf) && !ready" /></Transition>
   <ConfirmDialog />
 </template>
 
 <style scoped>
+.access-error { margin-top:32px; }
+.access-error a { color:var(--accent); }
 .content-banner button { color:var(--accent); border:0; background:none; cursor:pointer; font:inherit; }
 /* 内容就绪后加载页淡出并轻微放大，露出下方首页 */
 .boot-leave-active { transition:opacity .6s var(--ease),transform .6s var(--ease); }
