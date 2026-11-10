@@ -134,6 +134,9 @@ const imageAttachments = computed(() => {
   return [...fromRefs, ...inlineImages.value.map(img => ({ ...img, path: '' }))];
 });
 const fileAttachments = computed(() => parsedUserRefs.value.filter((r: any) => !isImageRef(r)));
+function referenceDirectory(path: string) {
+  return session.projects.find(project => project.id === path)?.name || (path === 'default' ? '默认项目' : path);
+}
 
 const parsedUserQuotes = computed(() => {
   if (Array.isArray(props.message?.quotes) && props.message.quotes.length) {
@@ -347,7 +350,7 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
             <img v-if="r.previewUrl" :src="r.previewUrl" alt="" class="user-chip-thumb" />
             <Icon v-else :name="isImage(r.name) ? 'image' : (r.isDir ? 'folder' : 'file')" :size="12" />
             <span class="user-chip-name">{{ r.name }}</span>
-            <span v-if="r.dir" class="user-chip-dir">{{ r.dir }}</span>
+            <span v-if="r.dir" class="user-chip-dir">{{ referenceDirectory(r.dir) }}</span>
           </span>
         </div>
 
@@ -525,12 +528,13 @@ function resend() { if (isUser.value) useSession().send(userDisplayText.value ||
 .user-bubble-image { padding: 0; border: 0; border-radius: 12px; overflow: hidden; background: color-mix(in srgb, var(--text) 4%, transparent); cursor: pointer; max-width: min(100%, 280px); }
 .user-bubble-image img { display: block; width: auto; max-width: 100%; max-height: 220px; object-fit: contain; }
 .user-bubble-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 7px; }
-.user-bubble-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 240px; height: 24px; padding: 0 7px; border-radius: 6px; background: color-mix(in srgb, var(--text) 7.5%, transparent); color: var(--text); font-size: 11.5px; font-weight: 520; user-select: none; transition: background-color var(--fast), color var(--fast); }
+.user-bubble-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: min(100%, 320px); height: 26px; padding: 0 8px; border-radius: 6px; background: color-mix(in srgb, var(--text) 7.5%, transparent); color: var(--text); font-size: 11.5px; font-weight: 520; line-height: 1.2; user-select: none; transition: background-color var(--fast), color var(--fast); }
+.user-bubble-chip > svg { flex: none; }
 .user-bubble-chip.is-image { cursor: pointer; }
 .user-bubble-chip.is-image:hover { background: color-mix(in srgb, var(--text) 14%, transparent); }
-.user-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-chip-name, .user-chip-dir { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .user-chip-thumb { width: 16px; height: 16px; flex: none; border-radius: 4px; object-fit: cover; }
-.user-chip-dir { color: var(--muted); font-size: 10px; opacity: 0.75; }
+.user-chip-dir { flex: 0 0 auto; max-width: 40%; border-left: 1px solid var(--line-strong); padding-left: 6px; color: var(--muted); font-size: 10px; }
 
 /* Assistant footer: quiet action row plus a single muted meta line */
 .assistant-note { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.6; }

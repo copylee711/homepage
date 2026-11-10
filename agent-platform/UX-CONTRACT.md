@@ -13,8 +13,10 @@ confirmation flow, with the same labels, buttons and inline status feedback.
 | Ordinary, active grant and rollout enabled | Allowed | Denied | Denied |
 | Administrator | Allowed | Allowed | Allowed |
 
-The backend is authoritative on every request. Management controls are hidden for
-ordinary accounts; disabled composer controls explain missing execution permission.
+The backend is authoritative on every request. The console shows a loading screen
+while it checks identity and opens the initial conversation. An authenticated
+account without execution permission goes to the homepage, while protected API
+requests still return 403. Management controls are hidden for ordinary accounts.
 Execution permission never implies administrator or provider access. Disabled accounts
 and expired/revoked parent sessions cannot use an execution grant.
 

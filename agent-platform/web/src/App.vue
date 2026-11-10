@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, computed, ref, watch } from 'vue';
+import BootScreen from './components/BootScreen.vue';
 import Sidebar from './components/Sidebar.vue';
 import TopBar from './components/TopBar.vue';
 import Conversation from './components/Conversation.vue';
@@ -74,7 +75,10 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="app" :style="shellStyle" :data-sidebar="ui.sidebarOpen ? 'open' : 'closed'" :data-workspace="workspaceVisible ? 'open' : 'closed'">
+  <Transition name="iris-boot">
+    <BootScreen v-if="!session.booted || !session.canExecute" :error="session.bootError" @retry="session.boot()" />
+  </Transition>
+  <div v-if="session.booted && session.canExecute" class="app" :style="shellStyle" :data-sidebar="ui.sidebarOpen ? 'open' : 'closed'" :data-workspace="workspaceVisible ? 'open' : 'closed'">
     <Sidebar class="app-sidebar" />
     <main class="main-col" :class="{ 'is-welcome': session.isEmpty && !session.loadingChat }">
       <TopBar />
@@ -98,6 +102,10 @@ onMounted(() => {
 </template>
 
 <style>
+.iris-boot-leave-active { transition: opacity var(--slow) var(--ease); pointer-events: none; }
+.iris-boot-leave-to { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .iris-boot-leave-active { transition: none; } }
+
 .app {
   height: 100dvh;
   display: grid;

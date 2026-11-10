@@ -1,10 +1,11 @@
-import { assignToolArgs, finishedPlan } from './plan-state.mjs';
+import { assignToolArgs } from './plan-state.mjs';
 import { readToolImage } from './tool-images.mjs';
 
 // A plain reactive-friendly object describing the streaming assistant turn.
-export function reactiveLive() {
+export function reactiveLive({ startedAt = Date.now(), resumed = false } = {}) {
   return {
-    startedAt: Date.now(),
+    startedAt,
+    resumed,
     blocks: [],
     approvals: [],
     questions: [],
@@ -24,8 +25,9 @@ export function reactiveLive() {
 export function handleEvent(event, live) {
   if (!event || typeof event !== 'object') return;
   const vm = live;
+  const now = Date.now();
   if (event.type === 'turn_clock' && Number.isFinite(event.startedAt)) {
-    vm.startedAt = event.startedAt;
+    if (vm.resumed) vm.startedAt = event.startedAt;
     return;
   }
   if (event.type === 'extension_ui_request' && event.method === 'input' && event.question) {
@@ -50,6 +52,7 @@ export function handleEvent(event, live) {
   }
   if (event.type === 'message_start' && event.message?.role === 'user') return;
   if (event.type === 'message_start' && event.message?.role === 'assistant') {
+    settleTools(vm, 'interrupted', event.at, now);
     vm.retry = null;
     vm._callStartedAt = Date.now();
     vm._firstTokenAt = 0;
@@ -62,6 +65,7 @@ export function handleEvent(event, live) {
     return b;
   };
   if (event.type === 'message_end' && event.message?.role === 'assistant') {
+    finishThinking(vm, event.at, now);
     vm.retry = null;
     for (const [index, part] of (event.message.content || []).entries()) {
       if (part.type === 'text' || part.type === 'thinking') {
@@ -104,6 +108,7 @@ export function handleEvent(event, live) {
   }
   if (event.type === 'message_update') {
     const u = event.assistantMessageEvent; if (!u) return;
+    finishThinking(vm, event.at, now, u.contentIndex);
     if (vm.retry) vm.retry = null;
     if (!vm._firstTokenAt && (u.type === 'text_delta' || u.type === 'thinking_delta' || u.type === 'toolcall_delta')) {
       vm._firstTokenAt = Date.now();
@@ -115,17 +120,24 @@ export function handleEvent(event, live) {
       case 'text_start': ensureBlock(u.contentIndex, 'text'); break;
       case 'text_delta': { const b = ensureBlock(u.contentIndex, 'text'); b.text += u.delta || ''; break; }
       case 'text_end': { const b = ensureBlock(u.contentIndex, 'text'); if (typeof u.content === 'string') b.text = u.content; break; }
-      case 'thinking_start': { const b = ensureBlock(u.contentIndex, 'thinking'); if (!b.started) b.started = Date.now(); break; }
-      case 'thinking_delta': { const b = ensureBlock(u.contentIndex, 'thinking'); if (!b.started) b.started = Date.now(); b.text += u.delta || ''; break; }
+      case 'thinking_start':
+      case 'thinking_delta': {
+        const b = ensureBlock(u.contentIndex, 'thinking');
+        startTiming(b, event.at, now);
+        if (b.durationMs == null) vm.activeThinking = b;
+        if (u.type === 'thinking_delta') b.text += u.delta || '';
+        break;
+      }
       case 'thinking_end': {
         const b = ensureBlock(u.contentIndex, 'thinking');
         if (typeof u.content === 'string') b.text = u.content;
-        if (b.started && !b.durationMs) b.durationMs = Date.now() - b.started;
+        finishTiming(b, event.at, now);
+        if (vm.activeThinking === b) vm.activeThinking = null;
         break;
       }
       case 'toolcall_start': {
         const b = ensureBlock(u.contentIndex, 'tool');
-        if (!finishedPlan(b)) {
+        if (!b.state || b.state === 'pending') {
           b.id = u.id || u.toolCall?.id || b.id;
           b.name = u.toolName || u.toolCall?.name || b.name || 'tool';
           b.state = 'pending';
@@ -136,14 +148,14 @@ export function handleEvent(event, live) {
       }
       case 'toolcall_delta': {
         const b = ensureBlock(u.contentIndex, 'tool');
-        if (finishedPlan(b)) break;
+        if (b.state && b.state !== 'pending') break;
         b.args = (b.args || '') + (u.delta || '');
         break;
       }
       case 'toolcall_end': {
         const b = ensureBlock(u.contentIndex, 'tool');
         const tc = u.toolCall || {};
-        const keep = finishedPlan(b);
+        const keep = b.state && b.state !== 'pending';
         if (!keep) { b.id = tc.id || b.id; b.name = tc.name || b.name; }
         if (tc.arguments) assignToolArgs(b, tc.arguments);
         if (!keep) b.state = 'pending';
@@ -153,12 +165,13 @@ export function handleEvent(event, live) {
     return;
   }
   if (event.type === 'tool_execution_start') {
+    finishThinking(vm, event.at, now);
     const b = vm.blocks.find((x) => x.type === 'tool' && x.id === event.toolCallId) || ensureBlock(1e6 + vm.blocks.length, 'tool');
-    const keep = finishedPlan(b);
+    const keep = b.state && b.state !== 'pending';
     b.id = event.toolCallId; b.name = event.toolName || b.name;
     if (!keep) b.state = 'running';
     if (event.args) assignToolArgs(b, event.args);
-    b.started = Date.now();
+    if (!keep) startTiming(b, event.at, now);
     if (b.name !== 'set_chat_title') { vm.status = '正在执行工具 · ' + (event.toolName || ''); vm.spinner = true; }
     return;
   }
@@ -168,7 +181,8 @@ export function handleEvent(event, live) {
       b.state = event.isError ? 'error' : 'success';
       b.result = toolText(event.result);
       b.imageUrl = event.isError ? undefined : readToolImage(b.name, event.result);
-      b.durationMs = event.durationMs || (b.started ? Date.now() - b.started : 0);
+      if (Number.isFinite(event.durationMs)) b.durationMs = Math.max(0, event.durationMs);
+      else finishTiming(b, event.at, now);
     }
     if (b?.name !== 'set_chat_title') vm.status = '正在整理结果…'; return;
   }
@@ -189,15 +203,37 @@ export function handleEvent(event, live) {
   }
   if (event.type === 'goal_progress') { vm.goal = { continues: event.continues, max: event.max }; vm.status = `长目标自动续跑 ${event.continues}/${event.max}…`; vm.spinner = true; return; }
   if (event.type === 'compaction_start') { vm.status = '上下文接近上限，正在自动压缩…'; vm.spinner = true; return; }
-  if (event.type === 'agent_settled') { vm.retry = null; if (event.aborted) vm.stopped = true; settleTools(vm, vm.stopped ? 'stopped' : 'interrupted'); vm.status = ''; vm.spinner = false; }
+  if (event.type === 'agent_settled') { vm.retry = null; if (event.aborted) vm.stopped = true; settleTools(vm, vm.stopped ? 'stopped' : 'interrupted', event.at, now); vm.endedAt = now; vm.status = ''; vm.spinner = false; }
 }
 
-export function settleTools(vm, state) {
-  const now = Date.now();
+function startTiming(block, at, now) {
+  if (block.started != null || block.durationMs != null) return;
+  block.started = now;
+  if (Number.isFinite(at)) block.startedOnServer = at;
+}
+
+function finishTiming(block, at, now) {
+  if (block.started == null || block.durationMs != null) return;
+  block.durationMs = Math.max(0, Number.isFinite(at) && Number.isFinite(block.startedOnServer)
+    ? at - block.startedOnServer
+    : now - block.started);
+}
+
+function finishThinking(vm, at, now, beforeIndex = Infinity) {
+  const block = vm.activeThinking;
+  if (block && (block.sequence !== (vm.messageSequence || 0) || block.index < beforeIndex)) {
+    finishTiming(block, at, now);
+    vm.activeThinking = null;
+  }
+}
+
+export function settleTools(vm, state, at, now = Date.now()) {
+  finishThinking(vm, at, now);
   for (const block of vm.blocks) {
-    if (block.type === 'tool' && ['pending', 'running'].includes(block.state)) block.state = state;
-    // A reasoning block cut short by a stop still reports how long it ran.
-    if (block.type === 'thinking' && block.started && !block.durationMs) block.durationMs = now - block.started;
+    if (block.type === 'tool' && ['pending', 'running'].includes(block.state)) {
+      finishTiming(block, at, now);
+      block.state = state;
+    }
   }
 }
 

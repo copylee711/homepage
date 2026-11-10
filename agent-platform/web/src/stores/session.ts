@@ -53,6 +53,7 @@ export interface Chat {
 
 export interface Identity {
   csrf: string; admin: boolean; can_execute: boolean; model?: string;
+  homepage?: string;
   grant_expires_at?: number; user?: { id: string; name: string; avatar?: string };
 }
 
@@ -216,22 +217,36 @@ export const useSession = defineStore('session', {
       if (changedUser) { this.snapshots.clear(); this.messages = []; this.live = null; this.liveThread = null; this.liveMessages = []; }
     },
     async refreshIdentity() {
-      try { this.applyIdentity(await get('/api/me')); return true; }
+      try {
+        const me = await get('/api/me');
+        this.bootError = '';
+        this.applyIdentity(me);
+        if (me.can_execute === false) location.replace(me.homepage || 'https://copylee.cn/');
+        return me.can_execute === true;
+      }
       catch (error: any) {
-        if (this.auth) this.applyIdentity({ ...this.auth, admin: false, can_execute: false });
+        if (this.auth) {
+          this.applyIdentity({ ...this.auth, admin: false, can_execute: false });
+          this.bootError = error.message || '无法重新验证账户，请重试。';
+        }
         return false;
       }
     },
     async boot() {
+      this.booted = false;
+      this.bootError = '';
       try {
         const me = await get('/api/me');
         this.applyIdentity(me);
-        this.booted = true;
-        if (!me.can_execute) { this.chatsLoading = false; return; }
+        if (me.can_execute === false) {
+          location.replace(me.homepage || 'https://copylee.cn/');
+          return;
+        }
         await Promise.all([this.loadProjects(), this.loadChats()]);
         const id = new URLSearchParams(location.search).get('chat');
         if (id && /^[a-f0-9-]{36}$/.test(id)) await this.selectChat(id);
         else this.startNew();
+        this.booted = true;
       } catch (error: any) {
         this.bootError = error.message || '无法读取账户，请刷新重试。';
       }
@@ -421,10 +436,9 @@ export const useSession = defineStore('session', {
     },
     async resumeTurn(thread: string) {
       const controller = new AbortController();
-      const live = reactive(reactiveLive());
       const messages = this.messages;
       const previousUser = messages.findLast(item => item.role === 'user');
-      if (previousUser && Number(previousUser.timestamp) > 0) live.startedAt = Number(previousUser.timestamp);
+      const live = reactive(reactiveLive({ resumed: true, startedAt: Number(previousUser?.timestamp) || undefined }));
       this.liveMessages = messages;
       this.controller = controller;
       this.live = live;
@@ -533,7 +547,7 @@ export const useSession = defineStore('session', {
       this.busy = true;
       this.liveThread = thread;
       this.liveMessages = streamMessages;
-      const live = reactive(reactiveLive());
+      const live = reactive(reactiveLive({ startedAt: turnStartTime }));
       this.live = live;
       let received = false;
       let rejected = false;
@@ -565,7 +579,7 @@ export const useSession = defineStore('session', {
       } finally {
         settleTools(live, live.stopped ? 'stopped' : 'interrupted');
         // fold the live view model into the transcript as a finalized message
-        const durationMs = Math.max(0, Date.now() - live.startedAt);
+        const durationMs = Math.max(0, (live.endedAt ?? Date.now()) - live.startedAt);
         streamMessages.push({ role: 'assistant', timestamp: Date.now(), durationMs, content: live.blocks, stopReason: live.stopReason === 'length' ? 'length' : undefined, _vm: live, _fresh: true });
         const notes = live.error ? [{ at: Date.now(), kind: 'error', message: live.error }]
           : live.stopped ? [{ at: Date.now(), kind: 'stopped', message: '任务已由你停止。' }] : [];

@@ -73,6 +73,12 @@ test('anonymous access redirects and a callback needs the original signed browse
 test('server authorization and CSRF protect execution and provider settings', async () => {
   const cookie = 'copylee_ai=' + 't'.repeat(64);
   admin = false;
+  for (const path of ['/', '/?chat=old', '/some/deep/link']) {
+    const denied = await fetch(base + path, { headers: { cookie }, redirect: 'manual' });
+    assert.equal(denied.status, 302);
+    assert.equal(denied.headers.get('location'), new URL('/', process.env.HOMEPAGE_URL).href);
+    assert.equal(denied.headers.get('cache-control'), 'no-store');
+  }
   assert.equal((await fetch(base + '/api/providers', { headers: { cookie } })).status, 403);
   admin = true;
   const response = await fetch(base + '/api/providers/save', { method: 'POST', headers: { cookie, Origin: 'http://evil.test' }, body: '{}' });

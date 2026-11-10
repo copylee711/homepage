@@ -11,6 +11,7 @@ import TurnNavigator from './TurnNavigator.vue';
 import FloatingPlanPanel from './FloatingPlanPanel.vue';
 import FloatingBackgroundPanel from './FloatingBackgroundPanel.vue';
 import { formatDuration, textContent } from '../services/format';
+import { useLiveClock } from '../services/live-clock';
 import { useSession } from '../stores/session';
 
 const session = useSession();
@@ -193,33 +194,14 @@ function autoFollow() {
   });
 }
 
-// Live countdown for auto_retry_start so "X 秒后自动重试" ticks smoothly.
-const retryNow = ref(Date.now());
-let retryTicker: ReturnType<typeof setInterval> | undefined;
-watch(
-  () => live.value?.retry?.until,
-  (until) => {
-    if (retryTicker) { clearInterval(retryTicker); retryTicker = undefined; }
-    if (until) {
-      retryNow.value = Date.now();
-      retryTicker = setInterval(() => { retryNow.value = Date.now(); }, 100);
-    }
-  },
-  { immediate: true }
-);
-const elapsedNow = ref(Date.now());
-watch(() => live.value?.startedAt, (startedAt, _, onCleanup) => {
-  if (!startedAt) return;
-  elapsedNow.value = Date.now();
-  const timer = setInterval(() => { elapsedNow.value = Date.now(); }, 1000);
-  onCleanup(() => clearInterval(timer));
-}, { immediate: true });
-const elapsedLabel = computed(() => formatDuration(Math.max(0, elapsedNow.value - (live.value?.startedAt ?? elapsedNow.value)), true));
+const now = useLiveClock(() => !!live.value && live.value.endedAt == null);
+const elapsedLabel = computed(() => formatDuration(
+  (live.value?.endedAt ?? now.value) - (live.value?.startedAt ?? now.value), true));
 const liveStatusText = computed(() => {
   const cur = live.value;
   if (!cur) return '';
   if (cur.retry?.until) {
-    const remMs = Math.max(0, cur.retry.until - retryNow.value);
+    const remMs = Math.max(0, cur.retry.until - now.value);
     const secs = (remMs / 1000).toFixed(1);
     return remMs > 0
       ? `模型调用失败，${secs} 秒后自动重试（${cur.retry.attempt}/${cur.retry.maxAttempts}）…`
@@ -230,7 +212,6 @@ const liveStatusText = computed(() => {
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(followFrame);
-  if (retryTicker) clearInterval(retryTicker);
   chromeObserver?.disconnect();
 });
 
@@ -255,7 +236,7 @@ onMounted(() => {
       <FloatingBackgroundPanel />
       <FloatingPlanPanel />
     </div>
-    <div class="conversation" :class="{ 'is-empty': session.isEmpty && !session.loadingChat, 'is-unauthorized': session.booted && !session.canExecute }" ref="scroller" tabindex="0" aria-label="对话内容" @scroll.passive="onScroll" @wheel.passive="onWheel" @keydown="onKeydown" @touchstart.passive="onTouchStart" @touchmove.passive="onTouchMove">
+    <div class="conversation" :class="{ 'is-empty': session.isEmpty && !session.loadingChat }" ref="scroller" tabindex="0" aria-label="对话内容" @scroll.passive="onScroll" @wheel.passive="onWheel" @keydown="onKeydown" @touchstart.passive="onTouchStart" @touchmove.passive="onTouchMove">
       <WelcomeHero v-if="session.isEmpty && !session.loadingChat" />
       <div v-else class="messages">
         <div v-if="session.loadingChat" class="conversation-state"><span class="spinner"></span><span>正在读取对话…</span></div>
@@ -325,7 +306,6 @@ onMounted(() => {
   }
 }
 .conversation { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable both-edges; padding: 0 clamp(16px, 4vw, 40px); padding-bottom: var(--thread-end-gap, 12px); scroll-padding-bottom: var(--thread-end-gap, 12px); scroll-behavior: auto; overscroll-behavior: contain; }
-.conversation.is-unauthorized.is-empty { justify-content: center; }
 .conversation.is-empty { display: flex; flex-direction: column; justify-content: center; align-items: center; }
 .messages { width: 100%; max-width: 760px; margin: 0 auto; padding: calc(var(--header-h) + 16px) 0 0; display: flex; flex-direction: column; gap: 30px; }
 .scroll-anchor { height: 1px; width: 100%; pointer-events: none; scroll-margin-bottom: var(--thread-end-gap, 12px); }
@@ -337,7 +317,7 @@ onMounted(() => {
 .conversation-state { padding: 40px 0; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: 12.5px; }
 .context-compact-note { margin: 12px 0; color: var(--muted); font-size: 13px; }
 .message-status { min-height: 18px; display: flex; align-items: center; gap: 8px; margin-top: 9px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.status-elapsed { white-space: nowrap; opacity: .8; }
+.status-elapsed { white-space: nowrap; opacity: .8; font-variant-numeric: tabular-nums; }
 .message-status.is-error { color: var(--danger); }
 .tool-approval { margin-top: 14px; padding: 14px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-2); }
 .tool-approval strong { font-size: 13px; }

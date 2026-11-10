@@ -298,7 +298,7 @@ class Pi {
     if (event.type === 'gateway_error') this.recordNote('error', event.error);
     let imageAllowance = event.type === 'tool_execution_end' && !event.isError &&
       ['read', 'web_view_image'].includes(event.toolName) ? Math.min(160 * 1024, this.previewBudget || 0) : 0;
-    const line = this.mask(JSON.stringify(event, (_key, value) =>
+    const line = this.mask(JSON.stringify({ ...event, at: Date.now() }, (_key, value) =>
       {
       if (value?.type !== 'image' || typeof value.data !== 'string') return value;
       if (value.data.length <= imageAllowance && ['image/png','image/jpeg','image/gif','image/webp','image/bmp'].includes(value.mimeType)) {

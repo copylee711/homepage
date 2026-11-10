@@ -147,3 +147,40 @@ test('a thinking block times itself while streaming and freezes when it ends', (
   assert.equal(typeof cut.blocks[0].durationMs, 'number');
   assert.equal(frozen >= 0, true);
 });
+
+test('step transitions freeze reasoning even when the end event is missing or has zero duration', () => {
+  const live = reactiveLive();
+  const update = (type, contentIndex, at) => handleEvent({
+    type: 'message_update', at, assistantMessageEvent: { type, contentIndex, delta: 'reason' },
+  }, live);
+  update('thinking_delta', 0, 1000);
+  update('thinking_end', 0, 1000);
+  update('thinking_delta', 1, 1400);
+  update('toolcall_start', 2, 2100);
+  assert.equal(live.blocks[0].durationMs, 0);
+  assert.equal(live.blocks[1].durationMs, 700);
+  handleEvent({ type: 'agent_settled', at: 3000 }, live);
+  assert.deepEqual(live.blocks.slice(0, 2).map(block => block.durationMs), [0, 700]);
+});
+
+test('tool timers keep parallel work live and settle before the next model message', () => {
+  const live = reactiveLive();
+  const tool = (phase, id, at) => handleEvent({ type: 'tool_execution_' + phase, toolCallId: id, at }, live);
+  tool('start', 'a', 1000);
+  tool('start', 'b', 1200);
+  assert.deepEqual(live.blocks.map(block => block.state), ['running', 'running']);
+  tool('end', 'a', 1600);
+  assert.equal(live.blocks[0].durationMs, 600);
+  handleEvent({ type: 'message_start', message: { role: 'assistant' }, at: 2000 }, live);
+  assert.equal(live.blocks[1].state, 'interrupted');
+  assert.equal(live.blocks[1].durationMs, 800);
+});
+
+test('the first server event does not reset the elapsed time of a new turn', () => {
+  const live = reactiveLive({ startedAt: 1000 });
+  handleEvent({ type: 'turn_clock', startedAt: 1600 }, live);
+  assert.equal(live.startedAt, 1000);
+  const resumed = reactiveLive({ startedAt: 1000, resumed: true });
+  handleEvent({ type: 'turn_clock', startedAt: 1600 }, resumed);
+  assert.equal(resumed.startedAt, 1600);
+});

@@ -24,9 +24,9 @@ export function formatBytes(value: number) {
 export function formatDuration(ms: number, live = false) {
   const v = Math.max(0, Number(ms) || 0);
   if (live) {
-    if (v < 60000) return (v / 1000).toFixed(1) + 's';
+    if (v < 60000) return (Math.floor(v / 100) / 10).toFixed(1) + 's';
     const mins = Math.floor(v / 60000);
-    const secs = ((v % 60000) / 1000).toFixed(1);
+    const secs = (Math.floor((v % 60000) / 100) / 10).toFixed(1);
     return `${mins}分 ${secs}秒`;
   }
   if (v < 100) return Math.round(v) + 'ms';

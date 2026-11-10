@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import Icon from './Icon.vue';
 import SiteIconStack from './SiteIconStack.vue';
 import WebToolPages from './WebToolPages.vue';
 import ToolImagePreview from './ToolImagePreview.vue';
 import { formatDuration } from '../services/format';
+import { useLiveClock } from '../services/live-clock';
 import { rowSiteUrls, siteKey } from '../services/site-icon.mjs';
 import { useWorkspace } from '../stores/workspace';
 import { useSession } from '../stores/session';
@@ -316,19 +317,7 @@ function openArgFile(v: string) {
   void useWorkspace().locateAndOpenFile(v, proj);
 }
 
-// A running tool ticks its own elapsed time, like the desktop client, so a
-// long call never looks frozen.
-const now = ref(Date.now());
-let ticker: number | null = null;
-watch(
-  () => list.value.some(b => b?.state === 'running'),
-  running => {
-    if (running && ticker == null) ticker = window.setInterval(() => { now.value = Date.now(); }, 80);
-    if (!running && ticker != null) { clearInterval(ticker); ticker = null; }
-  },
-  { immediate: true }
-);
-onBeforeUnmount(() => { if (ticker != null) clearInterval(ticker); });
+const now = useLiveClock(() => list.value.some(b => b?.state === 'running'));
 
 function durationOf(block: any) {
   if (!block) return 0;

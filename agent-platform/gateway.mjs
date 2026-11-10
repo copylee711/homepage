@@ -25,7 +25,7 @@ const cookies = req => Object.fromEntries((req.headers.cookie || '').split(';').
 }));
 const cookie = (name, value, age) => `${name}=${value}; Path=/; Max-Age=${age}; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`;
 function redirect(res, location, setCookies = []) {
-  res.writeHead(302, { Location: location, 'Set-Cookie': setCookies }); res.end();
+  res.writeHead(302, { Location: location, 'Set-Cookie': setCookies, 'Cache-Control': 'no-store' }); res.end();
 }
 async function sso(path, value) {
   let response;
@@ -285,7 +285,7 @@ export const server = createServer(async (req, res) => {
     if (url.pathname === '/api/me' && req.method === 'GET') {
       const user = auth.user ? { ...auth.user } : null;
       if (user && user.avatar) user.avatar = '/api/avatar';
-      return json(res, 200, { user, admin: auth.admin, can_execute: auth.can_execute,
+      return json(res, 200, { user, admin: auth.admin, can_execute: auth.can_execute, homepage: new URL('/', homepage).href,
         grant_expires_at: auth.grant_expires_at, csrf: csrf(auth.token), model: await modelName(auth.user.id) });
     }
     if (url.pathname === '/auth/logout' && req.method === 'POST') {
@@ -601,6 +601,7 @@ export const server = createServer(async (req, res) => {
       return res.end(data);
     }
     // SPA fallback: any non-asset GET renders the app shell.
+    if (!auth.can_execute) return redirect(res, new URL('/', homepage).href);
     const shell = await readFile(new URL('index.html', distRoot));
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(shell);

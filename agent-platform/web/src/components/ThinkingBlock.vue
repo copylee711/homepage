@@ -1,23 +1,18 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import Icon from './Icon.vue';
 import { formatDuration } from '../services/format';
+import { useLiveClock } from '../services/live-clock';
 
 const props = defineProps<{ text: string; started?: number; durationMs?: number }>();
 const body = ref<HTMLElement | null>(null);
 
 // Reasoning blocks tick while the model thinks, then freeze on the elapsed
 // time the way tool rows do.
-const now = ref(Date.now());
-const running = computed(() => !!props.started && !props.durationMs);
-let ticker: number | null = null;
-watch(running, value => {
-  if (value && ticker == null) ticker = window.setInterval(() => { now.value = Date.now(); }, 80);
-  if (!value && ticker != null) { clearInterval(ticker); ticker = null; }
-}, { immediate: true });
-onBeforeUnmount(() => { if (ticker != null) clearInterval(ticker); });
+const running = computed(() => props.started != null && props.durationMs == null);
+const now = useLiveClock(() => running.value);
 const elapsed = computed(() => {
-  if (props.durationMs) return props.durationMs;
+  if (props.durationMs != null) return props.durationMs;
   if (!props.started) return 0;
   return Math.max(0, now.value - props.started);
 });
@@ -41,7 +36,7 @@ function toggle() {
     <button type="button" class="thinking-head" :aria-expanded="isOpen" @click="toggle">
       <Icon class="thinking-icon" :class="{ 'is-live': running }" name="sparkle" :size="13" />
       <span class="thinking-label">思考过程</span>
-      <span v-if="elapsed || running" class="thinking-time" :class="{ 'is-live': running }">{{ formatDuration(elapsed, running) }}</span>
+      <span v-if="durationMs != null || running" class="thinking-time" :class="{ 'is-live': running }">{{ formatDuration(elapsed, running) }}</span>
       <span class="thinking-toggle">
         <span>{{ isOpen ? '收起' : '展开' }}</span>
         <Icon class="thinking-chevron" name="chevron-right" :size="13" />
