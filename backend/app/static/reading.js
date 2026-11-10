@@ -38,21 +38,6 @@
   addEventListener('resize', onScroll, { passive: true });
   onScroll();
 
-  // 移动端导航可横向滚动：把当前栏目滚到可见位置。
-  const navScroll = document.querySelector('.nav-scroll');
-  const current = navScroll?.querySelector('.active');
-  if (navScroll && current && navScroll.scrollWidth > navScroll.clientWidth) {
-    navScroll.scrollLeft = current.offsetLeft - (navScroll.clientWidth - current.offsetWidth) / 2;
-  }
-  const edges = () => {
-    if (!navScroll) return;
-    navScroll.classList.toggle('fade-start', navScroll.scrollLeft > 4);
-    navScroll.classList.toggle('fade-end', navScroll.scrollLeft + navScroll.clientWidth < navScroll.scrollWidth - 4);
-  };
-  navScroll?.addEventListener('scroll', edges, { passive: true });
-  addEventListener('resize', edges, { passive: true });
-  edges();
-
   // 笔记列表：本地搜索与分类筛选。
   const query = document.getElementById('notes-query');
   const chips = [...document.querySelectorAll('.notes-chips button')];
@@ -81,42 +66,6 @@
       filter();
     });
   }
-
-  // 访客账户：导航头像、收藏按钮与浏览记录。未登录时静默跳过。
-  (async () => {
-    let me;
-    try {
-      const response = await fetch('/api/account/me', { credentials: 'same-origin', cache: 'no-store' });
-      if (response.ok) me = await response.json();
-    } catch {}
-    // 云盘与后台入口只对已开通的用户显示；新用户默认没有这些功能。
-    document.querySelectorAll('[data-cloud]').forEach(el => { el.hidden = !me?.features?.drive; });
-    document.querySelectorAll('.reading-terms').forEach(el => { el.hidden = !(me?.features?.drive || me?.features?.images); });
-    const link = document.getElementById('account-link');
-    if (me && link) {
-      link.title = me.user.name; link.setAttribute('aria-label', `账户：${me.user.name}`);
-      const face = me.user.avatar ? Object.assign(document.createElement('img'), { src: me.user.avatar, alt: '' }) : Object.assign(document.createElement('span'), { className: 'initial', textContent: me.user.name.slice(0, 1).toUpperCase() });
-      link.replaceChildren(face);
-    }
-    const button = document.querySelector('.fav-button');
-    if (!button) return;
-    const target = { kind: button.dataset.kind, slug: button.dataset.slug };
-    const send = (path, body) => fetch(`/api/account${path}`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': me.csrf }, body: JSON.stringify(body) });
-    const setState = on => { button.setAttribute('aria-pressed', String(on)); button.classList.toggle('on', on); button.querySelector('span').textContent = on ? '已收藏' : '收藏'; };
-    if (me) {
-      send('/history', target).catch(() => {});
-      const state = await fetch(`/api/account/favorites/check?kind=${target.kind}&slug=${encodeURIComponent(target.slug)}`, { credentials: 'same-origin' }).then(r => r.json()).catch(() => ({}));
-      setState(!!state.favorite);
-    }
-    button.addEventListener('click', async () => {
-      if (!me) { location.href = `/account?next=${encodeURIComponent(location.pathname)}`; return; }
-      const on = button.getAttribute('aria-pressed') !== 'true';
-      button.disabled = true;
-      const response = await send(on ? '/favorites' : '/favorites/remove', target).catch(() => null);
-      button.disabled = false;
-      if (response?.ok) { setState(on); if (on && !reduce) { button.classList.remove('pop'); void button.offsetWidth; button.classList.add('pop'); } }
-    });
-  })();
 
   const prose = document.querySelector('.prose');
   if (!prose) return;

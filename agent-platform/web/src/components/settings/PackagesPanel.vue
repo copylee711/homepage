@@ -64,11 +64,11 @@ onMounted(load);
 
 <template>
   <div class="settings-pad">
-    <form novalidate class="panel-top" @submit.prevent="load">
-      <div class="search-box">
+    <form novalidate class="panel-top pkg-toolbar" @submit.prevent="load">
+      <label class="pkg-search">
         <Icon name="search" :size="15" />
-        <input v-model="query" type="search" placeholder="搜索技能与提示词包（npm pi-package）…" maxlength="100" autocomplete="off">
-      </div>
+        <input v-model="query" type="search" aria-label="搜索技能与提示词包" placeholder="搜索技能与提示词包…" maxlength="100" autocomplete="off">
+      </label>
       <button type="submit" class="btn btn-solid btn-sm" :disabled="loading || !!pending">搜索</button>
       <a class="btn btn-quiet btn-sm" href="https://pi.dev/packages" target="_blank" rel="noopener noreferrer">
         <span>官方目录</span><Icon name="external-link" :size="13" />
@@ -104,11 +104,27 @@ onMounted(load);
 </template>
 
 <style>
+.pkg-toolbar { margin-bottom: 10px; }
+.pkg-search { display: flex; flex: 1 1 180px; align-items: center; gap: 8px; min-width: 0; min-height: 36px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface-2); color: var(--muted); }
+.pkg-search:focus-within { border-color: var(--accent); }
+.pkg-search svg { flex: none; }
+.pkg-search input { min-width: 0; width: 100%; padding: 6px 0; border: 0; outline: 0; background: transparent; }
+.pkg-toolbar > .btn { flex: none; white-space: nowrap; }
+.pkg-toolbar + .hint { margin: 0 0 12px; line-height: 1.55; }
+@media (max-width: 460px) {
+  .pkg-search { flex-basis: 100%; }
+  .settings-pad .pkg-search input[type='search'] { font-size: 16px; }
+}
 .pkg-list { display: flex; flex-direction: column; gap: 8px; }
 .pkg-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); }
 .pkg-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .pkg-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pkg-head strong { font-size: 13.5px; font-weight: 600; font-family: var(--font-mono); }
 .pkg-ver { font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
-.pkg-desc { margin: 0; color: var(--text-2); font-size: 12px; line-height: 1.5; }
+.pkg-desc { margin: 0; color: var(--text-2); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.pkg-card .btn { flex: none; white-space: nowrap; }
+@media (max-width: 460px) {
+  .pkg-card { flex-direction: column; align-items: stretch; gap: 8px; }
+  .pkg-card .btn { align-self: flex-end; }
+}
 </style>

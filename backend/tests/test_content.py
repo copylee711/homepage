@@ -461,6 +461,23 @@ def publish(client, headers, **changes):
     assert response.status_code == 200, response.text
 
 
+def test_reading_pages_load_shared_header_assets(server):
+    client, _, settings = server
+    manifest = settings.static_dir / ".vite" / "manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text('''{
+      "src/reading-header.ts": {"file": "assets/header.js", "imports": ["shared"]},
+      "shared": {"file": "assets/shared.js", "css": ["assets/header.css"]}
+    }''', encoding="utf-8")
+    for route in ("/posts", "/notes", "/notes/does-not-exist"):
+        page = client.get(route)
+        assert page.status_code == (404 if route.endswith("does-not-exist") else 200)
+        assert 'id="reading-header"' in page.text
+        assert 'src="/assets/header.js"' in page.text
+        assert 'href="/assets/header.css"' in page.text
+        assert 'class="reading-nav"' not in page.text
+
+
 def test_reading_pages_feed_and_not_found(server):
     client, _, _ = server
     headers = login(client)

@@ -54,6 +54,33 @@ def introspect(client, token):
     return client.post('/api/agent/introspect', headers=PRIVATE, json={"token": token})
 
 
+def test_workspace_shortcut_uses_current_execution_grant(agent):
+    client, app, settings = agent
+    assert client.get("/api/account/me").status_code == 401
+    login(client)
+    assert client.get("/api/account/me").json()["features"]["iris"] == settings.agent_url
+    with Session(app.state.engine) as session:
+        session.add(User(id="nav-user", email="nav@example.test", name="Reader",
+                         password_hash=hash_password(PASSWORD), created_at="2026-01-02"))
+        session.flush()
+        session.add(AgentGrant(user_id="nav-user", granted_by="admin-user",
+                               expires_at=time.time() + 3600, updated_at=time.time()))
+        session.commit()
+    result = client.post("/api/account/login", headers={"Origin": ORIGIN},
+                         json={"email": "nav@example.test", "password": PASSWORD})
+    assert result.status_code == 200
+    settings.agent_user_execution_enabled = False
+    assert "iris" not in client.get("/api/account/me").json()["features"]
+    settings.agent_user_execution_enabled = True
+    assert client.get("/api/account/me").json()["features"]["iris"] == settings.agent_url
+    with Session(app.state.engine) as session:
+        grant = session.get(AgentGrant, "nav-user")
+        grant.expires_at = time.time() - 1
+        session.add(grant)
+        session.commit()
+    assert "iris" not in client.get("/api/account/me").json()["features"]
+
+
 def test_permissions_page_redirects_before_serving_html(agent):
     client, app, _ = agent
     path = "/permissions?section=defaults"

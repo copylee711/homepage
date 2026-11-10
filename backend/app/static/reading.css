@@ -4,34 +4,9 @@
 .reading-bar { display:flex; align-items:center; justify-content:space-between; height:100%; }
 .reading-brand { display:inline-flex; align-items:center; gap:10px; font-size:18px; font-weight:700; letter-spacing:-.02em; white-space:nowrap; }
 .reading-logo { width:30px; height:auto; flex:none; }
-.reading-header nav { display:flex; align-items:stretch; justify-content:flex-end; gap:clamp(8px,2vw,24px); flex:1; min-width:0; height:100%; margin-left:24px; font-size:14px; color:var(--muted); }
-/* 栏目多于屏宽时横向滚动，两端渐隐提示还有内容 */
-.nav-scroll { display:flex; align-items:stretch; gap:clamp(16px,4vw,40px); min-width:0; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
-.nav-scroll::-webkit-scrollbar { display:none; }
-.nav-scroll a { flex:none; }
-.nav-scroll.fade-end { -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent); mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent); }
-.nav-scroll.fade-start { -webkit-mask-image:linear-gradient(90deg,transparent,#000 28px); mask-image:linear-gradient(90deg,transparent,#000 28px); }
-.nav-scroll.fade-start.fade-end { -webkit-mask-image:linear-gradient(90deg,transparent,#000 28px,#000 calc(100% - 28px),transparent); mask-image:linear-gradient(90deg,transparent,#000 28px,#000 calc(100% - 28px),transparent); }
-.reading-header nav a { position:relative; display:inline-flex; align-items:center; transition:color .2s; }
-.reading-header nav a[hidden],.reading-footer a[hidden],.reading-terms[hidden] { display:none; }
-.reading-header nav a::after { content:''; position:absolute; inset:auto 0 14px; height:2px; border-radius:2px; background:var(--accent); transform:scaleX(0); transition:transform .4s var(--ease); }
-.reading-header a:hover,.reading-header a.active { color:var(--text); }
-.reading-header .active::after { transform:scaleX(1); }
-.account-link { flex:none; display:inline-grid; place-items:center; align-self:center; width:32px; height:32px; border-radius:50%; overflow:hidden; color:inherit; transition:color .2s,box-shadow .3s; }
-.reading-header nav .account-link { display:inline-grid; justify-content:center; }
-.reading-header nav .account-link::after { display:none; }
-.account-link:hover { color:var(--text); box-shadow:0 0 0 2px var(--accent-soft); }
-.account-link svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; }
-.account-link img { width:100%; height:100%; object-fit:cover; }
-.account-link .initial { display:grid; place-items:center; width:100%; height:100%; background:linear-gradient(135deg,var(--accent),#7ea2ff); color:#fff; font-size:13px; font-weight:700; }
-#theme-toggle { flex:none; display:inline-grid; place-items:center; align-self:center; width:36px; height:36px; margin-right:-8px; padding:0; border:0; border-radius:8px; background:none; color:inherit; cursor:pointer; transition:color .2s,background .2s; }
-#theme-toggle:hover { background:var(--line); color:var(--text); }
-#theme-toggle svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
-#theme-toggle .moon { display:none; }
-[data-theme="dark"] #theme-toggle .sun { display:none; }
-[data-theme="dark"] #theme-toggle .moon { display:block; }
+.reading-footer a[hidden],.reading-terms[hidden] { display:none; }
 /* 阅读进度：导航底边上的一条蓝线 */
-.reading-progress { position:absolute; inset:auto 0 -1px; height:2px; pointer-events:none; }
+.reading-progress { position:fixed; z-index:10; inset:calc(var(--header-h) - 1px) 0 auto; height:2px; pointer-events:none; }
 .reading-progress span { display:block; height:100%; background:linear-gradient(90deg,var(--accent-soft),var(--accent)); transform:scaleX(0); transform-origin:left; }
 .reading-main { min-height:calc(100svh - 180px); }
 
@@ -214,7 +189,6 @@
 
 @media(max-width:760px) { .nav-scroll { gap:20px; } }
 @media(max-width:600px) { .article-heading .page-grid { opacity:.3; } .post-item { grid-template-columns:1fr 20px; gap:10px; } .post-item time { grid-column:1 / -1; padding:0; } .article-pager { grid-template-columns:1fr; } .article-pager .newer { grid-column:auto; } .float-top { right:16px; bottom:16px; } }
-@media(max-width:479px) { .reading-header nav { margin-left:12px; } .reading-header .reading-brand span { display:none; } }
 /* 触屏点按：去掉浏览器默认的蓝色高亮，改为轻微变淡（与站点其他页面一致）。 */
 html { -webkit-tap-highlight-color:transparent; }
 @media (hover:none) { :where(a, button, summary, label, [role=button]):active { opacity:.62; } :where(button, [role=button]):active:not(:disabled) { transform:scale(.97); } }

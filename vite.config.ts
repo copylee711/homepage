@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
     build: {
       manifest: true,
       // math 入口单独打包，阅读页按需加载 KaTeX。
-      rollupOptions: { input: { main: 'index.html', math: 'src/math.ts' } },
+      rollupOptions: { input: { main: 'index.html', math: 'src/math.ts', readingHeader: 'src/reading-header.ts' } },
     },
     server: {
       proxy: {

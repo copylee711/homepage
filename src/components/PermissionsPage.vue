@@ -59,7 +59,10 @@ async function api<T>(path: string, method = 'GET', data?: unknown): Promise<T> 
       <div class="console-toolbar admin-panel">
         <nav class="segments" aria-label="权限类别">
           <button v-for="item in sections" :key="item.id" type="button"
-            :aria-pressed="section === item.id" @click="navigate(item.id)">{{ item.label }}</button>
+            :aria-pressed="section === item.id" @click="navigate(item.id)">
+            <span :class="{ 'iris-full': item.id === 'iris' }">{{ item.label }}</span>
+            <span v-if="item.id === 'iris'" class="iris-short">Iris</span>
+          </button>
         </nav>
         <label v-if="section !== 'defaults'" class="account-search">查找用户
           <input v-model="query" type="search" placeholder="昵称或邮箱" maxlength="160">
@@ -82,6 +85,7 @@ async function api<T>(path: string, method = 'GET', data?: unknown): Promise<T> 
 .segments { display:flex; gap:4px; padding:4px; border-radius:var(--radius-sm); background:var(--accent-soft); }
 .segments button { border:0; background:none; color:var(--muted); font-size:14px; padding:10px 16px; }
 .segments button[aria-pressed="true"] { background:var(--surface); color:var(--text); box-shadow:0 2px 8px color-mix(in srgb,var(--text) 9%,transparent); }
+.iris-short { display:none; }
 .account-search { width:min(100%, 240px); }
 .console-note { margin:0 0 18px; border-left:2px solid var(--accent); padding:8px 14px; background:var(--accent-soft); overflow-wrap:anywhere; }
 .console-note.is-error { border-color:currentColor; color:var(--text); background:var(--bg-tint); }
@@ -89,6 +93,8 @@ async function api<T>(path: string, method = 'GET', data?: unknown): Promise<T> 
   .permissions-content { padding-bottom:40px; }
   .console-toolbar { align-items:stretch; flex-direction:column; }
   .segments button { flex:1; padding-inline:8px; }
+  .iris-full { display:none; }
+  .iris-short { display:inline; }
   .account-search { width:100%; }
 }
 </style>

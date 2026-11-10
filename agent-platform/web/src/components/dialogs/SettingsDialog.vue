@@ -367,6 +367,7 @@ async function remove(c: any) {
 .settings-pad .question-hint:last-child { margin-bottom: 0; }
 .settings-pad .background-actions { margin-top: 10px; }
 .settings-pad section { min-width: 0; }
+.settings-pad .panel-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .settings-pad input:not([type='checkbox']):not([type='radio']),
 .settings-pad textarea,
 .settings-pad .search-test-input input,

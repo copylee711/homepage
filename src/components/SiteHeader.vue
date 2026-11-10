@@ -8,11 +8,14 @@ import AppIcon from './AppIcon.vue'
 import LogoMark from './LogoMark.vue'
 
 const { theme, toggle } = useTheme()
+const props = defineProps<{ readingSite?: { name: string; cloud: string } }>()
+const headerSite = computed(() => props.readingSite ?? site.value)
 
 const path = location.pathname.replace(/\/$/, '')
 const isAccount = path === '/account'
 // 非首页时，锚点链接回到首页对应区块。
 const onHome = path === ''
+const at = (route: string) => path === route || path.startsWith(route + '/')
 // 首页上滚动到作品区时高亮 Make；入口区没有单独的导航项，仍算 Home。
 const sections = ['top', 'portals', 'projects']
 
@@ -30,8 +33,8 @@ function closeMenus() { openGroup.value = ''; mobileOpen.value = false }
 const groups = computed<Group[]>(() => {
   const result: Group[] = [
     { id: 'read', label: 'Read', items: [
-      { label: 'Articles', href: '/posts', hint: '长文与随笔' },
-      { label: 'Notes', href: '/notes', hint: '学习笔记' },
+      { label: 'Articles', href: '/posts', hint: '长文与随笔', current: at('/posts') },
+      { label: 'Notes', href: '/notes', hint: '学习笔记', current: at('/notes') },
       { label: 'SCUT', href: '/scut', hint: '华工通知聚合', current: path === '/scut' },
     ] },
     { id: 'make', label: 'Make', items: [
@@ -45,7 +48,8 @@ const groups = computed<Group[]>(() => {
       { label: 'Docs', href: '/docs', hint: '协作文档', current: path === '/docs' },
       { label: 'Messages', href: '/messages', hint: unreadHint.value || '好友与私信', current: path === '/messages', dot: unreadCount.value > 0 },
     ]
-    if (features.value.drive && site.value) workspace.push({ label: 'Cloud', href: site.value.cloud, hint: '个人云盘', external: true })
+    if (features.value.drive && headerSite.value) workspace.push({ label: 'Cloud', href: headerSite.value.cloud, hint: '个人云盘', external: true })
+    if (features.value.iris) workspace.push({ label: 'Iris', href: features.value.iris, hint: 'AI 工作区', external: true })
     if (features.value.admin) workspace.push({ label: 'Permissions', href: '/permissions', hint: '权限控制台', current: path === '/permissions' })
     result.push({ id: 'workspace', label: 'Workspace', items: workspace })
   }
@@ -119,11 +123,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <header v-if="site" class="header" :class="{ scrolled }">
+  <header v-if="headerSite" class="header" :class="{ scrolled }">
     <div class="container bar">
-      <a class="brand" :href="onHome ? '#top' : '/#top'" :aria-label="`${site.name} 主页`">
+      <a class="brand" :href="onHome ? '#top' : '/#top'" :aria-label="`${headerSite.name} 主页`">
         <LogoMark class="logo" />
-        <span>{{ site.name }}</span>
+        <span>{{ headerSite.name }}</span>
       </a>
       <nav class="nav" aria-label="主导航" @focusout="onFocus">
         <button ref="mobileToggle" type="button" class="mobile-toggle" :aria-expanded="mobileOpen" aria-controls="site-nav-links" :aria-label="mobileOpen ? '收起导航菜单' : '展开导航菜单'" @click="mobileOpen = !mobileOpen; openGroup = ''">

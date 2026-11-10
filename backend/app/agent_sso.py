@@ -21,6 +21,11 @@ router = APIRouter(prefix="/api/agent", tags=["agent-sso"])
 EXECUTION_SESSION_GRACE = 24 * 3600
 
 
+def execution_grant(session, settings, user):
+    grant = session.get(AgentGrant, user.id) if settings.agent_user_execution_enabled else None
+    return grant if grant and grant.expires_at > time.time() else None
+
+
 def database(request: Request):
     with Session(request.app.state.engine) as session:
         yield session
@@ -127,9 +132,8 @@ def session_identity(body: Token, request: Request, session: Session, *, executi
             or parent.expires_at <= time.time() or parent.user_id != row.user_id \
             or not user or user.disabled:
         raise HTTPException(401, "Agent 登录已失效")
-    grant = session.get(AgentGrant, user.id)
-    allowed = bool(request.app.state.settings.agent_user_execution_enabled
-                   and grant and grant.expires_at > time.time())
+    grant = execution_grant(session, request.app.state.settings, user)
+    allowed = grant is not None
     return {"user": {"id": user.id, "name": user.name, "avatar": user.avatar or ""}, "admin": user.is_admin,
             "can_execute": user.is_admin or allowed, "expires_at": row.expires_at,
             "grant_expires_at": grant.expires_at if allowed else None}

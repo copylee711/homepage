@@ -396,6 +396,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # 前端据此显示或隐藏云盘、图床与后台入口；新用户默认都没有。
         features = {"drive": plan.drive_enabled, "images": plan.images_enabled,
                     "admin": user.is_admin, "terms": storage.agreed(session, user.id)}
+        if (
+            settings.agent_url and len(settings.agent_client_secret) >= 32
+            and (user.is_admin or agent_sso.execution_grant(session, settings, user))
+        ):
+            features["iris"] = settings.agent_url
         return {"user": profile(user), "csrf": row.csrf, "features": features}
 
     # —— 意见反馈 ——
@@ -963,6 +968,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "version": versions(session),
             "css_urls": css_urls(settings.static_dir),
             "math_assets": math_assets(settings.static_dir),
+            "header_assets": entry_assets(settings.static_dir, "src/reading-header.ts"),
             "year": timestamp()[:4],
         }
 
@@ -1165,7 +1171,26 @@ def css_urls(static_dir: Path) -> list[str]:
 
 def math_assets(static_dir: Path) -> dict:
     """KaTeX 单独打包，仅在含公式的页面加载。"""
-    entry = read_manifest(static_dir).get("src/math.ts")
+    return entry_assets(static_dir, "src/math.ts")
+
+
+def entry_assets(static_dir: Path, name: str) -> dict:
+    manifest = read_manifest(static_dir)
+    entry = manifest.get(name)
     if not entry:
         return {}
-    return {"js": "/" + entry["file"], "css": ["/" + name for name in entry.get("css", [])]}
+    css = {}
+    seen = set()
+
+    def collect(key):
+        if key in seen:
+            return
+        seen.add(key)
+        chunk = manifest.get(key, {})
+        for dependency in chunk.get("imports", []):
+            collect(dependency)
+        for asset in chunk.get("css", []):
+            css["/" + asset] = None
+
+    collect(name)
+    return {"js": "/" + entry["file"], "css": list(css)}

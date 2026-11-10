@@ -6,7 +6,7 @@ export interface ImageLimits { enabled: boolean; quota: number | null; max_file:
 export interface ImageToken { id: string; name: string; created_at: string; last_used: string | null }
 export interface HostedImage { id: string; url: string; size: number; width: number; height: number; created_at: string; owner?: string }
 /** 管理员授予的功能；新注册用户默认都没有，前端据此隐藏对应入口。 */
-export interface AccountFeatures { drive: boolean; images: boolean; admin: boolean; terms: boolean }
+export interface AccountFeatures { drive: boolean; images: boolean; admin: boolean; terms: boolean; iris?: string | null }
 export interface FeedbackItem { id: string; category: 'suggestion' | 'bug' | 'other'; content: string; page: string; status: 'new' | 'read' | 'done'; reply: string; created_at: number; replied_at: number | null }
 export interface AccountEntry { kind: 'note' | 'post'; slug: string; title: string; available: boolean; url: string; at: string }
 
