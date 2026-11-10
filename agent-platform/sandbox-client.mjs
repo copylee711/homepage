@@ -7,8 +7,12 @@ export async function sandbox(path, user, token, policy, extra, timeout = 15000)
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + required('SANDBOX_SECRET') },
     body: JSON.stringify(payload), signal: AbortSignal.timeout(timeout) });
   if (!response.ok) {
-    // Terminal and browser control are interactive: the broker's own reason
-    // (memory budget, session gone after a restart) is what the user needs.
+    if (path === '/files/operation') {
+      const detail = await response.json().catch(() => ({}));
+      const status = [400, 404, 409, 413, 422].includes(response.status) ? response.status : 503;
+      fail(status, detail.error || '工作区操作失败，请稍后重试');
+    }
+    // Interactive controls surface the broker's reason when a session fails.
     if (path.startsWith('/pty/') || path.startsWith('/browser/')) {
       const detail = await response.json().catch(() => ({}));
       if (typeof detail.error === 'string' && detail.error) fail(response.status === 400 || response.status === 409 ? 409 : 503, detail.error);

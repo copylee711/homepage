@@ -29,7 +29,7 @@ import { ToolApprovals, UserQuestions } from './tool-approvals.mjs';
 import { SessionSnapshots, projectSession } from './session-snapshot.mjs';
 import { packageCatalog, changePackage, packageArguments, packageTextFiles } from './packages.mjs';
 import { toolchainBusy, toolchainStatus, startToolchain, renewToolchain, cancelToolchain } from './toolchains.mjs';
-import { listWorkspace, previewWorkspace, downloadWorkspace, uploadWorkspace, manageWorkspace, invalidateWorkspace } from './workspace.mjs';
+import { listWorkspace, previewWorkspace, downloadWorkspace, uploadWorkspace, manageWorkspace } from './workspace.mjs';
 
 // A reader can edit an element in the live preview. Those edits are queued by
 // the sandbox host; the next prompt carries them so the agent re-reads the
@@ -326,7 +326,6 @@ class Pi {
   }
   finish() {
     this.approvals.clear(); this.questions.clear();
-    invalidateWorkspace(this.user);
     clearInterval(this.deadline); this.watchdog = null; clearInterval(this.storageCheck); clearInterval(this.renewWatch);
     this.busy = false;
     this.wikiTurn = null;
@@ -345,7 +344,6 @@ class Pi {
   async prompt(res, message, thinking, images, permission, goal) {
     if (this.maintenance) fail(409, '正在压缩此对话');
     if (deleting.has(this.key)) fail(409, '正在删除此对话');
-    invalidateWorkspace(this.user);
     if (this.busy) fail(409, '当前任务尚未结束，请先停止或等待完成');
     if ([...sessions.values()].some(entry => entry.pi !== this && entry.pi.user === this.user && entry.pi.busy)) fail(409, '每个用户同时只能运行一个任务');
     await sessionCapacity(`/data/sessions/${this.user}`, this.thread);
@@ -577,7 +575,6 @@ export const server = createServer(async (req, res) => {
           const { markdown, ...result } = await recognizeDocument({ path, firstPage, lastPage, settings, run, signal });
           const output = '/workspace/' + pi.projectId + '/ocr-' + randomUUID() + '.md';
           await run('file-write', { path: output, content: Buffer.from(markdown).toString('base64'), encoding: 'base64', overwrite: true });
-          invalidateWorkspace(pi.user);
           return json(res, 200, { ...result, path: output, preview: markdown.slice(0, 10000), truncated: markdown.length > 10000 });
         } finally { ocrUsers.delete(pi.user); }
       }
@@ -791,7 +788,6 @@ export const server = createServer(async (req, res) => {
     if (req.url === '/toolchains') return json(res, 200, await toolchainStatus(input.user));
     if (req.url === '/toolchains/change') {
       if ([...sessions.values()].some(entry => entry.pi.user === input.user && (entry.initializing || entry.pi.busy || entry.pi.maintenance))) fail(409, '请先等待当前模型任务结束');
-      invalidateWorkspace(input.user);
       return json(res, 200, await startToolchain(input.user, input));
     }
     if (req.url === '/packages') return json(res, 200, await packageCatalog(input.query));
@@ -920,15 +916,12 @@ export const server = createServer(async (req, res) => {
       }
     }
     if (req.url === '/terminal/exec') {
-      assertUserIdle(input.user);
       if (typeof input.command !== 'string' || !input.command.trim() || input.command.length > 20000) fail(422, '命令无效');
-      const lease = (await sandbox('/lease', input.user)).token;
       const cwd = typeof input.cwd === 'string' && input.cwd.trim() ? input.cwd.trim() : '/workspace';
       if (!(cwd === '/workspace' || cwd.startsWith('/workspace/')) || /[\u0000\r\n]/.test(cwd) || cwd.split('/').includes('..')) fail(422, '终端工作目录无效');
       const sentinel = '__PWD_' + Date.now() + '__';
       const wrapped = `cd ${shellQuote(cwd)} 2>/dev/null || exit 1; ${input.command}\n__EC=$?; printf '\\n${sentinel}'; pwd; exit $__EC`;
-      const result = await sandboxTool(lease, { op: 'bash', cwd, command: wrapped, timeout: 15 });
-      invalidateWorkspace(input.user);
+      const result = await sandbox('/pty/exec', input.user, undefined, undefined, { cwd, command: wrapped }, 30000);
       let output = result.output || '';
       let nextCwd = cwd;
       const idx = output.lastIndexOf('\n' + sentinel);
@@ -943,7 +936,6 @@ export const server = createServer(async (req, res) => {
     // mounts and hardening as a tool run; the browser only relays keystrokes and
     // output, so no host command surface is exposed.
     if (req.url === '/terminal/open') {
-      assertUserIdle(input.user);
       const project = normalizeProjectId(input.project || 'default');
       const cols = Math.max(20, Math.min(Number(input.cols) || 100, 500));
       const rows = Math.max(5, Math.min(Number(input.rows) || 30, 300));
@@ -1134,10 +1126,8 @@ export const server = createServer(async (req, res) => {
       }
       return json(res, 200, result);
     }
-    // Workspace calls use an independent short lease; they never cancel model work.
-    if (req.url.startsWith('/files/') && [...sessions.values()].some(entry => entry.pi.user === input.user && entry.pi.busy)) invalidateWorkspace(input.user);
-    if (req.url === '/files/list') return json(res, 200, await listWorkspace(input.user, input.path, input.fresh === true));
-    if (req.url === '/files/preview') return json(res, 200, await previewWorkspace(input.user, input.path, input.limit, input.fresh === true));
+    if (req.url === '/files/list') return json(res, 200, await listWorkspace(input.user, input.path));
+    if (req.url === '/files/preview') return json(res, 200, await previewWorkspace(input.user, input.path, input.limit));
     if (req.url === '/files/download') {
       const { response, abort } = await sandboxStream('/files/download', input.user, { path: input.path, range: input.range });
       const headers = Object.fromEntries(['accept-ranges', 'content-range', 'content-length']

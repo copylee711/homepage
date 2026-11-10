@@ -1,5 +1,6 @@
 """Host control plane. Never mounted into a tool container; no arbitrary Docker API."""
 import base64
+from contextlib import ExitStack, contextmanager, nullcontext
 import hashlib
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -51,7 +52,12 @@ USER = re.compile(r"^[a-f0-9]{64}$")
 leases = {}
 locks = {}
 guard = threading.RLock()
+mount_guard = threading.Lock()
+terminal_guard = threading.Lock()
 slots = threading.BoundedSemaphore(4)
+file_slots = threading.BoundedSemaphore(2)
+terminal_exec_slots = threading.BoundedSemaphore(1)
+TERMINAL_MEMORY_MIB = max(64, int(os.environ.get('SANDBOX_TERMINAL_MEMORY_MIB', '1024')))
 CAPACITY = 16
 quotas = quota_module.Quotas(ROOT)
 active_memory = {}
@@ -74,7 +80,9 @@ def workspace(user):
     """A quota-sized ext4 image per user bounds both bytes and inodes persistently."""
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     image, mount = ROOT / (user + ".img"), ROOT / user
-    with guard:
+    if os.path.ismount(mount):
+        return mount
+    with mount_guard:
         if not image.exists():
             if len(list(ROOT.glob("*.img"))) >= CAPACITY:
                 raise ValueError("沙箱用户容量已满，请联系管理员")
@@ -93,7 +101,7 @@ def workspace(user):
     return mount
 
 
-def run_tool(user, value, lease):
+def run_tool(user, value, lease=None, *, owner=None):
     if value.get('op') == 'quota-info': return quotas.status(user)
     if value.get('op', '').startswith('background-'):
         with guard:
@@ -121,36 +129,41 @@ def run_tool(user, value, lease):
     if value.get("op") not in {"read", "ocr-source", "write", "mkdir", "access", "bash", "list", "search-files", "file-read", "file-write", "file-manage", "toolchain-list", "toolchain-change"}:
         raise ValueError("工具不支持")
     readonly = value.get("op") in {"list", "file-read", "read", "ocr-source", "search-files"}
-    key = user + ":view" if readonly else user
-    name = ("cl-sandbox-view-" if readonly else "cl-sandbox-") + user
+    key = f'{user}:{owner}' if owner else user + ":view" if readonly else user
+    prefix = {'files': 'cl-files-', 'terminal': 'cl-term-exec-'}.get(owner)
+    name = (prefix or ("cl-sandbox-view-" if readonly else "cl-sandbox-")) + user
     lock = locks.setdefault(key, threading.Lock())
     browsing = value.get("op") in {"list", "file-read", "file-write", "file-manage", "toolchain-list", "toolchain-change"}
     # Pi may issue parallel tool calls; serialize them within the user's workspace.
     # Read-only views use a separate container and never take the command lock.
-    if browsing:
+    if browsing and not owner:
         if not lock.acquire(blocking=False):
             raise ValueError("工作区正在执行任务，请稍后刷新")
-    elif not lock.acquire(timeout=185):
-        raise ValueError("等待当前用户的工具执行超时")
-    if not slots.acquire(blocking=False):
+    elif not lock.acquire(timeout=10 if owner else 185):
+        raise ValueError("等待当前工作区操作超时" if owner else "等待当前用户的工具执行超时")
+    capacity = {'files': file_slots, 'terminal': terminal_exec_slots}.get(owner, slots)
+    if not capacity.acquire(blocking=False):
         lock.release()
-        raise ValueError("沙箱繁忙，请稍后重试")
+        raise ValueError("工作区操作繁忙，请稍后重试" if owner else "沙箱繁忙，请稍后重试")
     try:
         mount = workspace(user)
-        with guard:
-            if leases.get(lease, {}).get("expires", 0) <= time.monotonic():
+        with nullcontext() if owner else guard:
+            if not owner and leases.get(lease, {}).get("expires", 0) <= time.monotonic():
                 raise ValueError("执行授权已失效")
             quota = quotas.get(user)
-            if sum(active_memory.values()) + backgrounds.memory_used() + quota['memory_mib'] > int(os.environ.get('SANDBOX_ACTIVE_MEMORY_MIB', '4096')):
-                raise ValueError("沙箱运行内存预算已满，请等待其他任务结束")
-            active_memory[key] = quota['memory_mib']
+            if owner:
+                quota = {**quota, 'memory_mib': min(quota['memory_mib'], 128 if owner == 'files' else 256)}
+            else:
+                if sum(active_memory.values()) + backgrounds.memory_used() + quota['memory_mib'] > int(os.environ.get('SANDBOX_ACTIVE_MEMORY_MIB', '4096')):
+                    raise ValueError("沙箱运行内存预算已满，请等待其他任务结束")
+                active_memory[key] = quota['memory_mib']
             value = {**value, '_timeout_limit': quota['timeout']}
-            mount_args = project_policy.mount_arguments(mount, leases[lease].get("policy"))
+            mount_args = project_policy.mount_arguments(mount, None if owner else leases[lease].get("policy"))
             if readonly:
                 mount_args = [arg + ",readonly" if arg.startswith("type=bind,") and ",readonly" not in arg else arg for arg in mount_args]
             created = subprocess.run([
                 "docker", "create", "-i", "--name", name,
-                "--label", "copylee.sandbox=1", "--network", "none" if readonly else NETWORK, "--read-only",
+                "--label", "copylee.sandbox=1", "--network", "none" if readonly or owner == 'files' else NETWORK, "--read-only",
                 "--sysctl", "net.ipv6.conf.all.disable_ipv6=1",
                 "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
                 "--memory", str(quota['memory_mib']) + 'm', "--memory-swap", str(quota['memory_mib']) + 'm', "--cpus", str(quota['cpus']), "--pids-limit", str(quota['pids']),
@@ -181,8 +194,9 @@ def run_tool(user, value, lease):
             docker("rm", "-f", name)
             proc.wait(timeout=10)
     finally:
-        with guard: active_memory.pop(key, None)
-        slots.release()
+        if not owner:
+            with guard: active_memory.pop(key, None)
+        capacity.release()
         lock.release()
 
 
@@ -536,16 +550,82 @@ def close_browser(user):
         item.close()
 
 
-def close_terminal(user):
-    with guard:
+def close_terminal(user, expected=None):
+    # Callers serialize a user's open/close lifecycle via the PTY lock.
+    with terminal_guard:
+        if expected is not None and terminals.get(user) is not expected:
+            return
         item = terminals.pop(user, None)
-        terminal_memory.pop(user, None)
     if item:
-        item.close()
+        try:
+            item.close()
+        finally:
+            with terminal_guard:
+                terminal_memory.pop(user, None)
 
 
 def cancel_terminal(user):
     docker('rm', '-f', 'cl-term-' + user)
+
+
+def workspace_parts(path, allow_root=False):
+    if not isinstance(path, str) or len(path) > 1024 or any(c in path for c in '\x00\r\n'):
+        raise ValueError('工作区路径无效')
+    if allow_root and path in ('', '.', '/workspace', '/workspace/'):
+        return []
+    parts = path.removeprefix('/workspace/').split('/')
+    if any(part in {'', '.', '..'} for part in parts):
+        raise ValueError('工作区路径无效')
+    return parts
+
+
+@contextmanager
+def workspace_directory(root, parts):
+    # Resolve each component relative to an already-open directory. The
+    # sandbox can rename entries at any time, so path validation alone is unsafe.
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    directory = os.open(root, flags)
+    try:
+        for part in parts:
+            child = os.open(part, flags, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        yield directory
+    finally:
+        os.close(directory)
+
+
+def open_workspace_file(root, parts):
+    with workspace_directory(root, parts[:-1]) as directory:
+        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+    file = os.fdopen(fd, 'rb')
+    info = os.fstat(file.fileno())
+    if not stat.S_ISREG(info.st_mode):
+        file.close()
+        raise FileNotFoundError('请选择普通文件')
+    return file, info.st_size
+
+
+def list_owner_workspace(root, parts):
+    relative = '/'.join(parts)
+    kinds = {'dir': 0, 'file': 1, 'symlink': 2, 'other': 3}
+    entries = []
+    with workspace_directory(root, parts) as directory, os.scandir(directory) as scan:
+        for entry in scan:
+            if not parts and entry.name == 'lost+found':
+                continue
+            try:
+                info = entry.stat(follow_symlinks=False)
+            except FileNotFoundError:
+                continue  # Removed by another workspace client during the scan.
+            kind = {stat.S_IFDIR: 'dir', stat.S_IFREG: 'file', stat.S_IFLNK: 'symlink'}.get(stat.S_IFMT(info.st_mode), 'other')
+            entries.append({'name': entry.name, 'path': '/'.join([*parts, entry.name]), 'type': kind,
+                            'size': 0 if kind == 'dir' else info.st_size, 'modified': int(info.st_mtime)})
+            if len(entries) == 500:
+                break
+    entries.sort(key=lambda entry: (kinds[entry['type']], entry['name'].casefold()))
+    return {'path': relative, 'parent': '/'.join(parts[:-1]) if parts else None,
+            'root': '/workspace', 'entries': entries, 'truncated': len(entries) == 500}
 
 
 backgrounds = background_module.BackgroundTasks(workspace, quotas, project_policy, IMAGE, NETWORK, active_memory)
@@ -576,7 +656,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, quotas.defaults())
             if self.path == '/quota/defaults/set':
                 return self.reply(200, quotas.save_defaults(value.get('quota')))
-            if self.path.startswith('/pty/'):
+            if self.path.startswith('/pty/') and self.path != '/pty/exec':
                 return self.pty(value)
             if self.path.startswith('/browser/'):
                 return self.browser(value)
@@ -598,17 +678,29 @@ class Handler(BaseHTTPRequestHandler):
                 return self.embedding(value)
             if self.path == '/files/download':
                 return self.download(user, value)
+            if self.path == '/files/operation':
+                return self.workspace_operation(user, value)
+            if self.path == '/pty/exec':
+                return self.reply(200, run_tool(user, {**value, 'op': 'bash', 'timeout': 15}, owner='terminal'))
             if self.path == '/background/stop-user':
                 backgrounds.stop_user(user); return self.reply(200, {'ok': True})
             if self.path in {"/quota/get", "/quota/set"}:
-                if self.path.endswith('/set') and any(t['state'] == 'running' for t in backgrounds.list(user)['tasks']): return self.reply(409, {'error': '请先停止该用户的后台任务'})
-                user_lock = locks.setdefault(user, threading.Lock())
-                if not user_lock.acquire(blocking=False):
-                    return self.reply(409, {"error": "该用户正在运行工具，请先等待任务结束"})
-                try:
-                    return self.reply(200, quotas.save(user, value.get('quota', {})) if self.path.endswith('/set') else quotas.status(user))
-                finally:
-                    user_lock.release()
+                if self.path == '/quota/get':
+                    return self.reply(200, quotas.status(user))
+                if any(t['state'] == 'running' for t in backgrounds.list(user)['tasks']):
+                    return self.reply(409, {'error': '请先停止该用户的后台任务'})
+                with ExitStack() as stack:
+                    for suffix in ('', ':view', ':files', ':terminal', ':pty'):
+                        lock = locks.setdefault(user + suffix, threading.Lock())
+                        if not lock.acquire(blocking=False):
+                            return self.reply(409, {'error': '工作区正在使用，请等待当前操作结束'})
+                        stack.callback(lock.release)
+                    with terminal_guard:
+                        if user in terminals:
+                            return self.reply(409, {'error': '请先关闭该用户的交互终端'})
+                    with mount_guard:
+                        result = quotas.save(user, value.get('quota', {}))
+                    return self.reply(200, result)
             if self.path == "/cancel":
                 with guard:
                     for key, lease in list(leases.items()):
@@ -669,31 +761,42 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             web_slots.release()
 
-    def download(self, user, value):
-        path = value.get('path')
-        if not isinstance(path, str) or len(path) > 1024 or any(c in path for c in '\x00\r\n'):
-            return self.reply(422, {'error': '工作区路径无效'})
-        parts = path.removeprefix('/workspace/').split('/')
-        if any(part in {'', '.', '..'} for part in parts):
-            return self.reply(422, {'error': '工作区路径无效'})
-        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-        directory = os.open(workspace(user), flags)
+    def workspace_operation(self, user, value):
+        op = value.get('op')
+        if op in {'file-write', 'file-manage'}:
+            return self.reply(200, run_tool(user, value, owner='files'))
+        if op not in {'list', 'file-read'}:
+            return self.reply(422, {'error': '文件操作无效'})
         try:
-            for part in parts[:-1]:
-                child = os.open(part, flags, dir_fd=directory)
-                os.close(directory)
-                directory = child
-            fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+            parts = workspace_parts(value.get('path'), allow_root=op == 'list')
+        except ValueError as error:
+            return self.reply(422, {'error': str(error)})
+        root = workspace(user)
+        try:
+            if op == 'list':
+                return self.reply(200, list_owner_workspace(root, parts))
+            limit = max(1, min(15 * 1024 * 1024, int(value.get('limit') or 65536)))
+            file, size = open_workspace_file(root, parts)
+            with file:
+                data = file.read(limit + 1)
+        except OSError:
+            return self.reply(404, {'error': '文件或目录不存在或不可读取'})
+        truncated = len(data) > limit or size > limit
+        return self.reply(200, {'data': base64.b64encode(data[:limit]).decode(), 'size': size,
+                                'path': '/'.join(parts), 'truncated': truncated,
+                                'revision': None if truncated else hashlib.sha256(data).hexdigest()})
+
+    def download(self, user, value):
+        try:
+            parts = workspace_parts(value.get('path'))
+        except ValueError as error:
+            return self.reply(422, {'error': str(error)})
+        root = workspace(user)
+        try:
+            file, size = open_workspace_file(root, parts)
         except OSError:
             return self.reply(404, {'error': '文件不存在或不可下载'})
-        finally:
-            os.close(directory)
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode):
-            os.close(fd)
-            return self.reply(404, {'error': '请选择普通文件'})
-        with os.fdopen(fd, 'rb') as file:
-            size = info.st_size
+        with file:
             start, end, status = 0, size - 1, 200
             requested = value.get('range')
             if requested:
@@ -735,23 +838,29 @@ class Handler(BaseHTTPRequestHandler):
         if not USER.fullmatch(user):
             return self.reply(422, {'error': '用户无效'})
         if self.path == '/pty/open':
-            close_terminal(user)
-            quota = quotas.get(user)
             rules = project_policy.policy(value.get('policy'))
-            with guard:
-                used = sum(active_memory.values()) + backgrounds.memory_used() + sum(terminal_memory.values()) + sum(browser_memory.values())
-                if used + quota['memory_mib'] > int(os.environ.get('SANDBOX_ACTIVE_MEMORY_MIB', '4096')):
-                    return self.reply(409, {'error': '沙箱运行内存预算已满，请稍后重试'})
-                terminal_memory[user] = quota['memory_mib']
-            try:
-                item = Terminal(user, workspace(user), rules, quota, value.get('cols'), value.get('rows'))
-            except ValueError as error:
-                with guard: terminal_memory.pop(user, None)
-                return self.reply(400, {'error': str(error)})
-            with guard:
-                terminals[user] = item
+            with locks.setdefault(user + ':pty', threading.Lock()):
+                close_terminal(user)
+                quota = quotas.get(user)
+                quota['memory_mib'] = min(quota['memory_mib'], TERMINAL_MEMORY_MIB)
+                with terminal_guard:
+                    if sum(terminal_memory.values()) + quota['memory_mib'] > TERMINAL_MEMORY_MIB:
+                        return self.reply(409, {'error': '交互终端内存预算已满，请稍后重试'})
+                    terminal_memory[user] = quota['memory_mib']
+                try:
+                    item = Terminal(user, workspace(user), rules, quota, value.get('cols'), value.get('rows'))
+                except Exception:
+                    with terminal_guard:
+                        terminal_memory.pop(user, None)
+                    raise
+                with terminal_guard:
+                    terminals[user] = item
             return self.reply(200, {'ok': True})
-        with guard:
+        if self.path == '/pty/close':
+            with locks.setdefault(user + ':pty', threading.Lock()):
+                close_terminal(user)
+            return self.reply(200, {'ok': True})
+        with terminal_guard:
             item = terminals.get(user)
         if not item:
             return self.reply(404, {'error': '终端未打开'})
@@ -767,9 +876,6 @@ class Handler(BaseHTTPRequestHandler):
             return self.pty_stream(item, int(value.get('after') or 0))
         if self.path == '/pty/read':
             return self.reply(200, item.read(int(value.get('after') or 0), float(value.get('wait') or 0)))
-        if self.path == '/pty/close':
-            close_terminal(user)
-            return self.reply(200, {'ok': True})
         return self.reply(404, {'error': '接口不存在'})
 
     def browser_input(self, value):
@@ -816,7 +922,7 @@ class Handler(BaseHTTPRequestHandler):
             width = max(320, min(int(value.get('width') or 1280), 1920))
             height = max(320, min(int(value.get('height') or 800), 1400))
             with guard:
-                used = sum(active_memory.values()) + backgrounds.memory_used() + sum(terminal_memory.values()) + sum(browser_memory.values())
+                used = sum(active_memory.values()) + backgrounds.memory_used() + sum(browser_memory.values())
                 if used + quota['memory_mib'] > int(os.environ.get('SANDBOX_ACTIVE_MEMORY_MIB', '4096')):
                     return self.reply(409, {'error': '沙箱运行内存预算已满，请稍后重试'})
                 browser_memory[user] = quota['memory_mib']
@@ -1218,18 +1324,29 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
 
+def sweep_terminals():
+    while True:
+        time.sleep(1)
+        with terminal_guard:
+            stale = [(user, item) for user, item in terminals.items()
+                     if item.closed or time.monotonic() - item.last_use > TERMINAL_IDLE]
+        for user, item in stale:
+            lock = locks.setdefault(user + ':pty', threading.Lock())
+            if not lock.acquire(blocking=False):
+                continue
+            try:
+                if item.closed or time.monotonic() - item.last_use > TERMINAL_IDLE:
+                    close_terminal(user, item)
+            finally:
+                lock.release()
+
+
 def sweep():
     while True:
         time.sleep(1)
         with guard:
-            stale = [user for user, item in terminals.items()
-                     if item.closed or time.monotonic() - item.last_use > TERMINAL_IDLE]
             stale_browsers = [user for user, item in browsers.items()
                               if item.closed or time.monotonic() - item.last_use > BROWSER_IDLE]
-        # Removing a terminal shells out to docker; keep that off the guard so a
-        # slow container teardown cannot stall every other sandbox request.
-        for user in stale:
-            close_terminal(user)
         for user in stale_browsers:
             close_browser(user)
         with guard:
@@ -1249,4 +1366,5 @@ if __name__ == "__main__":
     if old:
         docker("rm", "-f", *old)
     threading.Thread(target=sweep, daemon=True).start()
+    threading.Thread(target=sweep_terminals, daemon=True).start()
     ThreadingHTTPServer(("192.168.84.1", 18082), Handler).serve_forever()

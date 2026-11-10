@@ -6,12 +6,9 @@ const broker = createServer(async (req, res) => {
   let text = ''; for await (const chunk of req) text += chunk;
   const input = JSON.parse(text);
   res.setHeader('Content-Type', 'application/json');
-  if (req.url === '/lease') {
-    assert.equal(req.headers.authorization, 'Bearer test-sandbox-control');
-    assert.equal(input.user, 'a'.repeat(64));
-    return res.end(JSON.stringify({ token: 'scoped-lease' }));
-  }
-  assert.equal(req.headers.authorization, 'Bearer scoped-lease');
+  assert.equal(req.url, '/files/operation');
+  assert.equal(req.headers.authorization, 'Bearer test-sandbox-control');
+  assert.equal(input.user, 'a'.repeat(64));
   assert.equal(input.op, 'file-read');
   res.end(JSON.stringify({ data: Buffer.from('complete').toString('base64'), size: large ? 1048577 : 8, truncated: large }));
 });
