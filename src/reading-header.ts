@@ -7,12 +7,13 @@ import './styles/base.css'
 
 const host = document.getElementById('reading-header')
 if (host?.dataset.name) {
-  createApp(SiteHeader, { readingSite: { name: host.dataset.name, cloud: host.dataset.cloud || '' } }).mount(host)
+  const cloud = host.dataset.siteCloud ?? host.dataset.cloud ?? ''
+  createApp(SiteHeader, { readingSite: { name: host.dataset.name, cloud } }).mount(host)
 }
 
 async function bindReadingAccount() {
   await loadAccount()
-  document.querySelectorAll<HTMLElement>('[data-cloud]').forEach(el => { el.hidden = !features.value.drive })
+  document.querySelectorAll<HTMLAnchorElement>('.reading-footer a[data-cloud]').forEach(el => { el.hidden = !features.value.drive })
   document.querySelectorAll<HTMLElement>('.reading-terms').forEach(el => { el.hidden = !(features.value.drive || features.value.images) })
   const button = document.querySelector<HTMLButtonElement>('.fav-button')
   const label = button?.querySelector('span')

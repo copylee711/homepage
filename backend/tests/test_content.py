@@ -473,6 +473,7 @@ def test_reading_pages_load_shared_header_assets(server):
         page = client.get(route)
         assert page.status_code == (404 if route.endswith("does-not-exist") else 200)
         assert 'id="reading-header"' in page.text
+        assert 'data-site-cloud=' in page.text.split('id="reading-header"', 1)[1].split('>', 1)[0]
         assert 'src="/assets/header.js"' in page.text
         assert 'href="/assets/header.css"' in page.text
         assert 'class="reading-nav"' not in page.text

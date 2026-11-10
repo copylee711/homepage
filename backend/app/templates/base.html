@@ -20,7 +20,7 @@
   <script src="/content-assets/theme.js"></script>
 </head>
 <body data-slug="{{ article.slug if article is defined and article else '' }}" data-post-revision="{{ article.public_revision if article is defined and article else 0 }}">
-  <div id="reading-header" data-name="{{ site.name }}" data-cloud="{{ site.cloud }}">
+  <div id="reading-header" data-name="{{ site.name }}" data-site-cloud="{{ site.cloud }}">
     <header class="reading-header"><div class="container reading-bar">
       <a class="reading-brand" href="/#top" aria-label="{{ site.name }} 主页">{% include "logo.html" %}<span>{{ site.name }}</span></a>
       <a href="/account">账户</a>
