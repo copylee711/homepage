@@ -51,7 +51,7 @@ def iris(request: Request, action: str, payload: dict, *, timeout: float):
         result = response.json()
     except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(503, "暂时无法连接 Iris，请稍后重试") from exc
-    if response.status_code in {409, 422} and isinstance(result, dict):
+    if response.status_code in {404, 409, 422} and isinstance(result, dict):
         raise HTTPException(response.status_code, result.get("error") or "Iris 拒绝了此操作")
     if response.status_code != 200 or not isinstance(result, dict):
         raise HTTPException(503, "Iris 权限服务暂不可用")
@@ -118,4 +118,112 @@ def save_quota(body: QuotaChange, request: Request,
     }, timeout=140)
     audit.record("admin.iris_quota", request, user=admin.user_id, target=body.user_id,
                  ok=True, quota=result.get("quota"))
+    return result
+
+
+class ProviderWrite(BaseModel):
+    config: dict
+
+
+class ProviderDelete(BaseModel):
+    id: str = Field(min_length=1, max_length=40, pattern=r"^[a-z][a-z0-9-]{0,39}$")
+
+
+class ProviderDefault(ProviderDelete):
+    model: str = Field(min_length=1, max_length=160)
+
+
+class DailyQuota(BaseModel):
+    daily_requests: int = Field(ge=0, le=1_000_000_000)
+    daily_tokens: int = Field(ge=0, le=1_000_000_000)
+
+
+class ModelQuotaInput(BaseModel):
+    daily_requests: int | None = Field(default=None, ge=0, le=1_000_000_000)
+    daily_tokens: int | None = Field(default=None, ge=0, le=1_000_000_000)
+
+
+class ModelQuotaChange(ModelQuotaInput):
+    user_id: str = Field(min_length=1, max_length=128)
+
+
+@router.get("/iris/providers")
+def iris_providers(request: Request, session: Session = Depends(agent_sso.database)):
+    admin = current_session(request, session)
+    return iris(request, "providers", {"actor": admin.user_id}, timeout=15)
+
+
+@router.post("/iris/providers")
+def save_iris_provider(body: ProviderWrite, request: Request,
+                       session: Session = Depends(agent_sso.database)):
+    admin = current_session(request, session, write=True)
+    result = iris(request, "providers/save", {"actor": admin.user_id, "config": body.config}, timeout=20)
+    audit.record("admin.iris_provider", request, user=admin.user_id, ok=True,
+                 provider=str((body.config or {}).get("id") or "")[:40])
+    return result
+
+
+@router.post("/iris/providers/delete")
+def delete_iris_provider(body: ProviderDelete, request: Request,
+                         session: Session = Depends(agent_sso.database)):
+    admin = current_session(request, session, write=True)
+    result = iris(request, "providers/delete", {"actor": admin.user_id, "id": body.id}, timeout=20)
+    audit.record("admin.iris_provider_delete", request, user=admin.user_id, ok=True, provider=body.id)
+    return result
+
+
+@router.post("/iris/providers/test")
+def test_iris_provider(body: ProviderWrite, request: Request,
+                       session: Session = Depends(agent_sso.database)):
+    admin = current_session(request, session, write=True)
+    return iris(request, "providers/test", {"actor": admin.user_id, "config": body.config}, timeout=45)
+
+
+@router.post("/iris/providers/models")
+def probe_iris_provider(body: ProviderWrite, request: Request,
+                        session: Session = Depends(agent_sso.database)):
+    admin = current_session(request, session, write=True)
+    return iris(request, "providers/models", {"actor": admin.user_id, "config": body.config}, timeout=35)
+
+
+@router.post("/iris/providers/default")
+def default_iris_provider(body: ProviderDefault, request: Request,
+                          session: Session = Depends(agent_sso.database)):
+    admin = current_session(request, session, write=True)
+    result = iris(request, "providers/default",
+                  {"actor": admin.user_id, "id": body.id, "model": body.model}, timeout=20)
+    audit.record("admin.iris_provider_default", request, user=admin.user_id, ok=True,
+                 provider=body.id, model=body.model)
+    return result
+
+
+@router.put("/iris/providers/quota")
+def save_iris_provider_quota(body: DailyQuota, request: Request,
+                             session: Session = Depends(agent_sso.database)):
+    admin = current_session(request, session, write=True)
+    result = iris(request, "providers/quota",
+                  {"actor": admin.user_id, "quota": body.model_dump()}, timeout=15)
+    audit.record("admin.iris_model_quota", request, user=admin.user_id, ok=True, **body.model_dump())
+    return result
+
+
+@router.get("/iris/model-quota")
+def read_model_quota(request: Request, user_id: str = Query(min_length=1, max_length=128),
+                     session: Session = Depends(agent_sso.database)):
+    admin = current_session(request, session)
+    quota_target(session, user_id)
+    return iris(request, "model-quota", {"actor": admin.user_id, "target": user_id}, timeout=15)
+
+
+@router.post("/iris/model-quota")
+def save_model_quota(body: ModelQuotaChange, request: Request,
+                     session: Session = Depends(agent_sso.database)):
+    admin = current_session(request, session, write=True)
+    quota_target(session, body.user_id)
+    result = iris(request, "model-quota/save", {
+        "actor": admin.user_id, "target": body.user_id,
+        "quota": {"daily_requests": body.daily_requests, "daily_tokens": body.daily_tokens},
+    }, timeout=15)
+    audit.record("admin.iris_model_quota_user", request, user=admin.user_id, target=body.user_id,
+                 ok=True, daily_requests=body.daily_requests, daily_tokens=body.daily_tokens)
     return result

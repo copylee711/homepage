@@ -1135,7 +1135,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def permissions_access(request: Request, session: Session = Depends(database)):
         section = request.query_params.get("section")
         target = "/permissions" + ("?" + urlencode({"section": section})
-                                   if section in {"iris", "defaults"} else "")
+                                   if section in {"iris", "models", "defaults"} else "")
         try:
             user, _ = current_user(request, session)
         except HTTPException as exc:

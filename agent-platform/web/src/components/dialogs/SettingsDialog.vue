@@ -29,7 +29,7 @@ const navItems = computed(() => {
     { id: 'memory', icon: 'edit', label: '人设与记忆', show: session.canExecute },
     { id: 'search', icon: 'search', label: '联网搜索', show: session.canExecute },
     { id: 'ocr', icon: 'file', label: '扫描件识别', show: session.canExecute },
-    { id: 'providers', icon: 'sparkle', label: '模型与供应商', show: session.isAdmin },
+    { id: 'providers', icon: 'sparkle', label: '模型与供应商', show: session.canExecute },
     { id: 'grants', icon: 'users', label: '执行授权与配额', show: session.isAdmin },
     { id: 'packages', icon: 'package', label: '技能资源市场', show: session.isAdmin },
     { id: 'toolchains', icon: 'terminal', label: '工具链', show: session.canExecute },
@@ -208,7 +208,7 @@ async function remove(c: any) {
         <MemoryPanel v-else-if="ui.settingsTab === 'memory' && session.canExecute" />
         <SearchPanel v-else-if="ui.settingsTab === 'search' && session.canExecute" />
         <OcrPanel v-else-if="ui.settingsTab === 'ocr' && session.canExecute" />
-        <ProvidersPanel v-else-if="ui.settingsTab === 'providers' && session.isAdmin" />
+        <ProvidersPanel v-else-if="ui.settingsTab === 'providers' && session.canExecute" />
         <div v-else-if="ui.settingsTab === 'grants' && session.isAdmin" class="settings-pad">
           <p>执行授权与沙箱资源配额已迁移到主站权限控制台。</p>
           <a class="btn btn-solid" href="https://copylee.cn/permissions?section=iris" target="_blank" rel="noopener">打开权限控制台 ↗</a>

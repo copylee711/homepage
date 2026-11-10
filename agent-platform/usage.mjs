@@ -1,5 +1,5 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { loadProviders, modelLimits } from './providers.mjs';
+import { activeProvider, modelLimits, providersFor } from './providers.mjs';
 
 // Token and cost totals read straight from Pi session files, so viewing usage
 // never starts a model process. Parsed files are cached by size and mtime.
@@ -34,7 +34,7 @@ async function fileUsage(path, providers) {
 
 export async function usageSummary(user, titles = {}, days = 30, root = '/data/sessions') {
   const dir = `${root}/${user}`;
-  const providers = (await loadProviders()).providers;
+  const providers = await providersFor(user);
   let names = [];
   try { names = (await readdir(dir)).filter(n => n.endsWith('.jsonl')); } catch {}
   const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
@@ -71,9 +71,8 @@ function contentChars(content) {
 }
 
 export async function sessionUsageStats(user, thread, root = '/data/sessions') {
-  const providersData = await loadProviders();
-  const providers = providersData.providers || [];
-  const activeProv = providers.find(p => p.id === providersData.active) || providers[0];
+  const providers = await providersFor(user);
+  const activeProv = await activeProvider(user);
   const defaultLimits = activeProv ? modelLimits(activeProv, activeProv.model || '') : { contextWindow: 128000, maxTokens: 16384 };
 
   const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };

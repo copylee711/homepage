@@ -112,17 +112,19 @@ function distAsset(pathname) {
   if (!mimeByExt[ext]) return null;
   return { rel: clean.replace(/^\//, ''), type: mimeByExt[ext], immutable: clean.startsWith('/assets/') };
 }
-const modelCache = { label: '', expires: 0 };
+const modelCache = new Map();
 async function modelName(user) {
-  if (Date.now() < modelCache.expires) return modelCache.label;
+  const hit = modelCache.get(user);
+  if (hit && Date.now() < hit.expires) return hit.label;
+  let label = hit?.label || '';
   try {
     const response = await runner('/model', user, {}, AbortSignal.timeout(2000));
     const value = await response.json();
-    if (typeof value.label === 'string' && value.label) modelCache.label = value.label;
+    if (typeof value.label === 'string' && value.label) label = value.label;
   } catch {}
-  if (!modelCache.label) modelCache.label = modelLabel(process.env.PI_MODEL || '');
-  modelCache.expires = Date.now() + 30000;
-  return modelCache.label;
+  if (!label) label = modelLabel(process.env.PI_MODEL || '');
+  modelCache.set(user, { label, expires: Date.now() + 30000 });
+  return label;
 }
 function filePath(url) {
   const value = url.searchParams.get('path') || '';
@@ -187,15 +189,16 @@ export const server = createServer(async (req, res) => {
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob: https:; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   try {
     const url = new URL(req.url, publicURL);
-    const permissionAction = url.pathname.match(/^\/auth\/permissions\/(quota|quota\/save|defaults|defaults\/save|abort)$/)?.[1];
+    const permissionAction = url.pathname.match(/^\/auth\/permissions\/(quota\/save|quota|defaults\/save|defaults|abort|providers\/save|providers\/delete|providers\/test|providers\/models|providers\/default|providers\/quota|providers|model-quota\/save|model-quota)$/)?.[1];
     if (permissionAction) {
       if (req.method !== 'POST') fail(405, '接口仅支持 POST');
       if (!equal(req.headers['x-agent-client-secret'] || '', secret)) {
         return json(res, 401, { error: '应用认证失败' });
       }
-      const { actor, target, quota } = (await body(req)) ?? {};
-      const defaults = permissionAction.startsWith('defaults');
-      if ((defaults ? [actor] : [actor, target]).some(id => typeof id !== 'string' || !id || id.length > 128)) {
+      const payload = (await body(req)) ?? {};
+      const { actor, target, quota, config, id, model } = payload;
+      const needsTarget = ['abort', 'quota', 'quota/save', 'model-quota', 'model-quota/save'].includes(permissionAction);
+      if ((needsTarget ? [actor, target] : [actor]).some(value => typeof value !== 'string' || !value || value.length > 128)) {
         fail(422, '用户标识无效');
       }
       if (permissionAction === 'abort') {
@@ -203,13 +206,28 @@ export const server = createServer(async (req, res) => {
         await runner('/abort', target, {}, AbortSignal.timeout(4000));
         return json(res, 200, { ok: true });
       }
-      if (defaults) {
+      if (permissionAction === 'defaults' || permissionAction === 'defaults/save') {
         const response = await runner('/quotas/' + permissionAction, actor, { quota }, AbortSignal.timeout(12000));
         return json(res, 200, await response.json());
       }
-      const saving = permissionAction === 'quota/save';
-      const response = await runner(saving ? '/quotas/save' : '/quotas', actor,
-        saving ? { target, quota } : { target }, AbortSignal.timeout(saving ? 135000 : 12000));
+      if (permissionAction === 'quota' || permissionAction === 'quota/save') {
+        const saving = permissionAction === 'quota/save';
+        const response = await runner(saving ? '/quotas/save' : '/quotas', actor,
+          saving ? { target, quota } : { target }, AbortSignal.timeout(saving ? 135000 : 12000));
+        return json(res, 200, await response.json());
+      }
+      const providerRoute = {
+        providers: ['/shared-providers', {}, 12000],
+        'providers/save': ['/shared-providers/save', { config }, 20000],
+        'providers/delete': ['/shared-providers/delete', { id }, 20000],
+        'providers/test': ['/shared-providers/test', { config }, 40000],
+        'providers/models': ['/shared-providers/models', { config }, 30000],
+        'providers/default': ['/shared-providers/default', { id, model }, 20000],
+        'providers/quota': ['/shared-providers/quota', { quota }, 12000],
+        'model-quota': ['/model-quota', { target }, 12000],
+        'model-quota/save': ['/model-quota/save', { target, quota }, 12000],
+      }[permissionAction];
+      const response = await runner(providerRoute[0], actor, providerRoute[1], AbortSignal.timeout(providerRoute[2]));
       return json(res, 200, await response.json());
     }
       if (url.pathname.startsWith('/preview/')) {
@@ -311,7 +329,6 @@ export const server = createServer(async (req, res) => {
         fail(404, '接口不存在');
       }
       if (!auth.can_execute) fail(403, '此账户尚未获得 Agent 执行权限');
-      if (url.pathname.startsWith('/api/providers') && !auth.admin) fail(403, '仅管理员可管理供应商');
       if (url.pathname === '/api/toolchains' && req.method === 'GET') {
         const response = await runner('/toolchains', auth.user.id, {}); return json(res, 200, await response.json());
       }
@@ -484,17 +501,17 @@ export const server = createServer(async (req, res) => {
       }
       if (['/api/providers/test', '/api/providers/models', '/api/providers/save'].includes(url.pathname)) {
         const response = await runner(url.pathname.replace('/api', ''), auth.user.id, { config: input.config });
-        if (url.pathname === '/api/providers/save') modelCache.expires = 0;
+        if (url.pathname === '/api/providers/save') modelCache.delete(auth.user.id);
         return json(res, 200, await response.json());
       }
       if (url.pathname === '/api/providers/delete') {
         const response = await runner('/providers/delete', auth.user.id, { id: input.id });
-        modelCache.expires = 0;
+        modelCache.delete(auth.user.id);
         return json(res, 200, await response.json());
       }
       if (url.pathname === '/api/providers/activate') {
         const response = await runner('/providers/activate', auth.user.id, { id: input.id, model: input.model });
-        modelCache.expires = 0;
+        modelCache.delete(auth.user.id);
         return json(res, 200, await response.json());
       }
 

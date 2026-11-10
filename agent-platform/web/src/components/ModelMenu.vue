@@ -44,12 +44,16 @@ const groups = computed(() => {
   if (!configs.value) return [];
   const q = query.value.trim().toLowerCase();
   const out: any[] = [];
-  for (const p of configs.value.providers || []) {
+  const lists = [
+    ...(configs.value.shared || []).map((p: any) => ({ ...p, shared: true })),
+    ...(configs.value.providers || []),
+  ];
+  for (const p of lists) {
     const models: string[] = (Array.isArray(p.models) && p.models.length ? p.models : [p.model]).filter(Boolean);
     const items = models
       .filter(m => !q || (p.name + ' ' + m).toLowerCase().includes(q))
       .map(m => ({ provider: p, model: m }));
-    if (items.length) out.push({ key: p.id, label: p.name, items });
+    if (items.length) out.push({ key: (p.shared ? 'shared:' : 'mine:') + p.id, label: p.name + (p.shared ? ' · 共享' : ''), items });
   }
   return out;
 });
@@ -59,7 +63,6 @@ function isActive(p: any, model: string) { return p.id === configs.value.active 
 
 async function pick(p: any, model: string) {
   if (isActive(p, model)) { emit('close'); return; }
-  if (!session.isAdmin) { ui.toast('模型由管理员配置，无法切换。', { tone: 'info' }); return; }
   try { await session.activateModel(p.id, model); ui.toast('已切换到 ' + model, { tone: 'success' }); emit('close'); }
   catch (e: any) { ui.toast(e.message, { tone: 'error' }); }
 }
@@ -130,8 +133,8 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <button type="button" class="model-menu-manage" :disabled="!session.isAdmin" @click="manage">
-        <Icon name="settings" :size="15" /><span>{{ session.isAdmin ? '模型与供应商设置…' : '模型由管理员配置' }}</span>
+      <button type="button" class="model-menu-manage" :disabled="!session.canExecute" @click="manage">
+        <Icon name="settings" :size="15" /><span>模型与供应商设置…</span>
       </button>
     </div>
   </teleport>

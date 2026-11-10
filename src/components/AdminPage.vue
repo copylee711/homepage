@@ -21,7 +21,7 @@ type SyncState = { last_success: string | null; last_error: string; items: unkno
 const { theme, toggle } = useTheme()
 const csrf = ref(''), loading = ref(true), busy = ref(false), error = ref(''), message = ref('')
 const next = new URLSearchParams(location.search).get('next')
-const permissionsReturn = ['/permissions', '/permissions?section=iris', '/permissions?section=defaults'].includes(next ?? '') ? next : ''
+const permissionsReturn = ['/permissions', '/permissions?section=iris', '/permissions?section=models', '/permissions?section=defaults'].includes(next ?? '') ? next : ''
 // 成功提示 4 秒后自动消失；错误提示保留到手动关闭或下一次操作。
 let messageTimer: ReturnType<typeof setTimeout> | undefined
 watch(message, value => { clearTimeout(messageTimer); if (value) messageTimer = setTimeout(() => { message.value = '' }, 4000) })

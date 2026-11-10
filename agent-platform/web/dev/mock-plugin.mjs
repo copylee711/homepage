@@ -231,8 +231,10 @@ function listDir(dirPath) {
 const providers = {
   active: 'opencode-go',
   activeModel: 'deepseek-v4.1-flash',
+  shared: [
+    { id: 'opencode-go', name: 'OpenCode Go', api: 'openai-completions', baseUrl: 'https://api.opencode.example/v1', model: 'deepseek-v4.1-flash', models: ['deepseek-v4.1-flash', 'deepseek-v4.1', 'qwen3-max', 'kimi-k3'], proxy: false, reasoning: false, hasKey: true, shared: true },
+  ],
   providers: [
-    { id: 'opencode-go', name: 'OpenCode Go', api: 'openai-completions', baseUrl: 'https://api.opencode.example/v1', model: 'deepseek-v4.1-flash', models: ['deepseek-v4.1-flash', 'deepseek-v4.1', 'qwen3-max', 'kimi-k3'], proxy: false, reasoning: false, hasKey: true },
     { id: 'anthropic', name: 'Anthropic', api: 'anthropic-messages', baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-5-5', models: ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5'], proxy: true, reasoning: true, hasKey: true },
     { id: 'openai', name: 'OpenAI GPT', api: 'openai-responses', baseUrl: 'https://api.openai.com/v1', model: 'gpt-5', models: ['gpt-5', 'gpt-5-mini'], proxy: false, reasoning: true, hasKey: true },
   ],
@@ -242,7 +244,7 @@ const providers = {
   ],
 };
 function activeName() {
-  const p = providers.providers.find(x => x.id === providers.active);
+  const p = [...providers.shared, ...providers.providers].find(x => x.id === providers.active);
   return providers.activeModel || p?.model || p?.name;
 }
 
@@ -1017,6 +1019,7 @@ export function devMock(widgetMath) {
             reasoning: !!cfg.reasoning,
             hasKey: true,
           };
+          if (providers.shared.some(x => x.id === item.id)) return send({ error: '该标识已被共享供应商使用' }, 422);
           const idx = providers.providers.findIndex(x => x.id === item.id);
           if (idx >= 0) providers.providers[idx] = item;
           else providers.providers.push(item);
@@ -1025,16 +1028,16 @@ export function devMock(widgetMath) {
           return send({ ...providers, model: activeName() });
         }
         if (path === '/api/providers/delete') {
-          if (providers.providers.length <= 1) return send({ error: '至少保留一个已配置的供应商' }, 422);
           providers.providers = providers.providers.filter(x => x.id !== body.id);
           if (providers.active === body.id) {
-            providers.active = providers.providers[0].id;
-            providers.activeModel = providers.providers[0].model;
+            const next = providers.shared[0];
+            providers.active = next.id;
+            providers.activeModel = next.model;
           }
           return send({ ...providers, model: activeName() });
         }
         if (path === '/api/providers/activate') {
-          const target = providers.providers.find(x => x.id === body.id);
+          const target = [...providers.shared, ...providers.providers].find(x => x.id === body.id);
           if (!target) return send({ error: '未找到该供应商' }, 404);
           providers.active = target.id;
           providers.activeModel = body.model && target.models.includes(body.model) ? body.model : target.model;

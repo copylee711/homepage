@@ -27,7 +27,7 @@ Caddy 转发至 xa 时只保留两个 ai 专属 Cookie，剥离既有 Cloud 兼�
 - `web/`：Iris 控制台，Vue 3 + Vite 单页应用（`src/` 源码、`package.json`、`vite.config.mjs`）。`Dockerfile.gateway` 多阶段构建先 `npm ci && npm run build` 生成 `web/dist/`，网关据此提供静态资源；`web/dist`、`web/node_modules` 不进构建上下文。自建中性设计令牌，不再复制主站 `tokens.css`。
 - `.env.example`、`Caddyfile.example`、`*.service.example`：配置模板；必须按实际环境生成。
 - 服务器 `.env`：客户端密钥、内部 runner 密钥、OpenCode Go 密钥，root 0600，禁止提交。
-- `data/providers.json`、`data/agent/models.json`：管理员保存的供应商密钥，服务用户 0600；不回显给浏览器。
+- `data/providers.json`、`data/agent/models.json`：共享供应商密钥，服务用户 0600；不回显给浏览器。个人供应商在 `data/personal-providers/`，每人的当前模型在 `data/model-choice/`，共享模型用量在 `data/model-usage/`。每个 Pi 进程使用 `data/agent-users/<用户>/`，只包含共享目录和该用户自己的密钥。
 - `data/sessions/<用户哈希>/<对话 UUID>.jsonl`：Pi 会话；`data/turns/<用户哈希>/<对话 UUID>.ndjson`：该回合已脱敏的事件日志，供断线后重连，约 30 分钟；`/var/lib/copylee-sandboxes/<用户哈希>.img`：256 MiB 持久化工作区（主机端，不在 runner 中）。
   两者以及 `secrets/` 均被 Git 和 Docker 构建上下文忽略。备份这些目录时按敏感数据处理。
 

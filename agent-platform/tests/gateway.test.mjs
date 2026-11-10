@@ -89,15 +89,20 @@ test('server authorization and CSRF protect execution and provider settings', as
   assert.equal(me.headers.get('referrer-policy'), 'no-referrer');
 });
 
-test('an execution grant never grants provider or user-management privileges', async () => {
+test('an execution grant allows personal providers but not user management', async () => {
   admin = false; granted = true;
   const cookie = 'copylee_ai=' + 't'.repeat(64);
   const me = await (await fetch(base + '/api/me', { headers: { cookie } })).json();
   assert.equal(me.can_execute, true); assert.equal(me.admin, false);
-  for (const path of ['/api/providers', '/api/grants', '/api/packages', '/api/quotas?user_id=other']) {
+  for (const path of ['/api/grants', '/api/packages', '/api/quotas?user_id=other']) {
     assert.equal((await fetch(base + path, { headers: { cookie } })).status, 403);
   }
-  for (const path of ['/api/providers/save', '/api/providers/test', '/api/providers/models', '/api/providers/delete', '/api/providers/activate', '/api/grants/save', '/api/packages/change', '/api/quotas/save']) {
+  assert.equal((await fetch(base + '/api/providers', { headers: { cookie } })).status, 200);
+  for (const path of ['/api/providers/save', '/api/providers/test', '/api/providers/models', '/api/providers/delete', '/api/providers/activate']) {
+    assert.equal((await fetch(base + path, { method: 'POST', headers: { cookie,
+      Origin: 'http://127.0.0.1', 'X-CSRF-Token': me.csrf }, body: JSON.stringify({ id: 'mine', model: 'x', config: { id: 'mine' } }) })).status, 200);
+  }
+  for (const path of ['/api/grants/save', '/api/packages/change', '/api/quotas/save']) {
     assert.equal((await fetch(base + path, { method: 'POST', headers: { cookie,
       Origin: 'http://127.0.0.1', 'X-CSRF-Token': me.csrf }, body: JSON.stringify({ user_id: 'other', days: 30 }) })).status, 403);
   }
@@ -126,6 +131,15 @@ test('permissions relay requires service authentication and forwards the intende
   assert.deepEqual(lastRunner, { path: '/quotas/defaults/save', value: {
     user: createHash('sha256').update('site-admin').digest('hex'), quota,
   } });
+  const providers = base + '/auth/permissions/providers/save';
+  const secretKey = 'relay-provider-secret';
+  const config = { id: 'shared-hub', apiKey: secretKey };
+  assert.equal((await fetch(providers, { method: 'POST', body: JSON.stringify({ actor: 'site-admin', config }) })).status, 401);
+  const saved = await fetch(providers, { method: 'POST', headers, body: JSON.stringify({ actor: 'site-admin', config }) });
+  assert.equal(saved.status, 200);
+  assert.equal(lastRunner.path, '/shared-providers/save');
+  assert.equal(lastRunner.value.config.apiKey, secretKey);
+  assert.equal((await saved.text()).includes(secretKey), false);
 });
 
 test('new file/chat endpoints enforce CSRF and derive tenant identity; local modules stay authenticated', async () => {

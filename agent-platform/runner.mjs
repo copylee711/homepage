@@ -16,7 +16,8 @@ import { dirname } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { body, equal, fail, json, modelLabel, required } from './shared.mjs';
 import { TurnFanout } from './turn-stream.mjs';
-import { publicProviders, saveProvider, deleteProvider, activeProvider, activateProvider, testProvider, discoverProviderModels, proxyEnvironment, loadProviders, refreshModelsJson, syncProviderFiles } from './providers.mjs';
+import { publicProviders, saveProvider, deleteProvider, savePersonalProvider, deletePersonalProvider, activeProvider, activateProvider, activateUserModel, testProvider, discoverProviderModels, proxyEnvironment, providersFor, refreshModelsJson, syncProviderFiles, writeUserAgentDir, isSharedProvider, hasModelChoice, loadPersonal } from './providers.mjs';
+import { assertSharedQuota, modelQuotaView, quotaError, recordSharedUsage, saveDefaultModelQuota, saveModelQuota } from './model-quota.mjs';
 import { sandbox, sandboxStream, sandboxTool } from './sandbox-client.mjs';
 import { sessionCapacity } from './session-limits.mjs';
 import { prepareSessionCwd } from './session-cwd.mjs';
@@ -79,8 +80,8 @@ await syncProviderFiles().catch(() => {});
 let configuring = false;
 const model = process.env.PI_MODEL || 'opencode-go/deepseek-v4.1-flash';
 function sameScope(a, b) { return (a?.scope || 'project_only') === (b?.scope || 'project_only') && JSON.stringify(Object.entries(a?.extraProjects || {}).sort()) === JSON.stringify(Object.entries(b?.extraProjects || {}).sort()); }
-async function secretValues() {
-  return [(process.env.OPENCODE_API_KEY || ''), ...(await loadProviders()).providers.map(item => item.apiKey || '')]
+async function secretValues(user) {
+  return [(process.env.OPENCODE_API_KEY || ''), ...(await providersFor(user)).map(item => item.apiKey || '')]
     .filter(key => key.length >= 8);
 }
 // Admin-only diagnostic bundle: everything needed to reproduce a slow or broken
@@ -89,7 +90,7 @@ async function secretValues() {
 const BUNDLE_MAX_BYTES = 24 * 1024 * 1024;
 async function exportBundle(user, thread) {
   const info = await chats.assertOwned(user, thread);
-  const secrets = await secretValues();
+  const secrets = await secretValues(user);
   const mask = text => secrets.reduce((value, key) => value.split(key).join('[REDACTED]'), String(text ?? ''));
   const title = (await chats.loadMeta(user).catch(() => ({ chats: {} }))).chats[thread]?.title || '对话';
   const files = [];
@@ -216,14 +217,18 @@ class Pi {
     await mkdir(cwd, { recursive: true, mode: 0o700 });
     await mkdir(`/data/sessions/${this.user}`, { recursive: true, mode: 0o700 });
     await prepareSessionCwd(`/data/sessions/${this.user}/${this.thread}.jsonl`, cwd);
-    const config = await activeProvider();
+    const config = await activeProvider(this.user);
+    if (!config) fail(422, '尚未配置可用模型');
+    this.modelShared = config.shared === true;
+    if (this.modelShared) await assertSharedQuota(this.user);
+    const agentDir = await writeUserAgentDir(this.user);
     const meta = await chats.loadMeta(this.user);
     const chatItem = meta.chats[this.thread] || {};
     const projectId = chatItem.projectId || 'default';
     this.projectId = projectId;
     const permission = chatItem.permission || { scope: 'project_only', extraProjects: {} };
     this.execution = EXECUTION_MODES.includes(permission.execution) ? permission.execution : 'ask';
-    this.secrets = await secretValues();
+    this.secrets = await secretValues(this.user);
     this.lease = (await sandbox('/lease', this.user, undefined, { project: projectId, ...permission }, { thread: this.thread })).token;
     await sandboxTool(this.lease, { op: 'mkdir', path: `/workspace/${projectId}` });
     const env = proxyEnvironment(config.proxy); delete env.RUNNER_SECRET; delete env.SANDBOX_SECRET;
@@ -235,6 +240,7 @@ class Pi {
     const personalSkills = await features.skills(this.user);
     env.PI_PACKAGE_TEXT_FILES = JSON.stringify([...await packageTextFiles(), ...personalSkills.files]);
     env.PI_OFFLINE = '1';
+    env.PI_CODING_AGENT_DIR = agentDir;
     // Private broker traffic must never use the model's Mihomo proxy.
     env.NO_PROXY = env.no_proxy = '127.0.0.1,localhost,192.168.84.1';
     this.proc = spawn('pi', ['--mode', 'rpc', '--model', config.id + '/' + config.model, '--session', `/data/sessions/${this.user}/${this.thread}.jsonl`,
@@ -263,6 +269,7 @@ class Pi {
           if(wire.type === 'message_update') { delete wire.assistantMessageEvent.partial; delete wire.assistantMessageEvent.message; }
           this.publish(wire);
         }
+        if (event.type === 'message_end' && event.message?.role === 'assistant') void this.noteSharedUsage(event.message);
         if (event.type === 'agent_settled') {
           const turn = this.wikiTurn;
           this.finish();
@@ -341,6 +348,21 @@ class Pi {
       });
     });
   }
+  async noteSharedUsage(message) {
+    if (!message?.usage) return;
+    const id = String(message.id || message.timestamp || JSON.stringify(message.usage));
+    if (!this.countedUsage) this.countedUsage = new Set();
+    if (this.countedUsage.has(id)) return;
+    this.countedUsage.add(id);
+    const shared = message.provider ? await isSharedProvider(message.provider) : this.modelShared === true;
+    if (!shared) return;
+    const result = await recordSharedUsage(this.user, message.usage);
+    if (result.exceeded && this.busy && !this.stopping) {
+      const text = quotaError(result.exceeded);
+      this.publish({ type: 'gateway_error', error: text });
+      this.abortTurn(text);
+    }
+  }
   async prompt(res, message, thinking, images, permission, goal) {
     if (this.maintenance) fail(409, '正在压缩此对话');
     if (deleting.has(this.key)) fail(409, '正在删除此对话');
@@ -353,6 +375,8 @@ class Pi {
     if (permission?.execution && EXECUTION_MODES.includes(permission.execution)) {
       this.execution = permission.execution;
     }
+    if (this.modelShared) await assertSharedQuota(this.user);
+    this.countedUsage = new Set();
     this.busy = true; this.previewBudget = 512 * 1024; this.webSession = new WebSession(); this.wikiTurn = { checks: new Map() }; this.stopping = false; this.lastRenew = Date.now();
     this.turnNote = null;
     // Goal mode keeps continuing across settle points until the goal reports done.
@@ -523,6 +547,22 @@ function forgetIdleSessions(user) {
   for (const [key, entry] of sessions) if (entry.pi.user === user) {
     sessions.delete(key); entry.pi.proc?.kill();
   }
+}
+function stopEntries(entries, reason) {
+  for (const entry of entries) {
+    if (reason && entry.pi.busy) entry.pi.abortTurn(reason);
+    entry.pi.stopping = true;
+    sessions.delete(entry.pi.key);
+    entry.pi.proc?.kill();
+  }
+}
+async function entriesUsing(id) {
+  const hits = [];
+  for (const entry of sessions.values()) {
+    const active = await activeProvider(entry.pi.user).catch(() => null);
+    if (active?.id === id) hits.push(entry);
+  }
+  return hits;
 }
 function shellQuote(value) { return "'" + String(value).replaceAll("'", "'\\''") + "'"; }
 async function projectDirectory(user, value) {
@@ -743,7 +783,7 @@ export const server = createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
     if (req.url === '/model') {
-      const config = await activeProvider().catch(() => undefined);
+      const config = await activeProvider(input.user).catch(() => undefined);
       return json(res, 200, { label: modelLabel(config?.model || model.split('/').pop()) });
     }
     if (req.url === '/search/wiki') return json(res, 200, sourceWiki.publicConfig(await sourceWiki.get(input.user)));
@@ -760,7 +800,7 @@ export const server = createServer(async (req, res) => {
         return json(res, 200, await sandboxTool(lease, { op: 'web-search', ...config, engine:input.category==='image'?config.imageEngine:config.engine, category:input.category === 'image'?'image':'web', query: input.query, ...(input.source?{sources:config.sources.filter(s=>s.id===input.source).map(s=>({...s,enabled:true}))}:{}) }, 45000));
       } finally { clearInterval(renewal); }
     }
-    if (req.url === '/providers') return json(res, 200, await publicProviders());
+    if (req.url === '/providers') return json(res, 200, await publicProviders(input.user));
     if (req.url === '/greeting') {
       // Rotate a small curated set (≤16 chars). Cheap, deterministic-ish by time
       // so it varies across visits without spending model tokens.
@@ -801,41 +841,57 @@ export const server = createServer(async (req, res) => {
         return json(res, 200, result);
       } finally { configuring = false; }
     }
-    if (req.url === '/providers/test') return json(res, 200, await testProvider(input.config));
-    if (req.url === '/providers/models') return json(res, 200, await discoverProviderModels(input.config));
+    if (req.url === '/providers/test') return json(res, 200, await testProvider(input.config, (await loadPersonal(input.user)).providers));
+    if (req.url === '/providers/models') return json(res, 200, await discoverProviderModels(input.config, (await loadPersonal(input.user)).providers));
     if (req.url === '/providers/delete') {
-      if (configuring) fail(409, '供应商正在更新，请稍后重试');
-      if ([...sessions.values()].some(entry => entry.pi.busy)) fail(409, '请先等待所有任务结束或停止任务，再删除供应商');
-      configuring = true;
-      try {
-        const result = await deleteProvider(input.id);
-        for (const entry of sessions.values()) entry.pi.proc?.kill();
-        sessions.clear();
-        return json(res, 200, result);
-      } finally { configuring = false; }
+      assertUserIdle(input.user);
+      const result = await deletePersonalProvider(input.user, input.id);
+      forgetIdleSessions(input.user);
+      return json(res, 200, result);
     }
     if (req.url === '/providers/save') {
-      if (configuring) fail(409, '供应商正在更新，请稍后重试');
-      if ([...sessions.values()].some(entry => entry.pi.busy)) fail(409, '请先等待所有任务结束或停止任务，再修改供应商');
-      configuring = true;
-      try {
-        const result = await saveProvider(input.config);
-        for (const entry of sessions.values()) entry.pi.proc?.kill();
-        sessions.clear();
-        return json(res, 200, result);
-      } finally { configuring = false; }
+      assertUserIdle(input.user);
+      const result = await savePersonalProvider(input.user, input.config);
+      forgetIdleSessions(input.user);
+      return json(res, 200, result);
     }
     if (req.url === '/providers/activate') {
-      if (configuring) fail(409, '供应商正在更新，请稍后重试');
-      if ([...sessions.values()].some(entry => entry.pi.busy)) fail(409, '请先等待所有任务结束或停止任务，再切换模型');
-      configuring = true;
-      try {
-        const result = await activateProvider({ id: input.id, model: input.model });
-        // New sessions must pick up the newly active model.
-        for (const entry of sessions.values()) entry.pi.proc?.kill();
-        sessions.clear();
-        return json(res, 200, result);
-      } finally { configuring = false; }
+      assertUserIdle(input.user);
+      const result = await activateUserModel(input.user, { id: input.id, model: input.model });
+      forgetIdleSessions(input.user);
+      return json(res, 200, result);
+    }
+    if (req.url === '/shared-providers') return json(res, 200, await publicProviders());
+    if (req.url === '/shared-providers/test') return json(res, 200, await testProvider(input.config));
+    if (req.url === '/shared-providers/models') return json(res, 200, await discoverProviderModels(input.config));
+    if (req.url === '/shared-providers/save') {
+      const id = input.config?.id;
+      const affected = await entriesUsing(id);
+      const result = await saveProvider(input.config);
+      stopEntries(affected, '共享模型配置已更新，当前任务已停止。');
+      return json(res, 200, result);
+    }
+    if (req.url === '/shared-providers/delete') {
+      const affected = await entriesUsing(input.id);
+      const result = await deleteProvider(input.id);
+      stopEntries(affected, '共享模型已移除，当前任务已停止。');
+      return json(res, 200, result);
+    }
+    if (req.url === '/shared-providers/default') {
+      const followers = [];
+      for (const entry of sessions.values()) if (!(await hasModelChoice(entry.pi.user))) followers.push(entry);
+      const result = await activateProvider({ id: input.id, model: input.model });
+      stopEntries(followers, '默认共享模型已更换，当前任务已停止。');
+      return json(res, 200, result);
+    }
+    if (req.url === '/shared-providers/quota') return json(res, 200, await saveDefaultModelQuota(input.quota));
+    if (req.url === '/model-quota' || req.url === '/model-quota/save') {
+      if (typeof input.target !== 'string' || !input.target || input.target.length > 128) fail(422, '用户标识无效');
+      const target = createHash('sha256').update(input.target).digest('hex');
+      if (req.url === '/model-quota/save' && [...sessions.values()].some(entry => entry.pi.user === target && (entry.pi.busy || entry.pi.maintenance))) {
+        fail(409, '该用户正在运行任务，请先停止或等待完成');
+      }
+      return json(res, 200, req.url.endsWith('/save') ? await saveModelQuota(target, input.quota) : await modelQuotaView(target));
     }
     if (req.url === '/projects') return json(res, 200, { projects: await chats.listProjects(input.user) });
     if (req.url === '/questions/answer' || req.url === '/steer') {
@@ -1105,7 +1161,7 @@ export const server = createServer(async (req, res) => {
       await unlink(turnNoteFile(input.user, input.thread)).catch(() => {});
       return json(res, 200, result);
     }
-    if (req.url === '/chats/export') return json(res, 200, await chats.export(input.user, input.thread, input.format, await secretValues()));
+    if (req.url === '/chats/export') return json(res, 200, await chats.export(input.user, input.thread, input.format, await secretValues(input.user)));
     if (req.url === '/chats/export-bundle') return json(res, 200, await exportBundle(input.user, input.thread));
     if (req.url === '/chats/fork') {
       assertUserIdle(input.user);
@@ -1146,7 +1202,7 @@ export const server = createServer(async (req, res) => {
       const busy = live?.pi.busy === true;
       const messages = busy ? (await live.pi.command('get_messages')).messages || [] : await snapshots.read(input.user, input.thread);
       let text = JSON.stringify(messages);
-      for (const key of await secretValues()) text = text.split(key).join('[REDACTED]');
+      for (const key of await secretValues(input.user)) text = text.split(key).join('[REDACTED]');
       return json(res, 200, { messages: JSON.parse(text), busy, notes: await readTurnNotes(input.user, input.thread) });
     }
     if (req.url === '/abort') {

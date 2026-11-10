@@ -172,6 +172,36 @@ def test_permissions_console_requires_separate_admin_session_and_csrf(agent, mon
     ]
 
 
+def test_iris_provider_routes_relay_without_recording_the_key(agent, monkeypatch):
+    client, app, _ = agent
+    headers = admin_login(client)
+    calls, audits = [], []
+
+    def relay(request, action, payload, *, timeout):
+        calls.append((action, payload, timeout))
+        return {"providers": [{"id": "shared-hub", "hasKey": True}], "quota": payload.get("quota")}
+
+    monkeypatch.setattr("app.permissions.iris", relay)
+    monkeypatch.setattr("app.permissions.audit.record", lambda event, request, **fields: audits.append((event, fields)))
+    secret = "provider-secret-value"
+    saved = client.post("/api/admin/permissions/iris/providers", headers=headers,
+                        json={"config": {"id": "shared-hub", "apiKey": secret}})
+    assert saved.status_code == 200
+    assert secret not in saved.text
+    assert calls[0][0] == "providers/save"
+    assert calls[0][1]["config"]["apiKey"] == secret
+    assert all(secret not in str(item) for item in audits)
+    with Session(app.state.engine) as session:
+        session.add(User(id="model-user", email="model@example.com", name="模型用户",
+                         password_hash="", created_at="2026-01-03T00:00:00+00:00"))
+        session.commit()
+    quota = client.post("/api/admin/permissions/iris/model-quota", headers=headers,
+                        json={"user_id": "model-user", "daily_requests": None, "daily_tokens": 20})
+    assert quota.status_code == 200
+    assert calls[-1][0] == "model-quota/save"
+    assert calls[-1][1]["quota"] == {"daily_requests": None, "daily_tokens": 20}
+
+
 def test_disabled_and_login_redirect(server, agent):
     client, _, settings = agent
     settings.agent_client_secret = ''

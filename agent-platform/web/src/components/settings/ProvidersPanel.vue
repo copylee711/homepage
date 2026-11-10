@@ -58,11 +58,12 @@ function limitPlaceholder(id: string, key: string) {
 function limitRow(id: string) { return (form.value.modelSettings[id] ||= {}); }
 
 const savedProviders = computed(() => configs.value?.providers || []);
+const sharedProviders = computed(() => configs.value?.shared || []);
 const presets = computed(() =>
-  (configs.value?.presets || []).filter((p: any) => !savedProviders.value.some((s: any) => s.id === p.id))
+  (configs.value?.presets || []).filter((p: any) => ![...savedProviders.value, ...sharedProviders.value].some((s: any) => s.id === p.id))
 );
 const isSavedCurrent = computed(() => savedProviders.value.some((p: any) => p.id === form.value.id));
-const canDelete = computed(() => isSavedCurrent.value && savedProviders.value.length > 1);
+const canDelete = computed(() => isSavedCurrent.value);
 
 const filteredProbed = computed(() => {
   const q = probeQuery.value.trim().toLowerCase();
@@ -232,10 +233,10 @@ async function act(save: boolean) {
       configs.value = result;
       const saved = result.providers.find((p: any) => p.id === payload.id) || result.providers.find((p: any) => p.id === result.active);
       if (saved) fill(saved, false);
-      status.value = '已保存并设为当前配置。';
+      status.value = '个人供应商已保存。';
       statusTone.value = 'is-success';
-      ui.toast('供应商配置已保存', { tone: 'success' });
-      void session.refreshIdentity();
+      ui.toast('个人供应商已保存', { tone: 'success' });
+      if (saved) await session.activateModel(saved.id, saved.model);
     } else {
       status.value = (result.detail || '测试完成') + ' · ' + (result.route || '') + (result.latency ? ' · ' + result.latency + ' ms' : '');
       statusTone.value = result.ok ? 'is-success' : 'is-error';
@@ -257,6 +258,7 @@ async function removeProvider() {
     configs.value = result;
     const next = result.providers.find((p: any) => p.id === result.active) || result.providers[0];
     if (next) fill(next, false);
+    else newProvider();
     ui.toast('供应商已删除', { tone: 'success' });
     void session.refreshIdentity();
   } catch (e: any) {
@@ -284,7 +286,7 @@ async function activate(p: any) {
 onMounted(async () => {
   try {
     configs.value = await get('/api/providers');
-    const a = configs.value.providers.find((p: any) => p.id === configs.value.active) || configs.value.providers[0];
+    const a = configs.value.providers.find((p: any) => p.id === configs.value.active);
     if (a) fill(a, false);
     else newProvider();
   } catch (e: any) {
@@ -298,8 +300,21 @@ onMounted(async () => {
 <template>
   <div class="prov-wrap">
     <aside class="prov-rail">
+      <div v-if="sharedProviders.length" class="prov-rail-sub">共享模型</div>
+      <div v-if="sharedProviders.length" class="prov-list">
+        <div v-for="p in sharedProviders" :key="p.id" class="prov-item" :class="{ 'is-active': configs?.active === p.id }">
+          <span class="prov-dot"></span>
+          <span class="prov-item-body">
+            <span class="prov-item-name">{{ p.name }}</span>
+            <span class="prov-item-sub">{{ p.model }}</span>
+          </span>
+          <span v-if="configs?.active === p.id" class="prov-active-tag">使用中</span>
+          <button v-else type="button" class="prov-switch-btn is-visible" @click="activate(p)">启用</button>
+        </div>
+        <p class="prov-item-sub shared-note">共享模型在权限控制台修改。</p>
+      </div>
       <div class="prov-rail-head">
-        <span>已保存供应商</span>
+        <span>我的供应商</span>
         <button type="button" class="icon-btn-sm" aria-label="新建供应商" title="新建自定义供应商" @click="newProvider">
           <Icon name="plus" :size="15" />
         </button>
@@ -519,7 +534,8 @@ onMounted(async () => {
 .prov-item-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--muted); font-family: var(--font-mono); }
 .prov-active-tag { flex: none; font-size: 10px; color: var(--ok); font-weight: 650; }
 .prov-switch-btn { flex: none; opacity: 0; padding: 2px 6px; border-radius: 6px; font-size: 10.5px; color: var(--text-2); background: color-mix(in srgb, var(--text) 7%, transparent); }
-.prov-item:hover .prov-switch-btn { opacity: 1; }
+.prov-switch-btn.is-visible, .prov-item:hover .prov-switch-btn { opacity: 1; }
+.shared-note { padding: 0 8px 8px; }
 .prov-switch-btn:hover { background: var(--ink); color: var(--surface); }
 .prov-presets .prov-item { opacity: 0.85; }
 

@@ -16,6 +16,9 @@ const duration = ref('7')
 const durations = [{ value: '1', label: '1 天' }, { value: '7', label: '7 天' }, { value: '30', label: '30 天' }]
 const selected = ref<User>(), quotaData = ref<QuotaState>(), draft = ref<Quota>()
 const quotaError = ref('')
+type ModelQuota = { defaults: { daily_requests: number; daily_tokens: number }; override: { daily_requests: number | null; daily_tokens: number | null }; limits: { daily_requests: number; daily_tokens: number }; used: { requests: number; tokens: number } }
+const modelUser = ref<User>(), modelQuota = ref<ModelQuota>()
+const requestDraft = ref(''), tokenDraft = ref(''), modelError = ref('')
 const shown = computed(() => users.value?.filter(user => `${user.name} ${user.email}`.toLowerCase().includes(props.query)) ?? [])
 const active = (user: User) => (user.expires_at ?? 0) > Date.now() / 1000
 const date = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' })
@@ -59,7 +62,19 @@ function closeQuota() {
   quotaData.value = draft.value = undefined
   quotaError.value = ''
 }
+function closeModel() {
+  modelUser.value = undefined
+  modelQuota.value = undefined
+  modelError.value = ''
+}
+function optionalNumber(value: string) {
+  const text = value.trim()
+  if (!text) return null
+  if (!/^\d+$/.test(text)) throw new Error('限额需为非负整数，留空表示沿用默认')
+  return Number(text)
+}
 const readQuota = (user: User) => work(async () => {
+  closeModel()
   selected.value = user
   quotaError.value = ''
   setQuota(await props.api<QuotaState>(base + '/quota?user_id=' + encodeURIComponent(user.id)))
@@ -75,6 +90,24 @@ const saveQuota = () => work(async () => {
   setQuota(await props.api<QuotaState>(base + '/quota', 'POST', { user_id: selected.value.id, quota }))
   emit('notify', '沙箱配额已保存。')
 }, text => { quotaError.value = text })
+const readModel = (user: User) => work(async () => {
+  closeQuota()
+  modelUser.value = user
+  modelError.value = ''
+  modelQuota.value = await props.api<ModelQuota>(base + '/model-quota?user_id=' + encodeURIComponent(user.id))
+  requestDraft.value = modelQuota.value.override.daily_requests == null ? '' : String(modelQuota.value.override.daily_requests)
+  tokenDraft.value = modelQuota.value.override.daily_tokens == null ? '' : String(modelQuota.value.override.daily_tokens)
+}, text => { modelError.value = text })
+const saveModel = () => work(async () => {
+  if (!modelUser.value) return
+  modelError.value = ''
+  modelQuota.value = await props.api<ModelQuota>(base + '/model-quota', 'POST', {
+    user_id: modelUser.value.id,
+    daily_requests: optionalNumber(requestDraft.value),
+    daily_tokens: optionalNumber(tokenDraft.value),
+  })
+  emit('notify', '模型限额已保存。')
+}, text => { modelError.value = text })
 onMounted(() => work(load))
 </script>
 
@@ -103,7 +136,9 @@ onMounted(() => work(load))
             <button v-if="active(user)" type="button" class="danger" :disabled="busy" @click="change(user, 0)">撤销</button>
           </template>
           <button type="button" :aria-expanded="selected?.id === user.id" :disabled="busy"
-            @click="selected?.id === user.id ? closeQuota() : (closeQuota(), readQuota(user))">{{ selected?.id === user.id ? '收起配额' : '编辑配额' }}</button>
+            @click="selected?.id === user.id ? closeQuota() : readQuota(user)">{{ selected?.id === user.id ? '收起配额' : '编辑配额' }}</button>
+          <button type="button" :aria-expanded="modelUser?.id === user.id" :disabled="busy"
+            @click="modelUser?.id === user.id ? closeModel() : readModel(user)">{{ modelUser?.id === user.id ? '收起用量' : '模型用量' }}</button>
         </div>
       </header>
       <div v-if="selected?.id === user.id" class="quota">
@@ -122,6 +157,19 @@ onMounted(() => work(load))
         </template>
         <p v-else-if="busy" role="status">正在读取沙箱配额…</p>
         <button v-else type="button" @click="readQuota(user)">重试</button>
+      </div>
+      <div v-if="modelUser?.id === user.id" class="quota">
+        <p v-if="modelError" role="alert" class="subtle">{{ modelError }}</p>
+        <form v-if="modelQuota" @submit.prevent="saveModel">
+          <p class="subtle">今日已用 {{ modelQuota.used.requests }} 次请求、{{ modelQuota.used.tokens }} token。当前生效上限为 {{ modelQuota.limits.daily_requests || '不限制' }} 次、{{ modelQuota.limits.daily_tokens || '不限制' }} token。</p>
+          <fieldset class="quota-fields" :disabled="busy">
+            <label>每日请求数<input v-model="requestDraft" inputmode="numeric" :placeholder="`沿用默认 ${modelQuota.defaults.daily_requests || '不限制'}`"></label>
+            <label>每日 token<input v-model="tokenDraft" inputmode="numeric" :placeholder="`沿用默认 ${modelQuota.defaults.daily_tokens || '不限制'}`"></label>
+          </fieldset>
+          <button class="primary" type="submit" :disabled="busy">{{ busy ? '处理中…' : '保存模型限额' }}</button>
+        </form>
+        <p v-else-if="busy" role="status">正在读取模型用量…</p>
+        <button v-else type="button" @click="readModel(user)">重试</button>
       </div>
     </article>
   </section>

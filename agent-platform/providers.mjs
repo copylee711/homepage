@@ -1,4 +1,4 @@
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, rename, mkdir, readdir, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isIP } from 'node:net';
@@ -13,6 +13,8 @@ export const presets = [
 ];
 const root = process.env.PROVIDER_DATA_DIR || '/data';
 const file = root + '/providers.json';
+const personalDir = root + '/personal-providers';
+const choiceDir = root + '/model-choice';
 const validApis = ['openai-completions', 'openai-responses', 'anthropic-messages', 'google-generative-ai'];
 const modelIdPattern = /^[A-Za-z0-9_.:/-]{1,160}$/;
 
@@ -79,31 +81,141 @@ function optionalLimit(value, min, max, message) {
   return number;
 }
 
+function assertUser(user) {
+  if (typeof user !== 'string' || !/^[a-f0-9]{64}$/.test(user)) fail(422, '用户标识无效');
+  return user;
+}
+function personalPath(user) { return personalDir + '/' + user + '.json'; }
+function choicePath(user) { return choiceDir + '/' + user + '.json'; }
+async function writeJson(path, value) {
+  await mkdir(path.slice(0, path.lastIndexOf('/')), { recursive: true, mode: 0o700 });
+  await writeFile(path + '.pending', JSON.stringify(value), { mode: 0o600 });
+  await rename(path + '.pending', path);
+}
+export function quotaOf(config) {
+  const raw = config?.quota || {};
+  const number = key => Number.isInteger(raw[key]) && raw[key] >= 0 && raw[key] <= 1000000000 ? raw[key] : 0;
+  return { daily_requests: number('daily_requests'), daily_tokens: number('daily_tokens') };
+}
+export function normalizeDailyQuota(input) {
+  if (!input || typeof input !== 'object') fail(422, '请填写每日限额');
+  const quota = {};
+  for (const [key, label] of [['daily_requests', '每日请求数'], ['daily_tokens', '每日 token']]) {
+    const number = Number(input[key] ?? 0);
+    if (!Number.isInteger(number) || number < 0 || number > 1000000000) fail(422, `${label}需为 0–1000000000 的整数，0 表示不限制`);
+    quota[key] = number;
+  }
+  return quota;
+}
+export function normalizeQuotaOverride(input) {
+  if (!input || typeof input !== 'object') fail(422, '请填写模型限额');
+  const quota = {};
+  for (const [key, label] of [['daily_requests', '每日请求数'], ['daily_tokens', '每日 token']]) {
+    if (input[key] == null || input[key] === '') { quota[key] = null; continue; }
+    const number = Number(input[key]);
+    if (!Number.isInteger(number) || number < 0 || number > 1000000000) fail(422, `${label}需为 0–1000000000 的整数，留空表示沿用默认`);
+    quota[key] = number;
+  }
+  return quota;
+}
+function modelList(provider) {
+  return Array.isArray(provider?.models) && provider.models.length ? provider.models : (provider?.model ? [provider.model] : []);
+}
+function present(value, shared = false) {
+  const { apiKey, ...rest } = value;
+  const models = modelList(value);
+  return {
+    ...rest,
+    models,
+    shared,
+    hasKey: !!providerKey({ ...value, apiKey }),
+    limits: Object.fromEntries(models.filter(Boolean).map(id => [id, modelLimits(value, id)])),
+  };
+}
 export async function loadProviders() {
   try { return JSON.parse(await readFile(file, 'utf8')); }
   catch (error) {
     if (error.code !== 'ENOENT') throw error;
-    return { active: 'opencode-go', providers: [{ ...presets[0], apiKey: '' }] };
+    return { active: 'opencode-go', providers: [{ ...presets[0], apiKey: '' }], quota: { daily_requests: 0, daily_tokens: 0 } };
   }
+}
+export async function loadPersonal(user) {
+  try { return JSON.parse(await readFile(personalPath(user), 'utf8')); }
+  catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    return { providers: [] };
+  }
+}
+async function loadChoice(user) {
+  try { return JSON.parse(await readFile(choicePath(user), 'utf8')); }
+  catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    return null;
+  }
+}
+async function personalIds() {
+  let names = [];
+  try { names = await readdir(personalDir); }
+  catch (error) { if (error.code === 'ENOENT') return new Set(); throw error; }
+  const ids = new Set();
+  for (const name of names) {
+    if (!/^[a-f0-9]{64}\.json$/.test(name)) continue;
+    try {
+      const data = JSON.parse(await readFile(personalDir + '/' + name, 'utf8'));
+      for (const item of data.providers || []) if (item?.id) ids.add(item.id);
+    } catch { /* A damaged personal file must not block the shared catalog. */ }
+  }
+  return ids;
+}
+function locate(shared, personal, id) {
+  const fromShared = shared.providers.find(item => item.id === id);
+  if (fromShared) return { provider: fromShared, shared: true };
+  const fromPersonal = personal.providers.find(item => item.id === id);
+  if (fromPersonal) return { provider: fromPersonal, shared: false };
+  return null;
 }
 export function providerKey(value) {
   return value.apiKey || (value.id === 'opencode-go' && value.baseUrl === presets[0].baseUrl ? process.env.OPENCODE_API_KEY : '');
 }
-export async function publicProviders() {
+export async function providersFor(user) {
+  const shared = await loadProviders();
+  if (!user) return shared.providers;
+  const personal = await loadPersonal(assertUser(user));
+  return [...shared.providers, ...personal.providers];
+}
+export async function isSharedProvider(id) {
+  return (await loadProviders()).providers.some(item => item.id === id);
+}
+export async function hasModelChoice(user) {
+  return !!(await loadChoice(assertUser(user)));
+}
+export async function publicProviders(user) {
   const config = await loadProviders();
+  const shared = config.providers.map(item => present(item, true));
+  const quota = quotaOf(config);
+  if (!user) {
+    return {
+      active: config.active,
+      activeModel: config.activeModel || config.providers.find(item => item.id === config.active)?.model || '',
+      presets,
+      providers: shared,
+      shared,
+      quota,
+    };
+  }
+  const id = assertUser(user);
+  const personal = await loadPersonal(id);
+  const resolved = await activeProvider(id);
   return {
-    active: config.active,
-    activeModel: config.activeModel || config.providers.find(p => p.id === config.active)?.model || '',
+    active: resolved?.id || config.active,
+    activeModel: resolved?.model || '',
     presets,
-    providers: config.providers.map(({ apiKey, ...value }) => ({
-      ...value,
-      models: Array.isArray(value.models) && value.models.length ? value.models : (value.model ? [value.model] : []),
-      hasKey: !!providerKey({ ...value, apiKey }),
-      limits: Object.fromEntries((Array.isArray(value.models) && value.models.length ? value.models : [value.model]).filter(Boolean).map(id => [id, modelLimits(value, id)])),
-    })),
+    providers: personal.providers.map(item => present(item, false)),
+    shared,
+    quota,
   };
 }
-export async function normalizeProvider(input) {
+export async function normalizeProvider(input, existing) {
   if (!input || !/^[a-z][a-z0-9-]{0,39}$/.test(input.id || '')) fail(422, '供应商标识需为 1–40 位小写字母、数字或短横线');
   if (!validApis.includes(input.api)) fail(422, '请选择支持的 API 协议');
   if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 60) fail(422, '请填写供应商名称（最多 60 字符）');
@@ -126,7 +238,8 @@ export async function normalizeProvider(input) {
   if (candidateModels.length > 80) fail(422, '单个供应商最多启用 80 个模型');
   const primaryModel = candidateModels[0];
   const baseUrl = validateBaseUrl(input.baseUrl);
-  const old = (await loadProviders()).providers.find(value => value.id === input.id);
+  const list = Array.isArray(existing) ? existing : (await loadProviders()).providers;
+  const old = list.find(value => value.id === input.id);
   if (old && old.baseUrl !== baseUrl && !input.apiKey) fail(422, '修改 API 地址时，请重新填写密钥');
   const apiKey = input.apiKey || old?.apiKey || '';
   if (typeof apiKey !== 'string' || apiKey.length > 1024 || /[\r\n]/.test(apiKey) || /^[!$]/.test(apiKey)) fail(422, '密钥格式无效');
@@ -169,11 +282,12 @@ function normalizeModelSettings(raw, models) {
   return result;
 }
 
-export async function normalizeProbeInput(input) {
+export async function normalizeProbeInput(input, existing) {
   if (!input || !validApis.includes(input.api)) fail(422, '请选择支持的 API 协议');
   const baseUrl = validateBaseUrl(input.baseUrl);
   const id = typeof input.id === 'string' && /^[a-z][a-z0-9-]{0,39}$/.test(input.id) ? input.id : '';
-  const old = id ? (await loadProviders()).providers.find(value => value.id === id) : undefined;
+  const list = Array.isArray(existing) ? existing : (await loadProviders()).providers;
+  const old = id ? list.find(value => value.id === id) : undefined;
   if (old && old.baseUrl !== baseUrl && !input.apiKey) fail(422, '修改 API 地址时，请重新填写密钥后再探测模型');
   const apiKey = input.apiKey || old?.apiKey || '';
   if (typeof apiKey !== 'string' || apiKey.length > 1024 || /[\r\n]/.test(apiKey) || /^[!$]/.test(apiKey)) fail(422, '密钥格式无效');
@@ -182,17 +296,32 @@ export async function normalizeProbeInput(input) {
   return { id, api: input.api, baseUrl, proxy: input.proxy === true, apiKey: resolved };
 }
 
+async function persistShared(config) {
+  if (!config.quota) config.quota = quotaOf(config);
+  await writeJson(file, config);
+  await syncModelsJson(config);
+}
 export async function saveProvider(input) {
   const value = await normalizeProvider(input), config = await loadProviders();
+  if (!config.providers.some(item => item.id === value.id) && (await personalIds()).has(value.id)) {
+    fail(422, '该标识已被用户的个人供应商使用');
+  }
   const idx = config.providers.findIndex(item => item.id === value.id);
   if (idx >= 0) config.providers[idx] = value;
   else config.providers.push(value);
-  config.active = value.id;
-  if (!config.activeModel || !value.models.includes(config.activeModel)) config.activeModel = value.model;
-  await writeFile(file + '.pending', JSON.stringify(config), { mode: 0o600 });
-  await rename(file + '.pending', file);
-  await syncModelsJson(config);
+  if (config.active === value.id && !value.models.includes(config.activeModel)) config.activeModel = value.model;
+  if (!config.providers.some(item => item.id === config.active)) {
+    config.active = value.id;
+    config.activeModel = value.model;
+  }
+  await persistShared(config);
   return publicProviders();
+}
+export async function saveSharedQuota(input) {
+  const config = await loadProviders();
+  config.quota = normalizeDailyQuota(input);
+  await writeJson(file, config);
+  return { quota: config.quota };
 }
 
 export async function deleteProvider(id) {
@@ -205,33 +334,67 @@ export async function deleteProvider(id) {
     config.active = config.providers[0].id;
     config.activeModel = config.providers[0].model;
   }
-  await writeFile(file + '.pending', JSON.stringify(config), { mode: 0o600 });
-  await rename(file + '.pending', file);
-  await syncModelsJson(config);
+  await persistShared(config);
   return publicProviders();
 }
 
-export async function activeProvider() {
+export async function savePersonalProvider(user, input) {
+  const id = assertUser(user);
+  const shared = await loadProviders();
+  if (shared.providers.some(item => item.id === input?.id)) fail(422, '该标识已被共享供应商使用');
+  const personal = await loadPersonal(id);
+  const value = await normalizeProvider(input, personal.providers);
+  const idx = personal.providers.findIndex(item => item.id === value.id);
+  if (idx >= 0) personal.providers[idx] = value;
+  else personal.providers.push(value);
+  await writeJson(personalPath(id), personal);
+  return publicProviders(id);
+}
+export async function deletePersonalProvider(user, providerId) {
+  const id = assertUser(user);
+  if (typeof providerId !== 'string' || !/^[a-z][a-z0-9-]{0,39}$/.test(providerId)) fail(422, '供应商标识无效');
+  const personal = await loadPersonal(id);
+  if (!personal.providers.some(item => item.id === providerId)) fail(404, '供应商不存在');
+  personal.providers = personal.providers.filter(item => item.id !== providerId);
+  await writeJson(personalPath(id), personal);
+  const choice = await loadChoice(id);
+  if (choice?.id === providerId) await rm(choicePath(id), { force: true });
+  return publicProviders(id);
+}
+
+export async function activeProvider(user) {
   const config = await loadProviders();
-  const provider = config.providers.find(item => item.id === config.active);
-  if (!provider) return provider;
-  const models = Array.isArray(provider.models) && provider.models.length ? provider.models : [provider.model];
-  const model = config.activeModel && models.includes(config.activeModel) ? config.activeModel : provider.model;
-  return { ...provider, model };
+  const personal = user ? await loadPersonal(assertUser(user)) : { providers: [] };
+  const choice = user ? await loadChoice(user) : null;
+  const wantedId = choice?.id || config.active;
+  const found = locate(config, personal, wantedId) || locate(config, personal, config.active);
+  if (!found) return undefined;
+  const models = modelList(found.provider);
+  const wanted = choice?.id === found.provider.id ? choice.model : config.activeModel;
+  const model = wanted && models.includes(wanted) ? wanted : found.provider.model;
+  return { ...found.provider, model, shared: found.shared };
 }
 
 export async function activateProvider({ id, model } = {}) {
   const config = await loadProviders();
   const provider = config.providers.find(item => item.id === id);
   if (!provider) fail(422, '供应商不存在');
-  const models = Array.isArray(provider.models) && provider.models.length ? provider.models : [provider.model];
+  const models = modelList(provider);
   if (model != null && !models.includes(model)) fail(422, '该供应商未配置此模型');
   config.active = id;
   config.activeModel = model != null ? model : (models.includes(config.activeModel) ? config.activeModel : provider.model);
-  await writeFile(file + '.pending', JSON.stringify(config), { mode: 0o600 });
-  await rename(file + '.pending', file);
-  await syncModelsJson(config);
+  await persistShared(config);
   return { active: config.active, activeModel: config.activeModel };
+}
+export async function activateUserModel(user, { id, model } = {}) {
+  const uid = assertUser(user);
+  const found = locate(await loadProviders(), await loadPersonal(uid), id);
+  if (!found) fail(422, '供应商不存在');
+  const models = modelList(found.provider);
+  const chosen = model != null ? model : found.provider.model;
+  if (!models.includes(chosen)) fail(422, '该供应商未配置此模型');
+  await writeJson(choicePath(uid), { id, model: chosen });
+  return { active: id, activeModel: chosen };
 }
 
 // Rewrite models.json from the saved providers, e.g. at startup so new limits apply.
@@ -242,9 +405,9 @@ export async function refreshModelsJson() {
   if (config.providers?.length) await syncModelsJson(config);
 }
 
-async function syncModelsJson(config) {
+async function syncModelsJson(config, dir = root + '/agent') {
   const providers = Object.fromEntries(config.providers.map(item => {
-    const list = Array.isArray(item.models) && item.models.length ? item.models : [item.model];
+    const list = modelList(item);
     const chosen = item.id === config.active && list.includes(config.activeModel) ? config.activeModel : item.model;
     const ordered = [chosen, ...list.filter(m => m !== chosen)];
     return [item.id, {
@@ -258,22 +421,35 @@ async function syncModelsJson(config) {
       }),
     }];
   }));
-  await mkdir(root + '/agent', { recursive: true, mode: 0o700 });
-  await syncAgentSettings();
-  await writeFile(root + '/agent/models.json.pending', JSON.stringify({ providers }), { mode: 0o600 });
-  await rename(root + '/agent/models.json.pending', root + '/agent/models.json');
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await syncAgentSettings(dir);
+  await writeFile(dir + '/models.json.pending', JSON.stringify({ providers }), { mode: 0o600 });
+  await rename(dir + '/models.json.pending', dir + '/models.json');
 }
 // Pi's agent-level retry covers overload, rate limits, 5xx and dropped streams.
-export async function syncAgentSettings() {
-  const path = root + '/agent/settings.json';
+export async function syncAgentSettings(dir = root + '/agent') {
+  const path = dir + '/settings.json';
   let settings = {};
   try { settings = JSON.parse(await readFile(path, 'utf8')); } catch {}
   settings.retry = { enabled: true, maxRetries: 5, baseDelayMs: 2000, maxAgentDelayMs: 60000 };
-  await mkdir(root + '/agent', { recursive: true, mode: 0o700 });
+  await mkdir(dir, { recursive: true, mode: 0o700 });
   await writeFile(path + '.pending', JSON.stringify(settings, null, 2), { mode: 0o600 });
   await rename(path + '.pending', path);
 }
 export async function syncProviderFiles() { await syncModelsJson(await loadProviders()); }
+export async function writeUserAgentDir(user) {
+  const id = assertUser(user);
+  const shared = await loadProviders();
+  const personal = await loadPersonal(id);
+  const choice = await activeProvider(id);
+  const dir = root + '/agent-users/' + id;
+  await syncModelsJson({
+    providers: [...shared.providers, ...personal.providers],
+    active: choice?.id || shared.active,
+    activeModel: choice?.model || shared.activeModel,
+  }, dir);
+  return dir;
+}
 export function proxyEnvironment(useProxy, source = process.env) {
   const env = { ...source };
   for (const name of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'NODE_USE_ENV_PROXY']) delete env[name];
@@ -299,11 +475,11 @@ function runProviderScript(scriptName, payload, useProxy, timeoutMs, fallbackDet
     child.stdin.end(JSON.stringify(payload));
   });
 }
-export async function testProvider(input) {
-  const config = await normalizeProvider(input);
+export async function testProvider(input, existing) {
+  const config = await normalizeProvider(input, existing);
   return runProviderScript('./provider-test.mjs', { ...config, apiKey: providerKey(config) }, config.proxy, 35000, '测试未完成，请检查代理服务');
 }
-export async function discoverProviderModels(input) {
-  const probe = await normalizeProbeInput(input);
+export async function discoverProviderModels(input, existing) {
+  const probe = await normalizeProbeInput(input, existing);
   return runProviderScript('./provider-models.mjs', probe, probe.proxy, 25000, '模型探测未完成，请检查代理服务');
 }

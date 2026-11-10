@@ -5,10 +5,11 @@ import { vReveal } from '../composables/useReveal'
 import AdminStorage from './AdminStorage.vue'
 import IrisPermissions from './IrisPermissions.vue'
 import PageHeading from './PageHeading.vue'
+import IrisModels from './IrisModels.vue'
 import QuotaDefaults from './QuotaDefaults.vue'
 import '../styles/admin-panel.css'
 
-const sections = [{ id: 'storage', label: '云盘与图床' }, { id: 'iris', label: 'Iris 执行与配额' }, { id: 'defaults', label: '初始配额' }] as const
+const sections = [{ id: 'storage', label: '云盘与图床' }, { id: 'iris', label: 'Iris 执行与配额' }, { id: 'models', label: '共享模型' }, { id: 'defaults', label: '初始配额' }] as const
 type Section = typeof sections[number]['id']
 const requested = new URLSearchParams(location.search).get('section')
 const section = ref<Section>(sections.find(item => item.id === requested)?.id ?? 'storage')
@@ -35,7 +36,7 @@ async function api<T>(path: string, method = 'GET', data?: unknown): Promise<T> 
       method, credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': props.csrf },
       ...(data === undefined ? {} : { body: JSON.stringify(data) }),
-      signal: AbortSignal.timeout(path.endsWith('/iris/quota') && method === 'POST' ? 145000 : 20000),
+      signal: AbortSignal.timeout(path.endsWith('/iris/quota') && method === 'POST' ? 145000 : path.endsWith('/providers/test') || path.endsWith('/providers/models') ? 50000 : 20000),
     })
   } catch (err) {
     if ((err as { status?: number }).status === 401) {
@@ -52,7 +53,7 @@ async function api<T>(path: string, method = 'GET', data?: unknown): Promise<T> 
 <template>
   <PageHeading title="Permissions" label="Administrator workspace">
     全站权限控制台
-    <span>为站点账户开通云盘与图床，管理 Iris 执行授权与沙箱资源。</span>
+    <span>为站点账户开通云盘与图床，管理 Iris 执行授权、共享模型与沙箱资源。</span>
   </PageHeading>
   <div class="container permissions-content">
     <div class="console" v-reveal>
@@ -64,7 +65,7 @@ async function api<T>(path: string, method = 'GET', data?: unknown): Promise<T> 
             <span v-if="item.id === 'iris'" class="iris-short">Iris</span>
           </button>
         </nav>
-        <label v-if="section !== 'defaults'" class="account-search">查找用户
+        <label v-if="section !== 'defaults' && section !== 'models'" class="account-search">查找用户
           <input v-model="query" type="search" placeholder="昵称或邮箱" maxlength="160">
         </label>
       </div>
@@ -74,6 +75,7 @@ async function api<T>(path: string, method = 'GET', data?: unknown): Promise<T> 
         @notify="notify" @fail="fail" />
       <IrisPermissions v-if="visited.has('iris')" v-show="section === 'iris'" :api="api" :query="search"
         @notify="notify" @fail="fail" />
+      <IrisModels v-if="visited.has('models')" v-show="section === 'models'" :api="api" />
       <QuotaDefaults v-if="visited.has('defaults')" v-show="section === 'defaults'" :api="api" @storage-saved="storageDefaults = $event" />
     </div>
   </div>
