@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useId } from 'vue'
 import { SelectRoot, SelectTrigger, SelectValue, SelectPortal, SelectContent, SelectViewport, SelectItem, SelectItemText, SelectItemIndicator } from 'reka-ui'
-const props = defineProps<{ modelValue: string; label: string; options: { value: string; label: string }[] }>()
+const props = defineProps<{ modelValue: string; label: string; options: { value: string; label: string }[]; disabled?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 const id = useId()
 const open = ref(false)
@@ -21,7 +21,7 @@ const value = computed({ get: () => props.modelValue || all, set: (next: string)
 <template>
   <div class="select-field">
     <label :id="`${id}-label`" :for="id">{{ label }}</label>
-    <SelectRoot v-model="value" v-model:open="open">
+    <SelectRoot v-model="value" v-model:open="open" :disabled="disabled">
       <SelectTrigger :id="id" class="select-trigger" :aria-labelledby="`${id}-label`">
         <SelectValue /><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 8 5 5 5-5" /></svg>
       </SelectTrigger>
@@ -43,7 +43,8 @@ const value = computed({ get: () => props.modelValue || all, set: (next: string)
 label { display:block; font-size:12px; color:var(--muted); margin-bottom:8px; }
 .select-trigger { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; min-height:48px; padding:13px 16px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); color:var(--text); font:14px var(--font); text-align:left; cursor:pointer; transition:border-color .3s,box-shadow .3s,background .3s; }
 .select-trigger :deep([data-slot="value"]),.select-trigger>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.select-trigger:hover { border-color:var(--line-strong); }
+.select-trigger:hover:not([data-disabled]) { border-color:var(--line-strong); }
+.select-trigger[data-disabled] { opacity:.55; cursor:not-allowed; }
 .select-trigger[data-state="open"] { border-color:var(--field-focus-border); box-shadow:var(--field-focus-shadow); }
 svg { width:18px; height:18px; flex:none; fill:none; stroke:var(--muted); stroke-width:1.5; transition:transform .35s var(--ease),stroke .3s; }
 [data-state="open"] svg { transform:rotate(180deg); stroke:var(--accent); }

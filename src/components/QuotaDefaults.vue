@@ -42,11 +42,11 @@ onMounted(() => { void update('storage'); void update('iris') })
 
 <template>
   <section class="admin-panel">
-    <div class="section-head"><h2>初始配额</h2></div>
-    <p class="subtle">分别保存两个服务的默认值。各功能仍按账户授权。</p>
+    <div class="section-head"><div class="head-copy"><h2>初始配额</h2><p class="field-hint">分别保存两个服务的默认值。各功能仍按账户授权。</p></div></div>
+    <div class="cards">
     <section v-for="item in sections" :key="item.id" class="edit-card">
       <h3>{{ item.title }}</h3>
-      <p class="subtle">{{ item.note }}</p>
+      <p class="field-hint note">{{ item.note }}</p>
       <form v-if="item.id === 'storage' ? storage : irisDraft" @submit.prevent="update(item.id, true)">
         <fieldset class="default-fields" :disabled="status[item.id].busy">
           <template v-if="item.id === 'storage' && storage">
@@ -68,10 +68,18 @@ onMounted(() => { void update('storage'); void update('iris') })
       <p v-if="status[item.id].error" class="subtle" role="alert">{{ status[item.id].error }}</p>
       <p v-if="status[item.id].saved" class="subtle" role="status">初始配额已保存。</p>
     </section>
+    </div>
   </section>
 </template>
 
 <style scoped>
-h3 { margin:0; font-size:17px; }
-.default-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr)); gap:12px; border:0; padding:0; margin:0 0 16px; min-width:0; }
+h3 { margin:0; font-size:15px; }
+.head-copy { display:grid; gap:4px; }
+.cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr)); gap:16px; align-items:start; }
+.admin-panel .cards .edit-card { margin:0; padding:18px 20px; }
+.note { display:block; margin:4px 0 14px; }
+.default-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,140px),1fr)); gap:10px; border:0; padding:0; margin:0 0 14px; min-width:0; }
+.admin-panel .default-fields label { font-size:12px; gap:4px; }
+.admin-panel .default-fields input { padding:7px 10px; font-size:13px; }
+.admin-panel .subtle { margin:10px 0 0; font-size:13px; }
 </style>

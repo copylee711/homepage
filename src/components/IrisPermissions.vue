@@ -3,7 +3,6 @@ import { computed, onMounted, ref } from 'vue'
 import { confirmDialog } from '../composables/useConfirm'
 import { formatSize } from '../drive'
 import { irisQuotaFields, type IrisQuota as Quota, type IrisQuotaDefaults } from '../irisQuota'
-import AnimatedSelect from './AnimatedSelect.vue'
 
 type User = { id: string; name: string; email: string; disabled: boolean; admin: boolean; expires_at: number | null }
 type QuotaState = IrisQuotaDefaults & { used_bytes: number | null }
@@ -22,10 +21,26 @@ const requestDraft = ref(''), tokenDraft = ref(''), modelError = ref('')
 const shown = computed(() => users.value?.filter(user => `${user.name} ${user.email}`.toLowerCase().includes(props.query)) ?? [])
 const active = (user: User) => (user.expires_at ?? 0) > Date.now() / 1000
 const date = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' })
+const compact = new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 })
+const counts = computed(() => {
+  const list = users.value ?? []
+  return { active: list.filter(user => !user.disabled && !user.admin && active(user)).length, total: list.length }
+})
+function stateTone(user: User) {
+  if (user.disabled) return 'off'
+  if (user.admin || active(user)) return 'on'
+  return user.expires_at ? 'warn' : 'off'
+}
+function remaining(user: User) {
+  if (!active(user) || !user.expires_at) return ''
+  const hours = (user.expires_at - Date.now() / 1000) / 3600
+  return hours >= 24 ? `剩 ${Math.floor(hours / 24)} 天` : `剩 ${Math.max(1, Math.floor(hours))} 小时`
+}
+const usagePct = (used: number, limit: number) => limit > 0 ? Math.min(100, used / limit * 100) : 0
 function stateText(user: User) {
   if (user.disabled) return '账户已停用'
-  if (user.admin) return '管理员 · 已有执行权限'
-  if (active(user) && user.expires_at) return `授权至 ${date.format(user.expires_at * 1000)}`
+  if (user.admin) return '管理员 · 始终可执行'
+  if (active(user) && user.expires_at) return `至 ${date.format(user.expires_at * 1000)}`
   return user.expires_at ? '授权已过期' : '未授权'
 }
 
@@ -112,74 +127,129 @@ onMounted(() => work(load))
 </script>
 
 <template>
-  <section class="admin-panel">
+  <section class="admin-panel iris">
     <div class="section-head">
-      <h2>Iris 执行与配额</h2>
-      <div class="buttons"><button type="button" :disabled="busy" @click="work(load)">刷新账户</button></div>
+      <div class="head-copy">
+        <h2>Iris 执行与配额</h2>
+        <p class="field-hint">{{ users ? (enabled ? `${counts.active} 位普通用户持有有效授权，共 ${counts.total} 个账户。续期从保存时重新计算。` : '普通用户执行开关尚未开启，暂时无法新增或续期授权。') : '读取中…' }}</p>
+      </div>
+      <div class="buttons">
+        <div v-if="users && enabled" class="duration" role="radiogroup" aria-label="授予与续期时长">
+          <span>时长</span>
+          <button v-for="item in durations" :key="item.value" type="button" role="radio" :aria-checked="duration === item.value"
+            @click="duration = item.value">{{ item.label }}</button>
+        </div>
+        <button type="button" :disabled="busy" @click="work(load)">刷新</button>
+      </div>
     </div>
     <p v-if="!users && busy" class="subtle" role="status">正在读取执行授权…</p>
-    <p v-if="users" class="subtle">{{ enabled ? '普通用户获得限时授权后可执行工具。续期从保存时重新计算。' : '普通用户执行开关尚未开启，暂时无法新增或续期授权。' }}</p>
-    <div v-if="users && enabled" class="duration">
-      <AnimatedSelect v-model="duration" label="授予与续期时长" :options="durations" />
-    </div>
     <p v-if="users && !shown.length" class="subtle">{{ query ? '没有符合条件的用户。' : '暂无用户。' }}</p>
-    <article v-for="user in shown" :key="user.id" class="edit-card">
-      <header class="iris-user">
-        <div class="identity">
-          <strong>{{ user.name }}</strong>
-          <span class="field-hint">{{ user.email }}</span>
-          <span class="grant-state">{{ stateText(user) }}</span>
+    <div v-if="users && shown.length" class="rows">
+      <div class="row head" aria-hidden="true"><span>用户</span><span>执行授权</span><span>操作</span></div>
+      <article v-for="user in shown" :key="user.id" class="row-wrap" :class="{ open: selected?.id === user.id || modelUser?.id === user.id, muted: user.disabled }">
+        <div class="row">
+          <div class="identity"><strong>{{ user.name }}</strong><span>{{ user.email }}</span></div>
+          <div class="grant"><i class="dot" :class="stateTone(user)" /><span>{{ stateText(user) }}</span><em v-if="remaining(user)">{{ remaining(user) }}</em></div>
+          <div class="actions">
+            <template v-if="!user.disabled && !user.admin">
+              <button type="button" :class="{ primary: !active(user) }" :disabled="busy || !enabled" @click="change(user, Number(duration))">{{ active(user) ? '续期' : '授权' }}</button>
+              <button v-if="active(user)" type="button" class="danger" :disabled="busy" @click="change(user, 0)">撤销</button>
+            </template>
+            <button type="button" :class="{ selected: selected?.id === user.id }" :aria-expanded="selected?.id === user.id" :disabled="busy"
+              @click="selected?.id === user.id ? closeQuota() : readQuota(user)">沙箱</button>
+            <button type="button" :class="{ selected: modelUser?.id === user.id }" :aria-expanded="modelUser?.id === user.id" :disabled="busy"
+              @click="modelUser?.id === user.id ? closeModel() : readModel(user)">模型</button>
+          </div>
         </div>
-        <div class="buttons">
-          <template v-if="!user.disabled && !user.admin">
-            <button type="button" class="primary" :disabled="busy || !enabled" @click="change(user, Number(duration))">{{ active(user) ? '续期' : '授予执行权限' }}</button>
-            <button v-if="active(user)" type="button" class="danger" :disabled="busy" @click="change(user, 0)">撤销</button>
-          </template>
-          <button type="button" :aria-expanded="selected?.id === user.id" :disabled="busy"
-            @click="selected?.id === user.id ? closeQuota() : readQuota(user)">{{ selected?.id === user.id ? '收起配额' : '编辑配额' }}</button>
-          <button type="button" :aria-expanded="modelUser?.id === user.id" :disabled="busy"
-            @click="modelUser?.id === user.id ? closeModel() : readModel(user)">{{ modelUser?.id === user.id ? '收起用量' : '模型用量' }}</button>
-        </div>
-      </header>
-      <div v-if="selected?.id === user.id" class="quota">
-        <p v-if="quotaError" role="alert" class="subtle">{{ quotaError }}</p>
-        <template v-if="draft && quotaData">
-          <p class="subtle">{{ quotaData.used_bytes === null ? '工作区尚未挂载' : `工作区已用 ${formatSize(quotaData.used_bytes)}` }} · 主机磁盘总预算 {{ formatSize(quotaData.total_disk_budget_mib * 1024 * 1024) }}</p>
-          <form @submit.prevent="saveQuota">
-            <fieldset class="quota-fields" :disabled="busy">
-              <label v-for="field in irisQuotaFields" :key="field.key">{{ field.label }}
-                <input v-model.number="draft[field.key]" type="number" required :step="field.step"
-                  :min="quotaData.ranges[field.key][0]" :max="quotaData.ranges[field.key][1]">
-              </label>
-            </fieldset>
-            <button class="primary" type="submit" :disabled="busy">{{ busy ? '处理中…' : '保存配额' }}</button>
-          </form>
-        </template>
-        <p v-else-if="busy" role="status">正在读取沙箱配额…</p>
-        <button v-else type="button" @click="readQuota(user)">重试</button>
-      </div>
-      <div v-if="modelUser?.id === user.id" class="quota">
-        <p v-if="modelError" role="alert" class="subtle">{{ modelError }}</p>
-        <form v-if="modelQuota" @submit.prevent="saveModel">
-          <p class="subtle">今日已用 {{ modelQuota.used.requests }} 次请求、{{ modelQuota.used.tokens }} token。当前生效上限为 {{ modelQuota.limits.daily_requests || '不限制' }} 次、{{ modelQuota.limits.daily_tokens || '不限制' }} token。</p>
-          <fieldset class="quota-fields" :disabled="busy">
-            <label>每日请求数<input v-model="requestDraft" inputmode="numeric" :placeholder="`沿用默认 ${modelQuota.defaults.daily_requests || '不限制'}`"></label>
-            <label>每日 token<input v-model="tokenDraft" inputmode="numeric" :placeholder="`沿用默认 ${modelQuota.defaults.daily_tokens || '不限制'}`"></label>
-          </fieldset>
-          <button class="primary" type="submit" :disabled="busy">{{ busy ? '处理中…' : '保存模型限额' }}</button>
-        </form>
-        <p v-else-if="busy" role="status">正在读取模型用量…</p>
-        <button v-else type="button" @click="readModel(user)">重试</button>
-      </div>
-    </article>
+        <Transition name="expand">
+          <div v-if="selected?.id === user.id" class="detail">
+            <p v-if="quotaError" role="alert" class="detail-error">{{ quotaError }}</p>
+            <form v-if="draft && quotaData" @submit.prevent="saveQuota">
+              <fieldset class="quota-fields" :disabled="busy">
+                <label v-for="field in irisQuotaFields" :key="field.key">{{ field.label }}
+                  <input v-model.number="draft[field.key]" type="number" required :step="field.step"
+                    :min="quotaData.ranges[field.key][0]" :max="quotaData.ranges[field.key][1]">
+                </label>
+                <button class="primary" type="submit" :disabled="busy">{{ busy ? '处理中…' : '保存' }}</button>
+              </fieldset>
+              <p class="field-hint">{{ quotaData.used_bytes === null ? '工作区尚未挂载' : `工作区已用 ${formatSize(quotaData.used_bytes)}` }} · 主机磁盘总预算 {{ formatSize(quotaData.total_disk_budget_mib * 1024 * 1024) }}</p>
+            </form>
+            <p v-else-if="busy" class="field-hint" role="status">正在读取沙箱配额…</p>
+            <button v-else type="button" @click="readQuota(user)">重试</button>
+          </div>
+        </Transition>
+        <Transition name="expand">
+          <div v-if="modelUser?.id === user.id" class="detail">
+            <p v-if="modelError" role="alert" class="detail-error">{{ modelError }}</p>
+            <form v-if="modelQuota" @submit.prevent="saveModel">
+              <div class="meters">
+                <div class="meter"><span>今日请求</span><strong>{{ modelQuota.used.requests }}<small> / {{ modelQuota.limits.daily_requests || '不限' }}</small></strong>
+                  <i><b :style="{ width: usagePct(modelQuota.used.requests, modelQuota.limits.daily_requests) + '%' }" /></i></div>
+                <div class="meter"><span>今日 token</span><strong>{{ compact.format(modelQuota.used.tokens) }}<small> / {{ modelQuota.limits.daily_tokens ? compact.format(modelQuota.limits.daily_tokens) : '不限' }}</small></strong>
+                  <i><b :style="{ width: usagePct(modelQuota.used.tokens, modelQuota.limits.daily_tokens) + '%' }" /></i></div>
+              </div>
+              <fieldset class="quota-fields" :disabled="busy">
+                <label>每日请求数<input v-model="requestDraft" inputmode="numeric" :placeholder="`默认 ${modelQuota.defaults.daily_requests || '不限'}`"></label>
+                <label>每日 token<input v-model="tokenDraft" inputmode="numeric" :placeholder="`默认 ${modelQuota.defaults.daily_tokens || '不限'}`"></label>
+                <button class="primary" type="submit" :disabled="busy">{{ busy ? '处理中…' : '保存' }}</button>
+              </fieldset>
+              <p class="field-hint">留空沿用默认限额，0 表示不限制。</p>
+            </form>
+            <p v-else-if="busy" class="field-hint" role="status">正在读取模型用量…</p>
+            <button v-else type="button" @click="readModel(user)">重试</button>
+          </div>
+        </Transition>
+      </article>
+    </div>
   </section>
 </template>
 
 <style scoped>
-.duration { width:min(100%, 190px); margin-bottom:18px; }
-.iris-user { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:14px; }
-.identity { display:grid; gap:2px; min-width:0; overflow-wrap:anywhere; }
-.grant-state { margin-top:4px; color:var(--muted); font-size:13px; }
-.quota { border-top:1px solid var(--line); margin-top:18px; padding-top:12px; }
-.quota-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,140px),1fr)); gap:12px; border:0; padding:0; margin:0 0 16px; min-width:0; }
+.head-copy { display:grid; gap:4px; }
+.duration { display:inline-flex; align-items:center; gap:2px; padding:3px; border:1px solid var(--line); border-radius:10px; }
+.duration > span { padding:0 6px 0 4px; color:var(--muted); font-size:12px; }
+.admin-panel .duration button { padding:4px 10px; border:0; border-radius:7px; background:none; color:var(--muted); font-size:12px; }
+.admin-panel .duration button[aria-checked="true"] { background:var(--accent-soft); color:var(--accent); }
+.rows { border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); overflow:hidden; }
+.row { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) 250px; align-items:center; gap:12px; padding:9px 14px; }
+.row.head { padding-block:8px; background:var(--bg-tint); color:var(--muted); font-size:12px; }
+.row.head span:last-child { text-align:right; }
+.row-wrap { border-top:1px solid var(--line); transition:background .2s; }
+.row-wrap:hover, .row-wrap.open { background:color-mix(in srgb,var(--bg-tint) 55%,transparent); }
+.row-wrap.muted .identity, .row-wrap.muted .grant { opacity:.55; }
+.identity { display:grid; min-width:0; line-height:1.35; }
+.identity strong { font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.identity span { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.grant { display:flex; align-items:center; gap:7px; min-width:0; font-size:12.5px; color:var(--text-2); }
+.grant span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.grant em { flex:none; padding:0 6px; border-radius:999px; background:var(--accent-soft); color:var(--accent); font-size:11px; font-style:normal; }
+.dot { flex:none; width:7px; height:7px; border-radius:50%; background:var(--line-strong); }
+.dot.on { background:#2f9e6b; box-shadow:0 0 0 3px rgba(47,158,107,.14); }
+.dot.warn { background:#d39a2c; }
+.actions { display:flex; justify-content:flex-end; gap:6px; }
+.admin-panel .actions button { padding:5px 11px; font-size:12px; border-radius:8px; }
+.detail { padding:4px 14px 14px; overflow:hidden; }
+.detail-error { margin:0 0 8px; color:#d15c5c; font-size:12.5px; }
+.quota-fields { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; border:0; padding:0; margin:0; min-width:0; }
+.admin-panel .quota-fields label { flex:1 1 130px; max-width:190px; }
+.admin-panel .quota-fields label { font-size:12px; gap:4px; }
+.admin-panel .quota-fields input { padding:6px 10px; font-size:13px; }
+.admin-panel .quota-fields button { flex:none; padding:7px 18px; }
+.detail .field-hint { display:block; margin-top:6px; }
+.meters { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,320px)); gap:10px 28px; margin:2px 0 12px; }
+.meter { display:grid; grid-template-columns:auto 1fr; align-items:baseline; gap:2px 10px; }
+.meter span { color:var(--muted); font-size:12px; }
+.meter strong { justify-self:end; font-size:14px; font-variant-numeric:tabular-nums; }
+.meter small { color:var(--muted); font-weight:400; font-size:12px; }
+.meter i { grid-column:1 / -1; height:4px; border-radius:999px; background:var(--bg-tint); overflow:hidden; }
+.meter b { display:block; height:100%; border-radius:inherit; background:var(--accent); transition:width .5s var(--ease); }
+.expand-enter-active, .expand-leave-active { transition:opacity .2s var(--ease), transform .2s var(--ease); }
+.expand-enter-from, .expand-leave-to { opacity:0; transform:translateY(-4px); }
+@media (max-width:700px) {
+  .row.head { display:none; }
+  .row { grid-template-columns:1fr auto; gap:6px 10px; }
+  .admin-panel .quota-fields label { max-width:none; }
+  .grant { grid-column:1; grid-row:2; }
+  .actions { grid-column:2; grid-row:1 / span 2; flex-wrap:wrap; max-width:150px; }
+}
 </style>
