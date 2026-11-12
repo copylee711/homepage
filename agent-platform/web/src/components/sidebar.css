@@ -183,3 +183,11 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; a
   .chat-list.slim-scroll-target { scrollbar-width:auto;scrollbar-color:auto; }
   .chat-list.slim-scroll-target::-webkit-scrollbar { display:block;width:auto; }
 }
+
+/* 对话增删与置顶时的列表动效 */
+.chat-items { position: relative; }
+.chat-row-move { transition: transform var(--slow) var(--ease); }
+.chat-row-enter-active { transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
+.chat-row-enter-from { opacity: 0; transform: translateX(-8px); }
+.chat-row-leave-active { position: absolute; left: 0; right: 0; transition: opacity 160ms ease, transform 160ms ease; }
+.chat-row-leave-to { opacity: 0; transform: translateX(-8px); }

@@ -51,8 +51,7 @@ onMounted(() => { setTimeout(() => input.value?.focus(), 30); });
 </script>
 
 <template>
-  <teleport to="body">
-    <div class="command-palette" @click.self="ui.closeCommand()">
+  <div class="command-palette" @click.self="ui.closeCommand()">
       <div class="command-panel" role="dialog" aria-modal="true" aria-label="命令面板" @keydown="onKey">
         <div class="command-field">
           <span class="search-icon"><Icon name="search" :size="17" /></span>
@@ -70,7 +69,6 @@ onMounted(() => { setTimeout(() => input.value?.focus(), 30); });
         <div class="command-foot"><span><kbd>↑</kbd><kbd>↓</kbd> 选择</span><span><kbd>↵</kbd> 执行</span><span><kbd>Esc</kbd> 关闭</span></div>
       </div>
     </div>
-  </teleport>
 </template>
 
 <style>

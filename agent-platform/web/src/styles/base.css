@@ -114,6 +114,16 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .spinner { width: 15px; height: 15px; flex: none; border: 2px solid color-mix(in srgb, var(--accent) 24%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: iris-spin 0.72s linear infinite; }
 @keyframes iris-spin { to { transform: rotate(360deg); } }
 
+/* Overlay exits — dialogs, command palette, confirm modal, context menu, drawers. */
+.iris-fade-enter-active, .iris-fade-leave-active { transition: opacity var(--dur) var(--ease); }
+.iris-fade-enter-from, .iris-fade-leave-to { opacity: 0; }
+.iris-overlay-leave-active { transition: opacity 160ms ease; pointer-events: none; }
+.iris-overlay-leave-to { opacity: 0; }
+.iris-overlay-leave-active :is(.dialog, .command-panel, .iris-modal) { transition: transform 160ms ease; }
+.iris-overlay-leave-to :is(.dialog, .command-panel, .iris-modal) { transform: translateY(6px) scale(0.985); }
+.iris-pop-leave-active { transition: opacity 110ms ease, transform 110ms ease; pointer-events: none; }
+.iris-pop-leave-to { opacity: 0; transform: scale(0.97); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }

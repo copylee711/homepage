@@ -18,8 +18,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey));
 </script>
 
 <template>
-  <teleport to="body">
-    <div class="dialog-backdrop" @click.self="ui.closeDialog()">
+  <div class="dialog-backdrop" @click.self="ui.closeDialog()">
       <div ref="dialogEl" tabindex="-1" class="dialog" :aria-label="title" :class="{ 'dialog-wide': wide, 'dialog-xl': xl }" role="dialog" aria-modal="true">
         <div class="dialog-heading">
           <div><h2>{{ title }}</h2><p v-if="subtitle">{{ subtitle }}</p></div>
@@ -27,8 +26,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey));
         </div>
         <div class="dialog-body"><slot /></div>
       </div>
-    </div>
-  </teleport>
+  </div>
 </template>
 
 <style>
@@ -58,7 +56,8 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey));
 .field input[aria-invalid="true"] { border-color: var(--danger); }
 .field-error { color: var(--danger); font-size: 11px; }
 .hint { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.55; }
-.btn { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 14px; border: 1px solid transparent; border-radius: 10px; font-size: 13px; font-weight: 560; white-space: nowrap; transition: background-color var(--fast), border-color var(--fast), color var(--fast), filter var(--fast), opacity var(--fast); }
+.btn { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 14px; border: 1px solid transparent; border-radius: 10px; font-size: 13px; font-weight: 560; white-space: nowrap; transition: background-color var(--fast), border-color var(--fast), color var(--fast), filter var(--fast), opacity var(--fast), transform var(--fast) var(--ease); }
+.btn:active:not(:disabled) { transform: scale(0.97); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-solid { background: var(--ink); color: var(--surface); }
 .btn-solid:hover:not(:disabled) { filter: brightness(1.12); }

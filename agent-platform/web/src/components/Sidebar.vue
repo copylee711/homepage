@@ -352,8 +352,8 @@ watch(avatarUrl, () => { avatarError.value = false; });
           </div>
         </header>
 
-        <ul v-show="!isGroupCollapsed(g.key)" class="chat-items">
-          <li v-if="!g.chats.length" class="chat-group-empty" @click="startNewInGroup(g)">
+        <TransitionGroup v-show="!isGroupCollapsed(g.key)" tag="ul" name="chat-row" class="chat-items">
+          <li v-if="!g.chats.length" key="empty" class="chat-group-empty" @click="startNewInGroup(g)">
             <span>暂无任务，点击开启</span>
           </li>
           <li v-for="c in g.chats" :key="c.id" class="chat-item" :class="{ 'is-active': c.id === session.chatId }">
@@ -363,7 +363,7 @@ watch(avatarUrl, () => { avatarError.value = false; });
             </button>
             <button class="icon-button chat-more" aria-label="对话操作" @click="e => openChatMenu(e, c)"><Icon name="more-horizontal" /></button>
           </li>
-        </ul>
+        </TransitionGroup>
       </section>
     </nav>
     <SlimScrollRail :target="chatList" />

@@ -32,6 +32,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', onDown, true
 
 <template>
   <teleport to="body">
+    <Transition name="iris-pop">
     <div v-if="ui.context" class="ctx-menu" ref="root" role="menu" :style="{ left: pos.left + 'px', top: pos.top + 'px' }">
       <template v-for="(it, i) in ui.context.items" :key="i">
         <div v-if="it.separator" class="ctx-sep"></div>
@@ -43,6 +44,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', onDown, true
         </button>
       </template>
     </div>
+    </Transition>
   </teleport>
 </template>
 

@@ -88,15 +88,19 @@ onMounted(() => {
     <Workspace v-if="session.canExecute" class="app-workspace" :aria-hidden="!workspaceVisible" :inert="!workspaceVisible" />
 
     <!-- mobile drawers -->
-    <div v-if="ui.mobileDrawer" class="scrim" @click="ui.mobileDrawer = null"></div>
-    <div v-if="ui.mobileDrawer === 'sidebar'" class="mobile-drawer left"><Sidebar /></div>
-    <div v-if="ui.mobileDrawer === 'workspace'" class="mobile-drawer right"><Workspace /></div>
+    <Transition name="iris-fade"><div v-if="ui.mobileDrawer" class="scrim" @click="ui.mobileDrawer = null"></div></Transition>
+    <Transition name="iris-drawer"><div v-if="ui.mobileDrawer === 'sidebar'" class="mobile-drawer left"><Sidebar /></div></Transition>
+    <Transition name="iris-drawer"><div v-if="ui.mobileDrawer === 'workspace'" class="mobile-drawer right"><Workspace /></div></Transition>
 
     <Toasts />
     <ContextMenu />
-    <CommandPalette v-if="ui.commandOpen" />
-    <SettingsDialog v-if="ui.dialog === 'settings'" />
-    <SubordinateDialog v-if="ui.dialog === 'add-subordinate'" />
+    <Teleport to="body">
+      <Transition name="iris-overlay"><CommandPalette v-if="ui.commandOpen" /></Transition>
+      <Transition name="iris-overlay">
+        <SettingsDialog v-if="ui.dialog === 'settings'" />
+        <SubordinateDialog v-else-if="ui.dialog === 'add-subordinate'" />
+      </Transition>
+    </Teleport>
     <ModalHost />
   </div>
 </template>
@@ -188,6 +192,8 @@ onMounted(() => {
 
 .scrim { position: fixed; inset: 0; z-index: 50; background: rgba(12, 13, 18, 0.48); }
 .mobile-drawer { position: fixed; top: 0; bottom: 0; z-index: 60; box-shadow: var(--shadow); animation: drawer-in var(--slow) var(--ease); overflow: hidden; }
+.iris-drawer-leave-active { transition: transform var(--dur) cubic-bezier(0.4, 0, 1, 1); }
+.iris-drawer-leave-to { transform: translateX(var(--from, -104%)); }
 .mobile-drawer.left { left: 0; width: min(86vw, 320px); border-radius: 0 22px 22px 0; border-right: 1px solid var(--line); }
 .mobile-drawer.right { right: 0; width: min(92vw, 404px); border-radius: 22px 0 0 22px; border-left: 1px solid var(--line); }
 .mobile-drawer .sidebar, .mobile-drawer .workspace { border-radius: inherit; width: 100%; }
